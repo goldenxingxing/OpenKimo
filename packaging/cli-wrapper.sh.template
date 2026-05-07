@@ -1,0 +1,62 @@
+#!/bin/sh
+# {APP_NAME} CLI wrapper.
+#
+# Installed at:   <App>.app/Contents/Resources/{SLUG}-cli
+# Symlinked to:   ~/.local/bin/{SLUG}   (when ~/.local/bin exists)
+#
+# Routes all `pip` / `python` invocations through the bundled interpreter
+# while writing into the user-overlay site-packages, so packages installed
+# via this CLI are immediately available to the running server.
+
+set -e
+
+SELF="$0"
+# Resolve symlinks to find the real .app location.
+while [ -h "$SELF" ]; do
+    LINK=$(readlink "$SELF")
+    case "$LINK" in
+        /*) SELF="$LINK" ;;
+        *)  SELF="$(dirname "$SELF")/$LINK" ;;
+    esac
+done
+RES_DIR="$(cd "$(dirname "$SELF")" && pwd)"
+APP_ROOT="$(cd "$RES_DIR/.." && pwd)"
+PYTHON_BIN="$APP_ROOT/Resources/runtimes/cpython-{PY_VERSION}/bin/python3"
+
+APP_SUPPORT="$HOME/Library/Application Support/{APP_NAME}"
+export PYTHONUSERBASE="$APP_SUPPORT/python-userbase"
+export PIP_CONFIG_FILE="$APP_SUPPORT/pip.conf"
+export PATH="$PYTHONUSERBASE/bin:$APP_ROOT/Resources/runtimes/cpython-{PY_VERSION}/bin:$PATH"
+
+case "${1:-}" in
+    pip)
+        shift
+        exec "$PYTHON_BIN" -m pip "$@"
+        ;;
+    python|python3)
+        shift
+        exec "$PYTHON_BIN" "$@"
+        ;;
+    where)
+        echo "python:        $PYTHON_BIN"
+        echo "PYTHONUSERBASE: $PYTHONUSERBASE"
+        echo "PIP_CONFIG_FILE: $PIP_CONFIG_FILE"
+        ;;
+    -h|--help|"")
+        cat <<USAGE
+Usage:
+  {SLUG} pip <args>       Run pip in the {APP_NAME} user overlay
+  {SLUG} python <args>    Run the bundled Python interpreter
+  {SLUG} where            Show resolved interpreter and overlay paths
+
+Example:
+  {SLUG} pip install requests
+  {SLUG} python -c "import requests; print(requests.__version__)"
+USAGE
+        ;;
+    *)
+        echo "Unknown subcommand: $1" >&2
+        echo "Try '{SLUG} --help'." >&2
+        exit 64
+        ;;
+esac

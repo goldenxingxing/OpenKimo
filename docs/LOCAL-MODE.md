@@ -165,3 +165,24 @@ pip install -e ./kimi-cli
 ```bash
 ./scripts/start.sh --mode=docker
 ```
+
+---
+
+## macOS App 安装（.dmg）
+
+希望开箱即用、不在终端敲命令的 macOS 用户，可以改用打包好的 `.app`：
+
+```bash
+cd kimi-cli/web && npm install && npm run build && cd ../..
+cd packaging && python build.py
+open ../dist/OpenKimo-*.dmg
+```
+
+把 `OpenKimo.app` 拖到 `Applications`，从启动台启动。它会：
+
+- 自带 Python 3.12 与全部依赖（无需宿主 Python）
+- 在菜单栏常驻状态行（Running / Starting / Stopped / Crashed）
+- 提供原生 Settings 窗口（LLM Provider、API Key、端口、目录），**服务未启动时也能改配置**
+- 在 `~/Library/Application Support/<AppName>/` 维护一份用户可写的 Python 覆盖层，`pip install` 不会动签名过的 bundle
+
+详细参数（白标定制、菜单结构、目录布局）见 [`packaging/README.md`](../packaging/README.md)。

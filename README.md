@@ -115,6 +115,28 @@ cp .env.example .env
 
 Local mode requires Python 3.10+ with `kimi-cli` installed (`pip install -e ./kimi-cli`); it disables the per-session sandbox, browser, and Jupyter, so use it only for development. See [`docs/LOCAL-MODE.md`](docs/LOCAL-MODE.md) for prerequisites and limitations.
 
+### Option E — macOS App (.dmg)
+
+A self-contained macOS application that bundles Python, kimi-cli, and the web frontend. No host dependencies; drag-to-install.
+
+```bash
+git clone --recurse-submodules git@github.com:j0x7c4/OpenKimo.git
+cd OpenKimo/kimi-cli/web && npm install && npm run build
+cd ../../packaging && python build.py
+open ../dist/OpenKimo-*.dmg
+```
+
+Drag `OpenKimo.app` into `Applications`, then launch from Launchpad. The first run opens a native Settings window for the LLM API key; once saved, the menu-bar icon turns `● Running` and your browser opens to `http://127.0.0.1:5494`. Quit from the menu bar to fully stop the server.
+
+White-label rebrand:
+
+```bash
+python build.py --app-name="ACME Agent" --bundle-id=com.acme.agent \
+                --icon=./acme.png --logo=./acme-logo.png --favicon=./acme-fav.png
+```
+
+All paths, the CLI command, and SQLite branding are derived from `--app-name`, so multiple brands can coexist on one Mac. See [`packaging/README.md`](packaging/README.md) for full options and the bundle layout.
+
 ### Access Web UI
 
 Open http://localhost:5494 in your browser.

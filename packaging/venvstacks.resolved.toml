@@ -1,0 +1,33 @@
+# venvstacks layer definitions for OpenKimo macOS .app
+#
+# Layers stack bottom-up: app sees framework sees runtime.
+# build.py writes a resolved copy where local path requirements are
+# substituted in (see _create_resolved_toml).
+
+[[runtimes]]
+name = "cpython-3.12"
+python_implementation = "cpython@3.12.13"
+requirements = []
+
+[[frameworks]]
+name = "framework-kimi"
+runtime = "cpython-3.12"
+requirements = [
+    "file:///Users/jie/Develop/projects/kimi_agent/packaging/wheels/kosong-0.52.0-py3-none-any.whl",
+    "file:///Users/jie/Develop/projects/kimi_agent/packaging/wheels/kimi_code-1.39.0-py3-none-any.whl",
+    "file:///Users/jie/Develop/projects/kimi_agent/packaging/wheels/kimi_sdk-0.2.1-py3-none-any.whl",
+    "file:///Users/jie/Develop/projects/kimi_agent/packaging/wheels/kimi_cli-1.39.0-py3-none-any.whl",
+    "file:///Users/jie/Develop/projects/kimi_agent/packaging/wheels/pykaos-0.9.0-py3-none-any.whl",
+    "file:///Users/jie/Develop/projects/kimi_agent/packaging/wheels/ripgrepy-2.2.0-py3-none-any.whl",
+    "file:///Users/jie/Develop/projects/kimi_agent/packaging/wheels/rumps-0.4.0-py3-none-any.whl",
+]
+
+[[applications]]
+name = "app-openkimo"
+launch_module = "app_main"
+frameworks = ["framework-kimi"]
+requirements = [
+    "rumps>=0.4.0",
+    "pyobjc-core>=10.0",
+    "pyobjc-framework-Cocoa>=10.0",
+]
