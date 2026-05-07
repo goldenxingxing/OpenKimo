@@ -1,0 +1,14 @@
+# Build artifacts
+.build/
+dist/
+*.dmg
+*.app
+
+# Generated requirements (recreated by venvstacks lock)
+requirements/
+
+# Generated wheels (rebuilt on each run)
+wheels/*.whl
+
+# macOS
+.DS_Store

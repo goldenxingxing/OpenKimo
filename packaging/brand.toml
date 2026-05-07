@@ -1,0 +1,34 @@
+# Default branding configuration.
+#
+# Override any of these via CLI flags to packaging/build.py:
+#   python build.py --app-name="ACME Agent" --bundle-id=com.acme.agent \
+#                   --icon=./acme.png --logo=./acme-logo.png \
+#                   --favicon=./acme-fav.png
+#
+# CLI flags take precedence over values here.
+
+[app]
+name = "OpenKimo"
+bundle_id = "ai.openkimo.app"
+copyright = "© 2026 OpenKimo Contributors. Apache License 2.0."
+min_macos_version = "14.0"
+
+# Asset paths are resolved relative to this file (packaging/).
+icon = "icon.png"
+# logo / favicon default to icon when omitted.
+# logo = "logo.png"
+# favicon = "favicon.png"
+
+[branding]
+# Web UI branding seeded into the SQLite branding table on first run.
+# brand_name / page_title default to app.name when omitted.
+# brand_name = "OpenKimo"
+# page_title = "OpenKimo"
+
+[python]
+# venvstacks runtime version. Must satisfy kimi-cli's requires-python (>=3.12).
+version = "3.12"
+
+[build]
+# Where the .app and .dmg are written.
+output_dir = "../dist"

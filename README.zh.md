@@ -115,6 +115,28 @@ cp .env.example .env
 
 本地模式需要 Python 3.10+ 并安装 `kimi-cli`（`pip install -e ./kimi-cli`）；为了无 Docker 也能跑通，会禁用每会话 sandbox、浏览器、Jupyter，因此仅推荐用于开发。详见 [`docs/LOCAL-MODE.md`](docs/LOCAL-MODE.md)。
 
+### 方式 E — macOS 应用程序（.dmg）
+
+把 Python、kimi-cli、Web 前端打包成自包含的 macOS App，宿主机零依赖，拖拽即装。
+
+```bash
+git clone --recurse-submodules git@github.com:j0x7c4/OpenKimo.git
+cd OpenKimo/kimi-cli/web && npm install && npm run build
+cd ../../packaging && python build.py
+open ../dist/OpenKimo-*.dmg
+```
+
+把 `OpenKimo.app` 拖入 `Applications`，从启动台启动。首次运行会弹出原生 Settings 窗填写 LLM API Key；保存后菜单栏图标变为 `● Running`，浏览器自动打开 `http://127.0.0.1:5494`。退出时点菜单栏 Quit 以彻底关闭服务。
+
+白标定制（OEM）：
+
+```bash
+python build.py --app-name="ACME Agent" --bundle-id=com.acme.agent \
+                --icon=./acme.png --logo=./acme-logo.png --favicon=./acme-fav.png
+```
+
+数据目录、CLI 命令、SQLite 中的品牌信息都按 `--app-name` 推导，可以在同一台 Mac 上并存多个品牌。完整参数与目录结构见 [`packaging/README.md`](packaging/README.md)。
+
 ### 访问 Web UI
 
 浏览器打开 http://localhost:5494。
