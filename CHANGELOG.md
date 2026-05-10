@@ -6,14 +6,70 @@ this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [v0.1.3] — 2026-05-10
+
+本版本以"打包稳定性 + 上游同步"为主线：升级 kimi-cli 到 1.41.0，重写 macOS Settings 窗口为单页滚动布局，并把前端 build 接入打包流水线，避免 .app 内 UI 卡在旧版本号。
+
+### Highlights
+
+- **升级到 kimi-cli 1.41.0**：合并 upstream/main 共 21 个上游提交，带来 `afk_mode`、会话遥测、状态栏 agent 计数、headless 剪贴板支持、`/usage` 剩余额度显示修复、OAuth 重连保留 token 等改进。
+- **macOS Settings 窗口完全重写**：改用单页滚动 + 原生 Auto Layout，替换之前 `NSStackView` / `NSGridView` / `NSBox` / toolbar 多层套娃，修复多次迭代仍布局错位的问题。
+- **打包流水线自动跑前端 build**：`packaging/build.py` 加入 `build_frontend()` 步骤，版本号自动跟随 `pyproject.toml`，避免 .app 内 Web UI 卡在旧版本号。
+
 ### Added
 
-- **macOS App 打包（.dmg）**：新增 `packaging/` 目录，可将 OpenKimo 打成自包含的 `.app`，宿主机零依赖。`python packaging/build.py` 输出 `dist/<AppName>.app` + `dist/<AppName>-<ver>.dmg`，拖拽到 Applications 即可使用。
+#### macOS App 打包（.dmg，从 Unreleased 转正）
+
+- 新增 `packaging/` 目录，可将 OpenKimo 打成自包含的 `.app`，宿主机零依赖。`python packaging/build.py` 输出 `dist/<AppName>.app` + `dist/<AppName>-<ver>.dmg`，拖拽到 Applications 即可使用。
   - 菜单栏常驻状态（`● Running` / `◐ Starting` / `○ Stopped` / `✗ Crashed`），提供 Start/Stop/Restart Server、Open Web UI、Open Admin、Install Package、Open Terminal Here、About、Quit。
-  - 原生 PyObjC Settings 窗口（LLM / Web Server / Paths 三个 tab）：服务离线时也能改配置，避免"API Key 错 → server 起不来 → 改不了配置"的死循环。
+  - 原生 PyObjC Settings 窗口（LLM / Web Server / Paths 三个 section）：服务离线时也能改配置，避免"API Key 错 → server 起不来 → 改不了配置"的死循环。
   - 用户可写的 Python 覆盖层 (`PYTHONUSERBASE`)：bundle 内 Frameworks 仍只读签名，用户 `pip install` 落到 `~/Library/Application Support/<AppName>/python-userbase/`，升级 .app 不丢已装包。
   - 白标定制：`--app-name` / `--bundle-id` / `--icon` / `--logo` / `--favicon` / `--brand-name` 全部支持，所有派生路径、CLI 命令、SQLite branding 字段按 `--app-name` 推导，可在同一台 Mac 上并存多个品牌。Web UI 的 logo/品牌名在首次启动自动种入 SQLite，后续 admin 改过的不会被升级覆盖。
   - 文档：`packaging/README.md`、`README.md` / `README.zh.md` 新增 "Option E — macOS App (.dmg)"，`docs/LOCAL-MODE.md` 末尾追加 macOS App 章节。
+- CI：新增 `.github/workflows/release.yml`，tag push 时在 macOS runner 上自动构建 `.dmg` 并发布到 GitHub Releases。
+
+#### kimi-cli 1.41.0 升级
+
+- 子模块从原 SHA bump 到 `bc32f372`（合并 upstream/main 之后的 merge commit），吸收社区 21 个 commit，主要内容：
+  - `feat(telemetry)`: 会话追踪与 telemetry server，`app_name` / `build_sha` 写入 context provenance。
+  - `fix(yolo)`: 解锁 `AskUserQuestion`；新增正交的 `afk_mode`（详见下方 Changed）。
+  - `fix(clipboard)`: 在 SSH 接入的 headless Linux 上启用粘贴板。
+  - `fix(shell)`: `/usage` 剩余额度显示修复；`/btw` slash command 注册；workflow slash 输入回显。
+  - `fix(chat-provider)`: 连接恢复时保留刷新过的 OAuth token。
+  - `fix(soul)`: LLM step 重试时清掉残留的 partial UI 输出；上下文 compaction 后重新注入 yolo reminder。
+  - `fix(approval)`: pending 请求作用域收敛到 turn 生命周期。
+  - `refactor(windows)`: Shell 后端从 PowerShell 切到 git-bash。
+- WIP：`LLM_PROVIDERS` 环境变量多 provider 合并 + admin Models tab（`packaging/app_main/configtoml.py`）。
+
+#### 开发工具
+
+- 新增 `scripts/screenshot-settings.py`：Settings 窗口的可视化验证 harness（`--env-fixture` 加载样例配置 + `--out` 输出 PNG），用于截图比对回归。
+- 新增 `.claude/agents/kimi-cli-merger.md`：Claude Code 项目级 subagent 定义，专门负责 kimi-cli 子模块与 upstream 的 merge 工作。
+- `CLAUDE.md` 加入 task dispatcher 工作模式说明（说明何时把多步任务分派给 subagent）。
+
+### Changed
+
+#### Settings 窗口（完全重写）
+
+- 改用 `NSScrollView` + 纯 `NSView` / Auto Layout，删除原 `NSStackView` / `NSGridView` / `NSBox` / toolbar 套娃实现。
+- 单页滚动布局：3 个 section（LLM / Web Server / Paths）+ sticky 底部按钮栏。
+- Provider 行用 leading 3pt accent bar 表示分组，移除 `NSBox` 边框。
+
+#### Build pipeline（`packaging/build.py`）
+
+- 加入 `build_frontend(cfg)` 步骤：smart `npm install`（仅在 `package-lock.json` / `node_modules` 过期时跑）+ `npm run build`。
+- 新增 `--skip-frontend` flag，便于本地迭代。
+- 静态资源选择反转：fresh `web/dist/` 优先于 committed `src/.../web/static/`，避免 .app 内 UI 版本号与 `pyproject.toml` 不同步。
+
+#### kimi-cli 行为变更（来自上游 1.41.0）
+
+- ⚠️ **Breaking**：`yolo_mode` 重命名为 `afk_mode`。`skip_yolo_prompt_injection` → `skip_afk_prompt_injection`，`dynamic_injections/yolo_mode.py` → `afk_mode.py`。下游集成需相应改名。
+- `max_steps_per_turn` 默认值由 500 提升到 1000。
+- approval 请求不再有 5 分钟超时，转为按 turn 生命周期收敛 pending 集合。
+
+### Fixed
+
+- `.gitignore`：补 `.agents/`，避免大体积第三方 skill bundle（`app/.agents/skills.zip`，~67 MB）误入 git 历史。
 
 ## [v0.1.1] — 2026-04-30
 
@@ -135,6 +191,7 @@ post-v0.1.0 patch — README + lint fixes only, no behavior change.
 - 资源限额（CPU / 内存 / 磁盘 / PID cgroups）。
 - 危险命令拦截。
 
+[v0.1.3]: https://github.com/j0x7c4/OpenKimo/releases/tag/v0.1.3
 [v0.1.1]: https://github.com/j0x7c4/OpenKimo/releases/tag/v0.1.1
 [v0.1.0]: https://github.com/j0x7c4/OpenKimo/releases/tag/v0.1.0
 [v0.0.1]: https://github.com/j0x7c4/OpenKimo/releases/tag/v0.0.1

@@ -36,6 +36,7 @@ class AppPaths:
     kimi_cli: Path              # Resources/kimi_cli
     static_dir: Path            # Resources/kimi_cli/web/static
     brand_json: Path            # Resources/brand.json
+    menubar_icon: Path          # Resources/MenuBarIcon.png (44x44 status-bar icon)
 
     app_support: Path           # ~/Library/Application Support/<AppName>
     env_file: Path              # ~/Library/Application Support/<AppName>/.env
@@ -133,6 +134,7 @@ def app_paths() -> AppPaths:
         kimi_cli=resources / "kimi_cli",
         static_dir=resources / "kimi_cli" / "web" / "static",
         brand_json=resources / "brand.json",
+        menubar_icon=resources / "MenuBarIcon.png",
         app_support=app_support,
         env_file=app_support / ".env",
         pip_conf=app_support / "pip.conf",
