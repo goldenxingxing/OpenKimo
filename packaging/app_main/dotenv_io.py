@@ -18,7 +18,11 @@ from pathlib import Path
 
 # Whitelisted keys exposed in the Settings window. Single source of truth.
 EDITABLE_KEYS: tuple[str, ...] = (
-    # LLM
+    # LLM — new multi-provider config (YAML/JSON list)
+    "LLM_PROVIDERS",
+    "LLM_DEFAULT_PROVIDER",
+    # LLM — legacy single-provider fallbacks (kept editable so the UI can clear
+    # them when migrating to LLM_PROVIDERS)
     "LLM_PROVIDER",
     "KIMI_API_KEY",
     "KIMI_BASE_URL",
@@ -47,6 +51,8 @@ SECRET_KEYS: frozenset[str] = frozenset({
     "OPENAI_API_KEY",
     "ANTHROPIC_API_KEY",
     "KIMI_WEB_SESSION_TOKEN",
+    # LLM_PROVIDERS embeds API keys; treat the whole blob as secret.
+    "LLM_PROVIDERS",
 })
 
 _LINE_RE = re.compile(r"^\s*(?P<key>[A-Za-z_][A-Za-z0-9_]*)\s*=\s*(?P<val>.*)$")
@@ -54,18 +60,32 @@ _LINE_RE = re.compile(r"^\s*(?P<key>[A-Za-z_][A-Za-z0-9_]*)\s*=\s*(?P<val>.*)$")
 
 def _unquote(v: str) -> str:
     v = v.rstrip()
-    if len(v) >= 2 and v[0] == v[-1] and v[0] in ("'", '"'):
-        return v[1:-1]
+    if len(v) >= 2 and v[0] == v[-1]:
+        if v[0] == "'":
+            # Single-quoted: literal value (matches bash semantics).
+            return v[1:-1]
+        if v[0] == '"':
+            # Double-quoted: unescape the same sequences that ``_quote`` emits.
+            inner = v[1:-1]
+            return inner.replace('\\"', '"').replace("\\\\", "\\")
     return v
 
 
 def _quote(v: str) -> str:
     if v == "":
         return ""
-    if re.search(r"[\s#'\"]", v):
-        # Use double quotes; escape embedded double quotes and backslashes.
-        return '"' + v.replace("\\", "\\\\").replace('"', '\\"') + '"'
-    return v
+    has_dq = '"' in v
+    has_sq = "'" in v
+    if not re.search(r"[\s#'\"]", v):
+        return v
+    # Prefer single quotes when the value carries embedded double quotes (JSON
+    # blobs, e.g. LLM_PROVIDERS) and no single quotes — single-quoted bash
+    # values need no escaping and round-trip unchanged through ``_unquote``.
+    if has_dq and not has_sq:
+        return "'" + v + "'"
+    # Fall back to double quotes; escape backslash and double-quote so bash
+    # ``source`` and our ``_unquote`` both reproduce the original value.
+    return '"' + v.replace("\\", "\\\\").replace('"', '\\"') + '"'
 
 
 def read_env(path: Path) -> dict[str, str]:

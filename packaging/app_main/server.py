@@ -14,6 +14,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import signal
 import socket
 import subprocess
 import threading
@@ -147,6 +148,71 @@ def _check_health(port: int) -> bool:
             return False
 
 
+def _reap_orphan_listener(port: int) -> None:
+    """Kill orphan kimi_cli.web.app listeners on `port`.
+
+    A prior force-killed menu-bar process leaves its uvicorn child running
+    with PPID=1 (reparented to launchd). Without this, the new supervisor
+    can't bind the port and burns through its retries. We only target
+    processes whose cmdline mentions kimi_cli.web.app AND whose parent is
+    launchd — never a dev server whose parent is a shell.
+    """
+    try:
+        lsof = subprocess.run(
+            ["lsof", "-ti", f"tcp:{port}", "-sTCP:LISTEN"],
+            capture_output=True, text=True, timeout=2.0,
+        )
+    except Exception:
+        return
+    for pid_str in lsof.stdout.split():
+        try:
+            pid = int(pid_str)
+        except ValueError:
+            continue
+        try:
+            ps = subprocess.run(
+                ["ps", "-o", "ppid=,command=", "-p", str(pid)],
+                capture_output=True, text=True, timeout=1.0,
+            ).stdout.strip()
+        except Exception:
+            continue
+        if not ps:
+            continue
+        ppid_str, _, cmd = ps.partition(" ")
+        try:
+            ppid = int(ppid_str)
+        except ValueError:
+            continue
+        if "kimi_cli.web.app" not in cmd:
+            log.warning("port %d held by foreign pid %d (%s); leaving alone",
+                        port, pid, cmd)
+            continue
+        if ppid != 1:
+            log.warning("port %d held by pid %d (parent %d, not orphaned); leaving alone",
+                        port, pid, ppid)
+            continue
+        log.warning("reaping orphan uvicorn pid %d on port %d", pid, port)
+        try:
+            os.kill(pid, signal.SIGTERM)
+        except ProcessLookupError:
+            continue
+        except Exception:
+            log.exception("failed to terminate orphan pid %d", pid)
+            continue
+        for _ in range(20):
+            try:
+                os.kill(pid, 0)
+            except ProcessLookupError:
+                break
+            time.sleep(0.1)
+        else:
+            try:
+                os.kill(pid, signal.SIGKILL)
+            except Exception:
+                pass
+            time.sleep(0.2)
+
+
 class UvicornSupervisor:
     """Owns the uvicorn child process; thread-safe controls."""
 
@@ -223,6 +289,8 @@ class UvicornSupervisor:
         env = _build_env(self.paths)
         self._port = _resolve_port(env)
         host = env.get("KIMI_WEB_HOST", "127.0.0.1")
+
+        _reap_orphan_listener(self._port)
 
         self.paths.logs.mkdir(parents=True, exist_ok=True)
         log_fp = self.paths.server_log.open("ab", buffering=0)

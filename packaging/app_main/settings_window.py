@@ -1,13 +1,13 @@
-"""Native macOS Settings window (PyObjC).
+"""Native macOS Settings window (PyObjC) — single-page scrolling layout.
 
-Lives in the menu-bar process so it's available even when the uvicorn
-server is offline (e.g. when the LLM API key hasn't been configured yet,
-which would prevent the Web admin panel from loading).
+Layout: a vertical NSScrollView holds three sections (LLM / Web Server /
+Paths) separated by horizontal dividers. A sticky button bar at the bottom
+of the window provides Cancel / Save / Save & Restart Server.
 
-Three toolbar tabs:
-  • LLM        — provider, API keys, model, base URL, temperature, thinking
-  • Web Server — port, session token, LAN-only
-  • Paths      — work / sessions / output / custom skills / HF cache
+All layout uses plain ``NSView`` + explicit Auto Layout edge anchors. We
+intentionally avoid ``NSStackView``, ``NSGridView`` and ``NSBox`` because
+their stretching semantics fight the form's edge-anchor pins (see commit
+history for details).
 
 Save writes to ``~/Library/Application Support/<AppName>/.env`` via
 ``dotenv_io.write_env`` (atomic, preserves comments and unknown lines).
@@ -15,37 +15,35 @@ Save writes to ``~/Library/Application Support/<AppName>/.env`` via
 
 from __future__ import annotations
 
+import json
 import logging
 import secrets
-from typing import Callable
+from typing import Any, Callable
 
 from AppKit import (
     NSAlert,
+    NSAlertFirstButtonReturn,
     NSApp,
     NSBackingStoreBuffered,
     NSButton,
+    NSColor,
     NSFont,
-    NSGridCellPlacementLeading,
-    NSGridCellPlacementTrailing,
-    NSGridView,
+    NSFontWeightSemibold,
     NSImage,
+    NSLayoutConstraint,
     NSMakeRect,
     NSModalResponseOK,
     NSOpenPanel,
     NSPopUpButton,
+    NSScrollView,
     NSSecureTextField,
     NSSlider,
-    NSStackView,
-    NSStackViewDistributionFill,
     NSSwitch,
     NSTextField,
     NSTitledWindowMask,
     NSClosableWindowMask,
     NSMiniaturizableWindowMask,
     NSResizableWindowMask,
-    NSToolbar,
-    NSToolbarItem,
-    NSUserInterfaceLayoutOrientationVertical,
     NSView,
     NSWindow,
     NSWindowController,
@@ -58,23 +56,78 @@ from .paths import AppPaths
 
 log = logging.getLogger(__name__)
 
-_PROVIDERS = ("kimi", "openai", "anthropic")
+# Provider types accepted by the runtime. Keep in sync with
+# ``kimi_cli.config.LLMProvider``.
+_PROVIDER_TYPES: tuple[str, ...] = ("kimi", "openai_legacy", "anthropic")
 
-_TAB_LLM = "LLM"
-_TAB_WEB = "Web Server"
-_TAB_PATHS = "Paths"
-_TABS = (_TAB_LLM, _TAB_WEB, _TAB_PATHS)
+# Default max context used when the user leaves the field blank (matches the
+# placeholder shown in the Settings UI and kimi-cli's documented default).
+_DEFAULT_MAX_CONTEXT: int = 262144
+
+# Capability flags exposed under each row's "Advanced" disclosure.
+_CAPABILITIES: tuple[str, ...] = (
+    "image_in",
+    "video_in",
+    "thinking",
+    "always_thinking",
+)
+
+# Legacy single-provider env keys we clear once a fresh LLM_PROVIDERS blob is
+# written, so the runtime parser unambiguously picks up the new format.
+_LEGACY_LLM_KEYS: tuple[str, ...] = (
+    "LLM_PROVIDER",
+    "KIMI_API_KEY",
+    "KIMI_BASE_URL",
+    "KIMI_MODEL_NAME",
+    "KIMI_MODEL_MAX_CONTEXT_SIZE",
+    "OPENAI_API_KEY",
+    "OPENAI_BASE_URL",
+    "ANTHROPIC_API_KEY",
+    "ANTHROPIC_BASE_URL",
+)
+
+# ---- module-level layout constants (per spec §3) -----------------------
+
+OUTER_HMARGIN: float = 24.0
+OUTER_VMARGIN: float = 20.0
+SECTION_VGAP: float = 24.0
+ROW_VGAP: float = 8.0
+LABEL_INPUT_GAP: float = 12.0
+LABEL_COLUMN_WIDTH: float = 160.0
+BUTTONBAR_HEIGHT: float = 56.0
+BUTTONBAR_HMARGIN: float = 20.0
 
 
-def _label(text: str, *, bold: bool = False) -> NSTextField:
+# ---- low-level helpers --------------------------------------------------
+
+def _v() -> NSView:
+    """Construct an NSView with auto-resizing translation disabled."""
+    view = NSView.alloc().init()
+    view.setTranslatesAutoresizingMaskIntoConstraints_(False)
+    return view
+
+
+def _label(text: str, *, semibold: bool = False, size: float = 13.0,
+           secondary: bool = False) -> NSTextField:
     f = NSTextField.alloc().init()
     f.setStringValue_(text)
     f.setBezeled_(False)
     f.setDrawsBackground_(False)
     f.setEditable_(False)
     f.setSelectable_(False)
-    if bold:
-        f.setFont_(NSFont.boldSystemFontOfSize_(13))
+    if semibold:
+        try:
+            f.setFont_(NSFont.systemFontOfSize_weight_(size, NSFontWeightSemibold))
+        except Exception:
+            f.setFont_(NSFont.boldSystemFontOfSize_(size))
+    else:
+        f.setFont_(NSFont.systemFontOfSize_(size))
+    if secondary:
+        try:
+            f.setTextColor_(NSColor.secondaryLabelColor())
+        except Exception:
+            pass
+    f.setTranslatesAutoresizingMaskIntoConstraints_(False)
     return f
 
 
@@ -86,12 +139,14 @@ def _text(value: str = "", *, secure: bool = False, placeholder: str = "") -> NS
         f.setPlaceholderString_(placeholder)
     f.setBezeled_(True)
     f.setEditable_(True)
+    f.setTranslatesAutoresizingMaskIntoConstraints_(False)
     return f
 
 
 def _switch(on: bool) -> NSSwitch:
     s = NSSwitch.alloc().init()
     s.setState_(1 if on else 0)
+    s.setTranslatesAutoresizingMaskIntoConstraints_(False)
     return s
 
 
@@ -101,8 +156,169 @@ def _button(title: str, target, action: str) -> NSButton:
     b.setBezelStyle_(1)  # rounded
     b.setTarget_(target)
     b.setAction_(action)
+    b.setTranslatesAutoresizingMaskIntoConstraints_(False)
     return b
 
+
+def _flat_button(title: str, target, action: str) -> NSButton:
+    """A leading-aligned, frameless-ish button used for + Add Provider."""
+    b = NSButton.alloc().init()
+    b.setTitle_(title)
+    b.setBezelStyle_(11)  # NSBezelStyleRecessed (subtle)
+    b.setTarget_(target)
+    b.setAction_(action)
+    b.setTranslatesAutoresizingMaskIntoConstraints_(False)
+    return b
+
+
+def _divider() -> NSView:
+    v = _v()
+    v.setWantsLayer_(True)
+    try:
+        v.layer().setBackgroundColor_(NSColor.separatorColor().CGColor())
+    except Exception:
+        v.layer().setBackgroundColor_(NSColor.grayColor().CGColor())
+    return v
+
+
+def _form_row(
+    label: NSTextField,
+    control: NSView,
+    *,
+    fixed_width: float | None = None,
+) -> NSView:
+    """Build one label-on-left, control-on-right form row.
+
+    If ``fixed_width`` is not None, the control is pinned to that width and a
+    trailing spacer absorbs the remainder; otherwise the control stretches to
+    the row's trailing edge.
+    """
+    row = _v()
+    row.addSubview_(label)
+    row.addSubview_(control)
+
+    label.setContentHuggingPriority_forOrientation_(750, 0)
+    control.setContentHuggingPriority_forOrientation_(250, 0)
+
+    cs: list[Any] = [
+        label.leadingAnchor().constraintEqualToAnchor_(row.leadingAnchor()),
+        label.centerYAnchor().constraintEqualToAnchor_(row.centerYAnchor()),
+        label.widthAnchor().constraintEqualToConstant_(LABEL_COLUMN_WIDTH),
+        control.leadingAnchor().constraintEqualToAnchor_constant_(
+            label.trailingAnchor(), LABEL_INPUT_GAP),
+        control.centerYAnchor().constraintEqualToAnchor_(row.centerYAnchor()),
+        control.topAnchor().constraintGreaterThanOrEqualToAnchor_(row.topAnchor()),
+        control.bottomAnchor().constraintLessThanOrEqualToAnchor_(row.bottomAnchor()),
+    ]
+
+    if fixed_width is not None:
+        spacer = _v()
+        row.addSubview_(spacer)
+        cs.extend([
+            control.widthAnchor().constraintEqualToConstant_(fixed_width),
+            spacer.leadingAnchor().constraintEqualToAnchor_constant_(
+                control.trailingAnchor(), 8.0),
+            spacer.trailingAnchor().constraintEqualToAnchor_(row.trailingAnchor()),
+            spacer.centerYAnchor().constraintEqualToAnchor_(row.centerYAnchor()),
+            spacer.heightAnchor().constraintEqualToConstant_(1.0),
+        ])
+    else:
+        cs.append(
+            control.trailingAnchor().constraintEqualToAnchor_(row.trailingAnchor())
+        )
+
+    # The row's intrinsic vertical span is dictated by the control's height
+    # (most controls have a sensible intrinsicContentSize). Pin the row's
+    # height >= the control's height so it doesn't collapse, and make the row
+    # tall enough to vertically center the label too.
+    cs.extend([
+        row.heightAnchor().constraintGreaterThanOrEqualToAnchor_(control.heightAnchor()),
+        row.heightAnchor().constraintGreaterThanOrEqualToAnchor_(label.heightAnchor()),
+    ])
+
+    NSLayoutConstraint.activateConstraints_(cs)
+    return row
+
+
+def _compound_token_field(
+    token_field: NSTextField,
+    generate_btn: NSButton,
+) -> NSView:
+    """[ token field …………… ] [ Generate ] compound."""
+    compound = _v()
+    compound.addSubview_(token_field)
+    compound.addSubview_(generate_btn)
+
+    generate_btn.setContentHuggingPriority_forOrientation_(752, 0)
+    token_field.setContentHuggingPriority_forOrientation_(250, 0)
+
+    NSLayoutConstraint.activateConstraints_([
+        token_field.leadingAnchor().constraintEqualToAnchor_(compound.leadingAnchor()),
+        token_field.centerYAnchor().constraintEqualToAnchor_(compound.centerYAnchor()),
+        token_field.trailingAnchor().constraintEqualToAnchor_constant_(
+            generate_btn.leadingAnchor(), -8.0),
+        generate_btn.trailingAnchor().constraintEqualToAnchor_(compound.trailingAnchor()),
+        generate_btn.centerYAnchor().constraintEqualToAnchor_(compound.centerYAnchor()),
+        compound.heightAnchor().constraintGreaterThanOrEqualToAnchor_(
+            token_field.heightAnchor()),
+        compound.heightAnchor().constraintGreaterThanOrEqualToAnchor_(
+            generate_btn.heightAnchor()),
+    ])
+    return compound
+
+
+def _compound_path_field(
+    path_field: NSTextField,
+    choose_btn: NSButton,
+    reset_btn: NSButton,
+) -> NSView:
+    """[ path field ………… ] [ Choose… ] [ Reset ] compound."""
+    compound = _v()
+    compound.addSubview_(path_field)
+    compound.addSubview_(choose_btn)
+    compound.addSubview_(reset_btn)
+
+    choose_btn.setContentHuggingPriority_forOrientation_(752, 0)
+    reset_btn.setContentHuggingPriority_forOrientation_(752, 0)
+    path_field.setContentHuggingPriority_forOrientation_(250, 0)
+
+    NSLayoutConstraint.activateConstraints_([
+        path_field.leadingAnchor().constraintEqualToAnchor_(compound.leadingAnchor()),
+        path_field.centerYAnchor().constraintEqualToAnchor_(compound.centerYAnchor()),
+        path_field.trailingAnchor().constraintEqualToAnchor_constant_(
+            choose_btn.leadingAnchor(), -6.0),
+        choose_btn.centerYAnchor().constraintEqualToAnchor_(compound.centerYAnchor()),
+        choose_btn.trailingAnchor().constraintEqualToAnchor_constant_(
+            reset_btn.leadingAnchor(), -6.0),
+        reset_btn.centerYAnchor().constraintEqualToAnchor_(compound.centerYAnchor()),
+        reset_btn.trailingAnchor().constraintEqualToAnchor_(compound.trailingAnchor()),
+        compound.heightAnchor().constraintGreaterThanOrEqualToAnchor_(
+            path_field.heightAnchor()),
+        compound.heightAnchor().constraintGreaterThanOrEqualToAnchor_(
+            choose_btn.heightAnchor()),
+    ])
+    return compound
+
+
+def _section_view(header_text: str) -> tuple[NSView, NSTextField]:
+    """Construct a section container with a semibold 17pt header label.
+
+    Returns ``(section_view, header_label)`` so callers can chain rows under
+    the header.
+    """
+    section = _v()
+    header = _label(header_text, semibold=True, size=17.0)
+    section.addSubview_(header)
+    NSLayoutConstraint.activateConstraints_([
+        header.topAnchor().constraintEqualToAnchor_(section.topAnchor()),
+        header.leadingAnchor().constraintEqualToAnchor_(section.leadingAnchor()),
+        header.trailingAnchor().constraintLessThanOrEqualToAnchor_(
+            section.trailingAnchor()),
+    ])
+    return section, header
+
+
+# ---- data classes -------------------------------------------------------
 
 class _Row:
     """Holds a label + control pair so we can read it back on Save."""
@@ -116,15 +332,160 @@ class _Row:
         self.extra = extra
 
 
+class _ProviderRow:
+    """One dynamically-managed entry in the LLM provider list."""
+
+    __slots__ = (
+        "view",
+        "title_label",
+        "name_field",
+        "type_popup",
+        "api_key",
+        "base_url",
+        "model",
+        "max_context",
+        "default_radio",
+        "advanced_btn",
+        "advanced_view",
+        "advanced_visible",
+        "advanced_height_zero",
+        "caps",
+    )
+
+    def __init__(
+        self,
+        *,
+        view,
+        title_label,
+        name_field,
+        type_popup,
+        api_key,
+        base_url,
+        model,
+        max_context,
+        default_radio,
+        advanced_btn,
+        advanced_view,
+        advanced_height_zero,
+        caps,
+    ):
+        self.view = view
+        self.title_label = title_label
+        self.name_field = name_field
+        self.type_popup = type_popup
+        self.api_key = api_key
+        self.base_url = base_url
+        self.model = model
+        self.max_context = max_context
+        self.default_radio = default_radio
+        self.advanced_btn = advanced_btn
+        self.advanced_view = advanced_view
+        self.advanced_visible = False
+        self.advanced_height_zero = advanced_height_zero
+        self.caps = caps  # dict[str, NSButton]
+
+    def get_name(self) -> str:
+        return str(self.name_field.stringValue()).strip()
+
+    def has_api_key(self) -> bool:
+        return bool(str(self.api_key.stringValue()).strip())
+
+    def is_default(self) -> bool:
+        return bool(self.default_radio.state())
+
+    def selected_type(self) -> str:
+        return str(self.type_popup.titleOfSelectedItem() or _PROVIDER_TYPES[0])
+
+    def to_dict(self) -> dict[str, Any]:
+        raw_ctx = str(self.max_context.stringValue()).strip()
+        try:
+            ctx = int(raw_ctx) if raw_ctx else _DEFAULT_MAX_CONTEXT
+        except ValueError:
+            ctx = _DEFAULT_MAX_CONTEXT
+        if ctx <= 0:
+            ctx = _DEFAULT_MAX_CONTEXT
+        out: dict[str, Any] = {
+            "name": self.get_name(),
+            "type": self.selected_type(),
+            "api_key": str(self.api_key.stringValue()).strip(),
+            "base_url": str(self.base_url.stringValue()).strip(),
+            "model": str(self.model.stringValue()).strip(),
+            "max_context_size": ctx,
+        }
+        caps = [k for k in _CAPABILITIES if self.caps[k].state()]
+        if caps:
+            out["capabilities"] = caps
+        return out
+
+
+# ---- parsers (carried over verbatim) -----------------------------------
+
+def _parse_existing_providers(raw: str) -> list[dict[str, Any]]:
+    """Parse the LLM_PROVIDERS env value into a list of entry dicts."""
+    raw = (raw or "").strip()
+    if not raw:
+        return []
+    try:
+        parsed = json.loads(raw)
+    except (ValueError, TypeError):
+        return []
+    if not isinstance(parsed, list):
+        return []
+    out: list[dict[str, Any]] = []
+    for entry in parsed:
+        if isinstance(entry, dict) and entry.get("name"):
+            out.append(entry)
+    return out
+
+
+def _legacy_entries(values: dict[str, str]) -> list[dict[str, Any]]:
+    """Synthesize provider entries from legacy single-provider env keys."""
+    out: list[dict[str, Any]] = []
+    if values.get("KIMI_API_KEY"):
+        out.append({
+            "name": "kimi",
+            "type": "kimi",
+            "api_key": values.get("KIMI_API_KEY", ""),
+            "base_url": values.get("KIMI_BASE_URL", "") or "https://api.moonshot.cn/v1",
+            "model": values.get("KIMI_MODEL_NAME", "") or "kimi-k2",
+            "max_context_size": int(values.get("KIMI_MODEL_MAX_CONTEXT_SIZE") or 262144),
+        })
+    if values.get("OPENAI_API_KEY"):
+        out.append({
+            "name": "openai",
+            "type": "openai_legacy",
+            "api_key": values.get("OPENAI_API_KEY", ""),
+            "base_url": values.get("OPENAI_BASE_URL", "") or "https://api.openai.com/v1",
+            "model": "gpt-4o",
+            "max_context_size": 128000,
+        })
+    if values.get("ANTHROPIC_API_KEY"):
+        out.append({
+            "name": "anthropic",
+            "type": "anthropic",
+            "api_key": values.get("ANTHROPIC_API_KEY", ""),
+            "base_url": values.get("ANTHROPIC_BASE_URL", "") or "https://api.anthropic.com",
+            "model": "claude-3-5-sonnet-20241022",
+            "max_context_size": 200000,
+        })
+    return out
+
+
+# ---- controller ---------------------------------------------------------
+
 class SettingsController(NSWindowController):
     """Backing window controller; built lazily via :func:`build_controller`."""
 
     paths_ref = None  # type: AppPaths | None
     on_save = None    # type: Callable[[bool], None] | None
     rows = None       # type: dict[str, list[_Row]] | None
-    tab_views = None  # type: dict[str, NSView] | None
-    container = None  # type: NSStackView | None
-    current_tab = _TAB_LLM
+
+    # LLM section state
+    provider_rows = None              # type: list[_ProviderRow] | None
+    providers_container = None        # type: NSView | None
+    providers_chain_constraints = None  # type: list | None
+    providers_bottom_pin = None       # type: Any | None
+    add_provider_button = None        # type: NSButton | None
 
     # ---- public API ----------------------------------------------------
 
@@ -133,52 +494,6 @@ class SettingsController(NSWindowController):
         self.showWindow_(None)
         self.window().makeKeyAndOrderFront_(None)
         NSApp.activateIgnoringOtherApps_(True)
-
-    # ---- toolbar -------------------------------------------------------
-
-    def toolbarAllowedItemIdentifiers_(self, _toolbar):  # noqa: N802
-        return list(_TABS)
-
-    def toolbarDefaultItemIdentifiers_(self, _toolbar):  # noqa: N802
-        return list(_TABS)
-
-    def toolbarSelectableItemIdentifiers_(self, _toolbar):  # noqa: N802
-        return list(_TABS)
-
-    def toolbar_itemForItemIdentifier_willBeInsertedIntoToolbar_(  # noqa: N802
-        self, _toolbar, identifier, _flag
-    ):
-        item = NSToolbarItem.alloc().initWithItemIdentifier_(identifier)
-        item.setLabel_(identifier)
-        item.setPaletteLabel_(identifier)
-        item.setTarget_(self)
-        item.setAction_("onTabSelected:")
-        sym = {
-            _TAB_LLM: "brain",
-            _TAB_WEB: "network",
-            _TAB_PATHS: "folder",
-        }.get(identifier, "gear")
-        try:
-            img = NSImage.imageWithSystemSymbolName_accessibilityDescription_(sym, identifier)
-            if img is not None:
-                item.setImage_(img)
-        except Exception:
-            pass
-        return item
-
-    def onTabSelected_(self, sender):  # noqa: N802
-        ident = sender.itemIdentifier() if hasattr(sender, "itemIdentifier") else sender.label()
-        self._show_tab(str(ident))
-
-    @objc.python_method
-    def _show_tab(self, name):
-        if name not in self.tab_views:
-            return
-        self.current_tab = name
-        for sub in list(self.container.arrangedSubviews()):
-            self.container.removeArrangedSubview_(sub)
-            sub.removeFromSuperview()
-        self.container.addArrangedSubview_(self.tab_views[name])
 
     # ---- bottom buttons -----------------------------------------------
 
@@ -193,13 +508,35 @@ class SettingsController(NSWindowController):
 
     @objc.python_method
     def _save(self, restart):
-        updates = self._collect_updates()
+        try:
+            updates = self._collect_updates()
+        except ValueError as e:
+            self._error(str(e))
+            return
         try:
             dotenv_io.write_env(self.paths_ref.env_file, updates)
         except Exception as e:
             log.exception("failed to write .env")
             self._error(f"Failed to save settings:\n{e}")
             return
+        # Prune stale [models.X] / [providers.X] from config.toml so the
+        # runtime selector matches the UI.
+        providers_json = updates.get("LLM_PROVIDERS", "")
+        if providers_json:
+            try:
+                from . import configtoml
+                keep_names = {
+                    str(p.get("name", ""))
+                    for p in json.loads(providers_json)
+                    if isinstance(p, dict) and p.get("name")
+                }
+                if keep_names:
+                    configtoml.prune(
+                        self.paths_ref.sessions_dir / "config.toml",
+                        keep_names,
+                    )
+            except Exception:
+                log.exception("config.toml prune failed; continuing")
         if self.on_save:
             try:
                 self.on_save(restart)
@@ -215,6 +552,33 @@ class SettingsController(NSWindowController):
                 if row.key is None:
                     continue
                 out[row.key] = self._read_control(row)
+
+        seen_names: set[str] = set()
+        provider_list: list[dict[str, Any]] = []
+        default_name = ""
+        for prow in (self.provider_rows or []):
+            name = prow.get_name()
+            if not name or not prow.has_api_key():
+                continue
+            if name.lower() in seen_names:
+                raise ValueError(
+                    f"Duplicate provider name: {name!r}. Names must be unique."
+                )
+            seen_names.add(name.lower())
+            provider_list.append(prow.to_dict())
+            if prow.is_default():
+                default_name = name
+
+        if provider_list:
+            out["LLM_PROVIDERS"] = json.dumps(
+                provider_list, ensure_ascii=False, separators=(",", ":")
+            )
+            out["LLM_DEFAULT_PROVIDER"] = default_name or provider_list[0]["name"]
+            for key in _LEGACY_LLM_KEYS:
+                out[key] = ""
+        else:
+            out["LLM_PROVIDERS"] = ""
+            out["LLM_DEFAULT_PROVIDER"] = ""
         return out
 
     @staticmethod
@@ -231,18 +595,130 @@ class SettingsController(NSWindowController):
             return str(c.stringValue())
         return ""
 
-    # ---- helpers -------------------------------------------------------
+    # ---- provider row actions -----------------------------------------
+
+    @objc.python_method
+    def _row_by_tag(self, tag):
+        for r in (self.provider_rows or []):
+            if id(r) == tag:
+                return r
+        return None
+
+    def onSetDefault_(self, sender):  # noqa: N802
+        tag = int(sender.tag())
+        for r in (self.provider_rows or []):
+            r.default_radio.setState_(1 if id(r) == tag else 0)
+
+    def onToggleAdvanced_(self, sender):  # noqa: N802
+        tag = int(sender.tag())
+        row = self._row_by_tag(tag)
+        if row is None:
+            return
+        row.advanced_visible = not row.advanced_visible
+        row.advanced_view.setHidden_(not row.advanced_visible)
+        # Toggle the pin: when hidden, force height==0; when visible,
+        # release that constraint so the panel claims its intrinsic height.
+        if row.advanced_height_zero is not None:
+            row.advanced_height_zero.setActive_(not row.advanced_visible)
+        row.advanced_btn.setTitle_(
+            ("▼ " if row.advanced_visible else "▶ ") + "Advanced (capabilities)"
+        )
+
+    def onAddProvider_(self, _sender):  # noqa: N802
+        row = _build_provider_row(self, entry=None)
+        self.provider_rows.append(row)
+        self.providers_container.addSubview_(row.view)
+        self._rebuild_provider_chain()
+        if not any(r.is_default() for r in self.provider_rows[:-1]):
+            row.default_radio.setState_(1)
+        self._renumber_providers()
+
+    def onRemoveProvider_(self, sender):  # noqa: N802
+        tag = int(sender.tag())
+        row = self._row_by_tag(tag)
+        if row is None:
+            return
+        a = NSAlert.alloc().init()
+        a.setMessageText_("Remove provider")
+        display = row.get_name() or "this provider"
+        a.setInformativeText_(f"Remove “{display}” from the list?")
+        a.addButtonWithTitle_("Remove")
+        a.addButtonWithTitle_("Cancel")
+        if a.runModal() != NSAlertFirstButtonReturn:
+            return
+        was_default = row.is_default()
+        self.provider_rows.remove(row)
+        row.view.removeFromSuperview()
+        self._rebuild_provider_chain()
+        if was_default and self.provider_rows:
+            self.provider_rows[0].default_radio.setState_(1)
+        self._renumber_providers()
+
+    @objc.python_method
+    def _renumber_providers(self):
+        for i, r in enumerate(self.provider_rows or [], start=1):
+            r.title_label.setStringValue_(f"Provider {i}")
+
+    @objc.python_method
+    def _rebuild_provider_chain(self):
+        """Recompute the vertical chain for the providers_container.
+
+        Deactivate the previously-installed chain constraints, then install
+        leading/trailing/top constraints for each row in order. The last
+        row's bottom is pinned to ``providers_container.bottom`` so the
+        container's height grows with the rows.
+        """
+        if self.providers_chain_constraints:
+            NSLayoutConstraint.deactivateConstraints_(
+                self.providers_chain_constraints)
+        self.providers_chain_constraints = []
+
+        container = self.providers_container
+        rows = self.provider_rows or []
+        cs: list = []
+        prev = None
+        for r in rows:
+            cs.append(
+                r.view.leadingAnchor().constraintEqualToAnchor_(
+                    container.leadingAnchor()))
+            cs.append(
+                r.view.trailingAnchor().constraintEqualToAnchor_(
+                    container.trailingAnchor()))
+            if prev is None:
+                cs.append(
+                    r.view.topAnchor().constraintEqualToAnchor_(
+                        container.topAnchor()))
+            else:
+                cs.append(
+                    r.view.topAnchor().constraintEqualToAnchor_constant_(
+                        prev.view.bottomAnchor(), 12.0))
+            prev = r
+
+        if prev is not None:
+            bottom = prev.view.bottomAnchor().constraintEqualToAnchor_(
+                container.bottomAnchor())
+            cs.append(bottom)
+            self.providers_bottom_pin = bottom
+        else:
+            # Empty list: container has zero intrinsic height.
+            zero = container.heightAnchor().constraintEqualToConstant_(0.0)
+            cs.append(zero)
+            self.providers_bottom_pin = zero
+
+        NSLayoutConstraint.activateConstraints_(cs)
+        self.providers_chain_constraints = cs
+
+    # ---- helpers (other actions) --------------------------------------
 
     def onGenerateToken_(self, _sender):  # noqa: N802
-        for row in self.rows[_TAB_WEB]:
+        for row in self.rows["WEB"]:
             if row.key == "KIMI_WEB_SESSION_TOKEN":
                 row.control.setStringValue_(secrets.token_hex(32))
                 return
 
     def onChooseDir_(self, sender):  # noqa: N802
-        # Use the button's tag to identify which row triggered this.
         tag = int(sender.tag())
-        for row in self.rows[_TAB_PATHS]:
+        for row in self.rows["PATHS"]:
             if id(row.extra) == tag:
                 panel = NSOpenPanel.openPanel()
                 panel.setCanChooseFiles_(False)
@@ -256,7 +732,7 @@ class SettingsController(NSWindowController):
 
     def onResetDir_(self, sender):  # noqa: N802
         tag = int(sender.tag())
-        for row in self.rows[_TAB_PATHS]:
+        for row in self.rows["PATHS"]:
             if id(row.extra) == tag:
                 row.control.setStringValue_("")
                 return
@@ -284,92 +760,377 @@ class SettingsController(NSWindowController):
 
 # ---- builders ----------------------------------------------------------
 
-def _make_grid(rows: list[tuple[NSTextField, NSView]]) -> NSGridView:
-    grid = NSGridView.gridViewWithViews_([[lbl, ctl] for lbl, ctl in rows])
-    grid.columnAtIndex_(0).setXPlacement_(NSGridCellPlacementTrailing)
-    grid.columnAtIndex_(1).setXPlacement_(NSGridCellPlacementLeading)
-    grid.setRowSpacing_(8.0)
-    grid.setColumnSpacing_(12.0)
-    return grid
+def _build_provider_row(controller, entry: dict[str, Any] | None = None) -> _ProviderRow:
+    """Build one provider row — a single NSView with explicit anchors.
+
+    See spec §3 "Provider row internal" for the constraint plan.
+    """
+    entry = entry or {}
+
+    row = _v()
+
+    # Leading 3pt accent bar (control accent color).
+    accent = _v()
+    accent.setWantsLayer_(True)
+    try:
+        accent.layer().setBackgroundColor_(NSColor.controlAccentColor().CGColor())
+    except Exception:
+        accent.layer().setBackgroundColor_(NSColor.systemBlueColor().CGColor())
+    row.addSubview_(accent)
+
+    # Section title (re-numbered by controller after add/remove).
+    title_label = _label("Provider", size=11.0, secondary=True)
+    row.addSubview_(title_label)
+
+    # Form rows — each label/control pair in its own NSView.
+    name_field = _text(str(entry.get("name", "")), placeholder="provider name")
+
+    type_popup = NSPopUpButton.alloc().init()
+    type_popup.setTranslatesAutoresizingMaskIntoConstraints_(False)
+    for t in _PROVIDER_TYPES:
+        type_popup.addItemWithTitle_(t)
+    type_value = str(entry.get("type", _PROVIDER_TYPES[0]))
+    if type_value in _PROVIDER_TYPES:
+        type_popup.selectItemWithTitle_(type_value)
+
+    api_key = _text(str(entry.get("api_key", "")), secure=True, placeholder="API key")
+    base_url = _text(str(entry.get("base_url", "")), placeholder="https://...")
+    model = _text(str(entry.get("model", "")), placeholder="model id")
+
+    max_ctx_val = entry.get("max_context_size", "")
+    max_context = _text(
+        str(max_ctx_val) if max_ctx_val else "",
+        placeholder="262144",
+    )
+
+    fr_name = _form_row(_label("Name"), name_field)
+    fr_type = _form_row(_label("Type"), type_popup, fixed_width=180.0)
+    fr_apikey = _form_row(_label("API Key"), api_key)
+    fr_baseurl = _form_row(_label("Base URL"), base_url)
+    fr_model = _form_row(_label("Model"), model)
+    fr_maxctx = _form_row(_label("Max Context"), max_context, fixed_width=120.0)
+
+    for fr in (fr_name, fr_type, fr_apikey, fr_baseurl, fr_model, fr_maxctx):
+        row.addSubview_(fr)
+
+    default_radio = NSButton.radioButtonWithTitle_target_action_(
+        "Set as default", controller, "onSetDefault:"
+    )
+    default_radio.setTranslatesAutoresizingMaskIntoConstraints_(False)
+    default_radio.setState_(0)
+    row.addSubview_(default_radio)
+
+    advanced_btn = NSButton.alloc().init()
+    advanced_btn.setBezelStyle_(11)  # recessed/flat
+    advanced_btn.setTitle_("▶ Advanced (capabilities)")
+    advanced_btn.setTarget_(controller)
+    advanced_btn.setAction_("onToggleAdvanced:")
+    advanced_btn.setTranslatesAutoresizingMaskIntoConstraints_(False)
+    row.addSubview_(advanced_btn)
+
+    raw_caps = entry.get("capabilities")
+    if isinstance(raw_caps, list) and raw_caps:
+        cap_initial = {str(c) for c in raw_caps}
+    else:
+        cap_initial = set(_CAPABILITIES)
+
+    advanced_view = _v()
+    advanced_view.setHidden_(True)
+    row.addSubview_(advanced_view)
+
+    caps: dict[str, NSButton] = {}
+    cap_buttons: list[NSButton] = []
+    for c in _CAPABILITIES:
+        btn = NSButton.checkboxWithTitle_target_action_(c, None, None)
+        btn.setTranslatesAutoresizingMaskIntoConstraints_(False)
+        btn.setState_(1 if c in cap_initial else 0)
+        caps[c] = btn
+        cap_buttons.append(btn)
+        advanced_view.addSubview_(btn)
+
+    # Vertical chain inside advanced_view.
+    cap_cs: list = []
+    prev_btn = None
+    for btn in cap_buttons:
+        cap_cs.append(btn.leadingAnchor().constraintEqualToAnchor_(
+            advanced_view.leadingAnchor()))
+        if prev_btn is None:
+            cap_cs.append(btn.topAnchor().constraintEqualToAnchor_(
+                advanced_view.topAnchor()))
+        else:
+            cap_cs.append(btn.topAnchor().constraintEqualToAnchor_constant_(
+                prev_btn.bottomAnchor(), 4.0))
+        prev_btn = btn
+    if prev_btn is not None:
+        cap_cs.append(prev_btn.bottomAnchor().constraintEqualToAnchor_(
+            advanced_view.bottomAnchor()))
+    NSLayoutConstraint.activateConstraints_(cap_cs)
+
+    # Mutable height==0 constraint on advanced_view (active when collapsed).
+    advanced_height_zero = advanced_view.heightAnchor().constraintEqualToConstant_(0.0)
+    advanced_height_zero.setPriority_(999)
+    advanced_height_zero.setActive_(True)
+
+    remove_btn = _button("Remove", controller, "onRemoveProvider:")
+    row.addSubview_(remove_btn)
+
+    # Constraint plan for the provider row (per spec §3).
+    PAD_LEADING_CONTENT = 9.0  # space between accent bar and content
+    PAD_INNER = 12.0           # row internal trailing padding
+    accent_to_content_inset = PAD_LEADING_CONTENT  # accent_bar.trailing + 9
+
+    cs: list = []
+
+    # Accent bar
+    cs.extend([
+        accent.leadingAnchor().constraintEqualToAnchor_(row.leadingAnchor()),
+        accent.topAnchor().constraintEqualToAnchor_(row.topAnchor()),
+        accent.bottomAnchor().constraintEqualToAnchor_(row.bottomAnchor()),
+        accent.widthAnchor().constraintEqualToConstant_(3.0),
+    ])
+
+    # Title label
+    cs.extend([
+        title_label.leadingAnchor().constraintEqualToAnchor_constant_(
+            accent.trailingAnchor(), accent_to_content_inset),
+        title_label.topAnchor().constraintEqualToAnchor_constant_(
+            row.topAnchor(), 8.0),
+        title_label.trailingAnchor().constraintLessThanOrEqualToAnchor_constant_(
+            row.trailingAnchor(), -PAD_INNER),
+    ])
+
+    # Form rows chain (top under the title)
+    form_rows = (fr_name, fr_type, fr_apikey, fr_baseurl, fr_model, fr_maxctx)
+    prev_fr = None
+    for fr in form_rows:
+        cs.append(fr.leadingAnchor().constraintEqualToAnchor_constant_(
+            accent.trailingAnchor(), accent_to_content_inset))
+        cs.append(fr.trailingAnchor().constraintEqualToAnchor_constant_(
+            row.trailingAnchor(), -PAD_INNER))
+        if prev_fr is None:
+            cs.append(fr.topAnchor().constraintEqualToAnchor_constant_(
+                title_label.bottomAnchor(), 8.0))
+        else:
+            cs.append(fr.topAnchor().constraintEqualToAnchor_constant_(
+                prev_fr.bottomAnchor(), ROW_VGAP))
+        prev_fr = fr
+
+    # default_radio aligned under the input column
+    radio_leading_offset = (
+        accent_to_content_inset + LABEL_COLUMN_WIDTH + LABEL_INPUT_GAP
+    )
+    cs.extend([
+        default_radio.topAnchor().constraintEqualToAnchor_constant_(
+            fr_maxctx.bottomAnchor(), 10.0),
+        default_radio.leadingAnchor().constraintEqualToAnchor_constant_(
+            accent.trailingAnchor(), radio_leading_offset),
+    ])
+
+    # advanced_btn under the radio
+    cs.extend([
+        advanced_btn.topAnchor().constraintEqualToAnchor_constant_(
+            default_radio.bottomAnchor(), 6.0),
+        advanced_btn.leadingAnchor().constraintEqualToAnchor_(
+            default_radio.leadingAnchor()),
+    ])
+
+    # advanced_view under the disclosure
+    cs.extend([
+        advanced_view.topAnchor().constraintEqualToAnchor_constant_(
+            advanced_btn.bottomAnchor(), 4.0),
+        advanced_view.leadingAnchor().constraintEqualToAnchor_(
+            advanced_btn.leadingAnchor()),
+        advanced_view.trailingAnchor().constraintEqualToAnchor_constant_(
+            row.trailingAnchor(), -PAD_INNER),
+    ])
+
+    # remove_btn at the bottom right
+    cs.extend([
+        remove_btn.topAnchor().constraintEqualToAnchor_constant_(
+            advanced_view.bottomAnchor(), 8.0),
+        remove_btn.trailingAnchor().constraintEqualToAnchor_constant_(
+            row.trailingAnchor(), -PAD_INNER),
+        remove_btn.bottomAnchor().constraintEqualToAnchor_constant_(
+            row.bottomAnchor(), -12.0),
+    ])
+
+    NSLayoutConstraint.activateConstraints_(cs)
+
+    pr = _ProviderRow(
+        view=row,
+        title_label=title_label,
+        name_field=name_field,
+        type_popup=type_popup,
+        api_key=api_key,
+        base_url=base_url,
+        model=model,
+        max_context=max_context,
+        default_radio=default_radio,
+        advanced_btn=advanced_btn,
+        advanced_view=advanced_view,
+        advanced_height_zero=advanced_height_zero,
+        caps=caps,
+    )
+    tag = id(pr)
+    default_radio.setTag_(tag)
+    advanced_btn.setTag_(tag)
+    remove_btn.setTag_(tag)
+    return pr
 
 
-def _build_llm_tab(values: dict[str, str]) -> tuple[NSView, list[_Row]]:
+def _build_llm_section(
+    values: dict[str, str],
+    controller: SettingsController,
+) -> tuple[NSView, list[_Row], list[_ProviderRow], NSView, NSButton]:
+    """Build the LLM section.
+
+    Returns ``(section_view, global_rows, provider_rows, providers_container,
+    add_button)``.
+    """
+    section, header = _section_view("LLM")
+
     rows: list[_Row] = []
-    grid_rows: list[tuple[NSTextField, NSView]] = []
 
-    provider = NSPopUpButton.alloc().init()
-    for p in _PROVIDERS:
-        provider.addItemWithTitle_(p)
-    cur = (values.get("LLM_PROVIDER") or "kimi").lower()
-    if cur in _PROVIDERS:
-        provider.selectItemWithTitle_(cur)
-    grid_rows.append((_label("Provider"), provider))
-    rows.append(_Row("LLM_PROVIDER", grid_rows[-1][0], provider))
-
-    def add_text(key: str, label: str, *, secure: bool = False, placeholder: str = ""):
-        ctl = _text(values.get(key, ""), secure=secure, placeholder=placeholder)
-        ctl.setFrame_(NSMakeRect(0, 0, 320, 22))
-        grid_rows.append((_label(label), ctl))
-        rows.append(_Row(key, grid_rows[-1][0], ctl))
-
-    add_text("KIMI_API_KEY", "Kimi API Key", secure=True, placeholder="sk-...")
-    add_text("KIMI_BASE_URL", "Kimi Base URL", placeholder="https://api.moonshot.cn/v1")
-    add_text("KIMI_MODEL_NAME", "Kimi Model")
-    add_text("KIMI_MODEL_MAX_CONTEXT_SIZE", "Kimi Max Context")
-
-    add_text("OPENAI_API_KEY", "OpenAI API Key", secure=True, placeholder="sk-...")
-    add_text("OPENAI_BASE_URL", "OpenAI Base URL")
-
-    add_text("ANTHROPIC_API_KEY", "Anthropic API Key", secure=True, placeholder="sk-ant-...")
-    add_text("ANTHROPIC_BASE_URL", "Anthropic Base URL")
-
+    # Global controls
     thinking = _switch((values.get("LLM_THINKING") or "").lower() == "true")
-    grid_rows.append((_label("Thinking"), thinking))
-    rows.append(_Row("LLM_THINKING", grid_rows[-1][0], thinking))
-
-    temp_val = 0.0
     try:
         temp_val = float(values.get("LLM_TEMPERATURE") or "0.0")
     except ValueError:
-        pass
+        temp_val = 0.0
     temp = NSSlider.alloc().init()
     temp.setMinValue_(0.0)
     temp.setMaxValue_(2.0)
     temp.setDoubleValue_(temp_val)
-    temp.setFrame_(NSMakeRect(0, 0, 200, 22))
-    grid_rows.append((_label("Temperature"), temp))
-    rows.append(_Row("LLM_TEMPERATURE", grid_rows[-1][0], temp))
+    temp.setTranslatesAutoresizingMaskIntoConstraints_(False)
+    # Slider should stretch but at least 200pt wide.
+    temp.widthAnchor().constraintGreaterThanOrEqualToConstant_(200.0).setActive_(True)
 
-    return _make_grid(grid_rows), rows
+    fr_thinking = _form_row(_label("Thinking"), thinking, fixed_width=60.0)
+    fr_temp = _form_row(_label("Temperature"), temp)
+    rows.append(_Row("LLM_THINKING", _label("Thinking"), thinking))
+    rows.append(_Row("LLM_TEMPERATURE", _label("Temperature"), temp))
+
+    section.addSubview_(fr_thinking)
+    section.addSubview_(fr_temp)
+
+    # Providers container
+    providers_container = _v()
+    section.addSubview_(providers_container)
+
+    # Pre-build any existing provider rows.
+    entries = _parse_existing_providers(values.get("LLM_PROVIDERS", ""))
+    if not entries:
+        entries = _legacy_entries(values)
+
+    default_value = (
+        values.get("LLM_DEFAULT_PROVIDER")
+        or values.get("LLM_PROVIDER")
+        or (entries[0]["name"] if entries else "")
+    ).strip().lower()
+
+    provider_rows: list[_ProviderRow] = []
+    default_set = False
+    for entry in entries:
+        prow = _build_provider_row(controller, entry)
+        provider_rows.append(prow)
+        providers_container.addSubview_(prow.view)
+        if not default_set and str(entry.get("name", "")).strip().lower() == default_value:
+            prow.default_radio.setState_(1)
+            default_set = True
+    if not default_set and provider_rows:
+        provider_rows[0].default_radio.setState_(1)
+
+    # + Add Provider button (left-aligned, flat)
+    add_btn = _flat_button("+ Add Provider", controller, "onAddProvider:")
+
+    section.addSubview_(add_btn)
+
+    # Section internal vertical chain.
+    cs: list = [
+        # header pinned by _section_view
+        fr_thinking.topAnchor().constraintEqualToAnchor_constant_(
+            header.bottomAnchor(), 12.0),
+        fr_thinking.leadingAnchor().constraintEqualToAnchor_(section.leadingAnchor()),
+        fr_thinking.trailingAnchor().constraintEqualToAnchor_(section.trailingAnchor()),
+
+        fr_temp.topAnchor().constraintEqualToAnchor_constant_(
+            fr_thinking.bottomAnchor(), ROW_VGAP),
+        fr_temp.leadingAnchor().constraintEqualToAnchor_(section.leadingAnchor()),
+        fr_temp.trailingAnchor().constraintEqualToAnchor_(section.trailingAnchor()),
+
+        providers_container.topAnchor().constraintEqualToAnchor_constant_(
+            fr_temp.bottomAnchor(), 14.0),
+        providers_container.leadingAnchor().constraintEqualToAnchor_(
+            section.leadingAnchor()),
+        providers_container.trailingAnchor().constraintEqualToAnchor_(
+            section.trailingAnchor()),
+
+        add_btn.topAnchor().constraintEqualToAnchor_constant_(
+            providers_container.bottomAnchor(), 10.0),
+        add_btn.leadingAnchor().constraintEqualToAnchor_(section.leadingAnchor()),
+        add_btn.bottomAnchor().constraintEqualToAnchor_(section.bottomAnchor()),
+    ]
+    NSLayoutConstraint.activateConstraints_(cs)
+
+    return section, rows, provider_rows, providers_container, add_btn
 
 
-def _build_web_tab(values: dict[str, str], controller: SettingsController) -> tuple[NSView, list[_Row]]:
+def _build_web_section(
+    values: dict[str, str],
+    controller: SettingsController,
+) -> tuple[NSView, list[_Row]]:
+    section, header = _section_view("Web Server")
     rows: list[_Row] = []
-    grid_rows: list[tuple[NSTextField, NSView]] = []
 
-    port = _text(values.get("KIMI_WEB_PORT", "5494"))
-    port.setFrame_(NSMakeRect(0, 0, 100, 22))
-    grid_rows.append((_label("Port"), port))
-    rows.append(_Row("KIMI_WEB_PORT", grid_rows[-1][0], port))
+    port = _text(values.get("KIMI_WEB_PORT", "5494") or "5494")
+    fr_port = _form_row(_label("Port"), port, fixed_width=100.0)
+    rows.append(_Row("KIMI_WEB_PORT", _label("Port"), port))
 
-    token = _text(values.get("KIMI_WEB_SESSION_TOKEN", ""), secure=True, placeholder="leave empty to disable auth")
-    token.setFrame_(NSMakeRect(0, 0, 320, 22))
+    token = _text(
+        values.get("KIMI_WEB_SESSION_TOKEN", ""),
+        secure=True,
+        placeholder="leave empty to disable auth",
+    )
     gen = _button("Generate", controller, "onGenerateToken:")
-    token_row = NSStackView.stackViewWithViews_([token, gen])
-    token_row.setSpacing_(8.0)
-    grid_rows.append((_label("Session Token"), token_row))
-    rows.append(_Row("KIMI_WEB_SESSION_TOKEN", grid_rows[-1][0], token))
+    token_compound = _compound_token_field(token, gen)
+    fr_token = _form_row(_label("Session Token"), token_compound)
+    rows.append(_Row("KIMI_WEB_SESSION_TOKEN", _label("Session Token"), token))
 
     lan_only = _switch((values.get("KIMI_WEB_LAN_ONLY") or "").lower() == "true")
-    grid_rows.append((_label("LAN Only"), lan_only))
-    rows.append(_Row("KIMI_WEB_LAN_ONLY", grid_rows[-1][0], lan_only))
+    fr_lan = _form_row(_label("LAN Only"), lan_only, fixed_width=60.0)
+    rows.append(_Row("KIMI_WEB_LAN_ONLY", _label("LAN Only"), lan_only))
 
-    return _make_grid(grid_rows), rows
+    for fr in (fr_port, fr_token, fr_lan):
+        section.addSubview_(fr)
+
+    cs: list = [
+        fr_port.topAnchor().constraintEqualToAnchor_constant_(
+            header.bottomAnchor(), 12.0),
+        fr_port.leadingAnchor().constraintEqualToAnchor_(section.leadingAnchor()),
+        fr_port.trailingAnchor().constraintEqualToAnchor_(section.trailingAnchor()),
+
+        fr_token.topAnchor().constraintEqualToAnchor_constant_(
+            fr_port.bottomAnchor(), ROW_VGAP),
+        fr_token.leadingAnchor().constraintEqualToAnchor_(section.leadingAnchor()),
+        fr_token.trailingAnchor().constraintEqualToAnchor_(section.trailingAnchor()),
+
+        fr_lan.topAnchor().constraintEqualToAnchor_constant_(
+            fr_token.bottomAnchor(), ROW_VGAP),
+        fr_lan.leadingAnchor().constraintEqualToAnchor_(section.leadingAnchor()),
+        fr_lan.trailingAnchor().constraintEqualToAnchor_(section.trailingAnchor()),
+        fr_lan.bottomAnchor().constraintEqualToAnchor_(section.bottomAnchor()),
+    ]
+    NSLayoutConstraint.activateConstraints_(cs)
+
+    return section, rows
 
 
-def _build_paths_tab(values: dict[str, str], controller: SettingsController) -> tuple[NSView, list[_Row]]:
+def _build_paths_section(
+    values: dict[str, str],
+    controller: SettingsController,
+) -> tuple[NSView, list[_Row]]:
+    section, header = _section_view("Paths")
     rows: list[_Row] = []
-    grid_rows: list[tuple[NSTextField, NSView]] = []
 
     spec = (
         ("KIMI_DEFAULT_WORK_DIR", "Default Work Directory"),
@@ -378,29 +1139,49 @@ def _build_paths_tab(values: dict[str, str], controller: SettingsController) -> 
         ("CUSTOM_SKILLS_HOST_PATH", "Custom Skills Directory"),
         ("HF_CACHE_HOST_PATH", "HuggingFace Cache"),
     )
-    for key, label in spec:
+
+    fr_views: list[NSView] = []
+    for key, label_text in spec:
         f = _text(values.get(key, ""), placeholder="(use packaged default)")
-        f.setFrame_(NSMakeRect(0, 0, 320, 22))
         f.setEditable_(False)  # browse only
         choose = _button("Choose…", controller, "onChooseDir:")
         reset = _button("Reset", controller, "onResetDir:")
         marker = object()
         choose.setTag_(id(marker))
         reset.setTag_(id(marker))
-        line = NSStackView.stackViewWithViews_([f, choose, reset])
-        line.setSpacing_(6.0)
-        grid_rows.append((_label(label), line))
-        rows.append(_Row(key, grid_rows[-1][0], f, marker))
 
-    grid = _make_grid(grid_rows)
+        compound = _compound_path_field(f, choose, reset)
+        fr = _form_row(_label(label_text), compound)
+        section.addSubview_(fr)
+        fr_views.append(fr)
+        rows.append(_Row(key, _label(label_text), f, marker))
 
-    reset_brand = _button("Reset Branding to Packaged Defaults", controller, "onResetBranding:")
-    wrapper = NSStackView.stackViewWithViews_([grid, reset_brand])
-    wrapper.setOrientation_(NSUserInterfaceLayoutOrientationVertical)
-    wrapper.setSpacing_(20.0)
-    wrapper.setAlignment_(2)  # NSLayoutAttributeLeft
+    reset_brand = _button(
+        "Reset Branding to Packaged Defaults", controller, "onResetBranding:")
+    section.addSubview_(reset_brand)
 
-    return wrapper, rows
+    cs: list = []
+    prev = None
+    for fr in fr_views:
+        cs.append(fr.leadingAnchor().constraintEqualToAnchor_(section.leadingAnchor()))
+        cs.append(fr.trailingAnchor().constraintEqualToAnchor_(section.trailingAnchor()))
+        if prev is None:
+            cs.append(fr.topAnchor().constraintEqualToAnchor_constant_(
+                header.bottomAnchor(), 12.0))
+        else:
+            cs.append(fr.topAnchor().constraintEqualToAnchor_constant_(
+                prev.bottomAnchor(), ROW_VGAP))
+        prev = fr
+
+    cs.extend([
+        reset_brand.topAnchor().constraintEqualToAnchor_constant_(
+            prev.bottomAnchor(), 16.0),
+        reset_brand.leadingAnchor().constraintEqualToAnchor_(section.leadingAnchor()),
+        reset_brand.bottomAnchor().constraintEqualToAnchor_(section.bottomAnchor()),
+    ])
+    NSLayoutConstraint.activateConstraints_(cs)
+
+    return section, rows
 
 
 def build_controller(
@@ -408,18 +1189,19 @@ def build_controller(
     on_save: Callable[[bool], None],
 ) -> SettingsController:
     """Construct an off-screen Settings window. Call ``.show()`` to display."""
-
     style = (
         NSTitledWindowMask
         | NSClosableWindowMask
         | NSMiniaturizableWindowMask
         | NSResizableWindowMask
     )
-    rect = NSMakeRect(0.0, 0.0, 620.0, 520.0)
+    rect = NSMakeRect(0.0, 0.0, 720.0, 640.0)
     window = NSWindow.alloc().initWithContentRect_styleMask_backing_defer_(
         rect, style, NSBackingStoreBuffered, False
     )
     window.setTitle_(f"{paths.app_name} Settings")
+    from Foundation import NSMakeSize
+    window.setContentMinSize_(NSMakeSize(560.0, 480.0))
     window.center()
     window.setReleasedWhenClosed_(False)
 
@@ -427,60 +1209,155 @@ def build_controller(
     controller.paths_ref = paths
     controller.on_save = on_save
     controller.rows = {}
-    controller.tab_views = {}
+    controller.provider_rows = []
+    controller.providers_chain_constraints = []
 
-    # Toolbar
-    toolbar = NSToolbar.alloc().initWithIdentifier_("settings.toolbar")
-    toolbar.setDelegate_(controller)
-    toolbar.setDisplayMode_(2)  # icon + label
-    toolbar.setAllowsUserCustomization_(False)
-    toolbar.setSelectedItemIdentifier_(_TAB_LLM)
-    window.setToolbar_(toolbar)
-
-    # Tabs
     values = dotenv_io.read_editable(paths.env_file)
-    llm_view, llm_rows = _build_llm_tab(values)
-    web_view, web_rows = _build_web_tab(values, controller)
-    paths_view, paths_rows = _build_paths_tab(values, controller)
 
-    controller.tab_views = {
-        _TAB_LLM: llm_view,
-        _TAB_WEB: web_view,
-        _TAB_PATHS: paths_view,
-    }
+    # Build the three sections.
+    llm_section, llm_rows, provider_rows, providers_container, add_button = (
+        _build_llm_section(values, controller)
+    )
+    web_section, web_rows = _build_web_section(values, controller)
+    paths_section, paths_rows = _build_paths_section(values, controller)
+
     controller.rows = {
-        _TAB_LLM: llm_rows,
-        _TAB_WEB: web_rows,
-        _TAB_PATHS: paths_rows,
+        "LLM": llm_rows,
+        "WEB": web_rows,
+        "PATHS": paths_rows,
     }
+    controller.provider_rows = provider_rows
+    controller.providers_container = providers_container
+    controller.add_provider_button = add_button
 
-    # Layout: vertical stack with tab body + button row
-    body_container = NSStackView.alloc().init()
-    body_container.setOrientation_(NSUserInterfaceLayoutOrientationVertical)
-    body_container.setDistribution_(NSStackViewDistributionFill)
-    body_container.setSpacing_(12.0)
-    body_container.setEdgeInsets_((20.0, 24.0, 20.0, 24.0))
+    # Wire the providers chain (must happen AFTER controller fields are set).
+    controller._rebuild_provider_chain()
 
-    body_container.addArrangedSubview_(llm_view)
-    controller.container = body_container
+    # Build the scroll content view.
+    scroll_content = _v()
+    scroll_content.addSubview_(llm_section)
+    div1 = _divider()
+    scroll_content.addSubview_(div1)
+    scroll_content.addSubview_(web_section)
+    div2 = _divider()
+    scroll_content.addSubview_(div2)
+    scroll_content.addSubview_(paths_section)
 
+    cs_content: list = [
+        # LLM section
+        llm_section.topAnchor().constraintEqualToAnchor_constant_(
+            scroll_content.topAnchor(), OUTER_VMARGIN),
+        llm_section.leadingAnchor().constraintEqualToAnchor_constant_(
+            scroll_content.leadingAnchor(), OUTER_HMARGIN),
+        llm_section.trailingAnchor().constraintEqualToAnchor_constant_(
+            scroll_content.trailingAnchor(), -OUTER_HMARGIN),
+
+        # Divider 1
+        div1.topAnchor().constraintEqualToAnchor_constant_(
+            llm_section.bottomAnchor(), SECTION_VGAP),
+        div1.leadingAnchor().constraintEqualToAnchor_constant_(
+            scroll_content.leadingAnchor(), OUTER_HMARGIN),
+        div1.trailingAnchor().constraintEqualToAnchor_constant_(
+            scroll_content.trailingAnchor(), -OUTER_HMARGIN),
+        div1.heightAnchor().constraintEqualToConstant_(1.0),
+
+        # Web section
+        web_section.topAnchor().constraintEqualToAnchor_constant_(
+            div1.bottomAnchor(), SECTION_VGAP),
+        web_section.leadingAnchor().constraintEqualToAnchor_constant_(
+            scroll_content.leadingAnchor(), OUTER_HMARGIN),
+        web_section.trailingAnchor().constraintEqualToAnchor_constant_(
+            scroll_content.trailingAnchor(), -OUTER_HMARGIN),
+
+        # Divider 2
+        div2.topAnchor().constraintEqualToAnchor_constant_(
+            web_section.bottomAnchor(), SECTION_VGAP),
+        div2.leadingAnchor().constraintEqualToAnchor_constant_(
+            scroll_content.leadingAnchor(), OUTER_HMARGIN),
+        div2.trailingAnchor().constraintEqualToAnchor_constant_(
+            scroll_content.trailingAnchor(), -OUTER_HMARGIN),
+        div2.heightAnchor().constraintEqualToConstant_(1.0),
+
+        # Paths section
+        paths_section.topAnchor().constraintEqualToAnchor_constant_(
+            div2.bottomAnchor(), SECTION_VGAP),
+        paths_section.leadingAnchor().constraintEqualToAnchor_constant_(
+            scroll_content.leadingAnchor(), OUTER_HMARGIN),
+        paths_section.trailingAnchor().constraintEqualToAnchor_constant_(
+            scroll_content.trailingAnchor(), -OUTER_HMARGIN),
+        paths_section.bottomAnchor().constraintEqualToAnchor_constant_(
+            scroll_content.bottomAnchor(), -OUTER_VMARGIN),
+    ]
+    NSLayoutConstraint.activateConstraints_(cs_content)
+
+    # Scroll view wrapping the content.
+    scroll = NSScrollView.alloc().init()
+    scroll.setTranslatesAutoresizingMaskIntoConstraints_(False)
+    scroll.setHasVerticalScroller_(True)
+    scroll.setHasHorizontalScroller_(False)
+    scroll.setBorderType_(0)  # NSNoBorder
+    scroll.setDrawsBackground_(False)
+    scroll.setDocumentView_(scroll_content)
+
+    # CRITICAL: pin scroll_content's width to the scroll's clip view to make
+    # vertical-only scrolling work.
+    NSLayoutConstraint.activateConstraints_([
+        scroll_content.widthAnchor().constraintEqualToAnchor_(
+            scroll.contentView().widthAnchor()),
+    ])
+
+    # Sticky button bar.
+    button_bar = _v()
     cancel = _button("Cancel", controller, "onCancel:")
     save = _button("Save", controller, "onSave:")
     save_restart = _button("Save & Restart Server", controller, "onSaveRestart:")
-    save_restart.setKeyEquivalent_("\r")  # Return = default
+    save_restart.setKeyEquivalent_("\r")  # default action
 
-    spacer = NSView.alloc().init()
-    button_row = NSStackView.stackViewWithViews_([cancel, spacer, save, save_restart])
-    button_row.setSpacing_(8.0)
+    sep_top = _divider()
+    button_bar.addSubview_(sep_top)
+    button_bar.addSubview_(cancel)
+    button_bar.addSubview_(save)
+    button_bar.addSubview_(save_restart)
 
-    outer = NSStackView.alloc().init()
-    outer.setOrientation_(NSUserInterfaceLayoutOrientationVertical)
-    outer.setSpacing_(12.0)
-    outer.setEdgeInsets_((16.0, 20.0, 16.0, 20.0))
-    outer.addArrangedSubview_(body_container)
-    outer.addArrangedSubview_(button_row)
+    for btn in (cancel, save, save_restart):
+        btn.setContentHuggingPriority_forOrientation_(752, 0)
 
-    window.setContentView_(outer)
+    NSLayoutConstraint.activateConstraints_([
+        sep_top.topAnchor().constraintEqualToAnchor_(button_bar.topAnchor()),
+        sep_top.leadingAnchor().constraintEqualToAnchor_(button_bar.leadingAnchor()),
+        sep_top.trailingAnchor().constraintEqualToAnchor_(button_bar.trailingAnchor()),
+        sep_top.heightAnchor().constraintEqualToConstant_(1.0),
+
+        cancel.leadingAnchor().constraintEqualToAnchor_constant_(
+            button_bar.leadingAnchor(), BUTTONBAR_HMARGIN),
+        cancel.centerYAnchor().constraintEqualToAnchor_(button_bar.centerYAnchor()),
+
+        save_restart.trailingAnchor().constraintEqualToAnchor_constant_(
+            button_bar.trailingAnchor(), -BUTTONBAR_HMARGIN),
+        save_restart.centerYAnchor().constraintEqualToAnchor_(button_bar.centerYAnchor()),
+
+        save.trailingAnchor().constraintEqualToAnchor_constant_(
+            save_restart.leadingAnchor(), -8.0),
+        save.centerYAnchor().constraintEqualToAnchor_(button_bar.centerYAnchor()),
+    ])
+
+    # Wire scroll + button_bar onto the window's contentView.
+    content = window.contentView()
+    content.addSubview_(scroll)
+    content.addSubview_(button_bar)
+
+    NSLayoutConstraint.activateConstraints_([
+        scroll.leadingAnchor().constraintEqualToAnchor_(content.leadingAnchor()),
+        scroll.trailingAnchor().constraintEqualToAnchor_(content.trailingAnchor()),
+        scroll.topAnchor().constraintEqualToAnchor_(content.topAnchor()),
+        scroll.bottomAnchor().constraintEqualToAnchor_(button_bar.topAnchor()),
+
+        button_bar.leadingAnchor().constraintEqualToAnchor_(content.leadingAnchor()),
+        button_bar.trailingAnchor().constraintEqualToAnchor_(content.trailingAnchor()),
+        button_bar.bottomAnchor().constraintEqualToAnchor_(content.bottomAnchor()),
+        button_bar.heightAnchor().constraintEqualToConstant_(BUTTONBAR_HEIGHT),
+    ])
+
     return controller
 
 

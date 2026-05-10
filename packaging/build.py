@@ -3,15 +3,20 @@
 
 Pipeline:
   1. Parse CLI flags (defaults from ``packaging/brand.toml``).
-  2. ``uv build --wheel`` for kimi-cli + workspace members.
-  3. Resolve ``venvstacks.toml`` (substitute local wheel paths).
-  4. ``venvstacks lock / build / local-export``.
-  5. Compile the C launcher to ``Contents/MacOS/<AppName>``.
-  6. Convert ``icon.png`` → ``AppIcon.icns`` (sips + iconutil).
-  7. Render Info.plist, brand.json, Credits.rtf, CLI wrapper.
-  8. Copy ``Resources/kimi_cli`` from the submodule source.
-  9. Ad-hoc codesign the bundle.
- 10. Build a UDZO DMG with an Applications symlink.
+  2. ``npm install`` (if needed) + ``npm run build`` in ``kimi-cli/web/`` so
+     the bundled UI matches the current kimi-cli version. Skip with
+     ``--skip-frontend``.
+  3. ``uv build --wheel`` for kimi-cli + workspace members.
+  4. Resolve ``venvstacks.toml`` (substitute local wheel paths).
+  5. ``venvstacks lock / build / local-export``.
+  6. Compile the C launcher to ``Contents/MacOS/<AppName>``.
+  7. Convert ``icon.png`` → ``AppIcon.icns`` (sips + iconutil).
+  8. Render Info.plist, brand.json, Credits.rtf, CLI wrapper.
+  9. Copy ``Resources/kimi_cli`` from the submodule source; the freshly
+     built ``kimi-cli/web/dist/`` overrides the committed pre-built static
+     artefact under ``kimi-cli/src/kimi_cli/web/static/``.
+ 10. Ad-hoc codesign the bundle.
+ 11. Build a UDZO DMG with an Applications symlink.
 
 Usage examples are in ``packaging/README.md``.
 """
@@ -62,6 +67,7 @@ class BuildConfig:
     output_dir: Path
     sign_identity: str = "-"  # "-" = ad-hoc
     skip_venv: bool = False
+    skip_frontend: bool = False
     dmg_only: bool = False
     extras: dict = field(default_factory=dict)
 
@@ -112,6 +118,10 @@ def parse_args(argv: list[str]) -> BuildConfig:
                         help='codesign identity; "-" for ad-hoc.')
     parser.add_argument("--skip-venv", action="store_true",
                         help="Reuse the existing venvstacks export.")
+    parser.add_argument("--skip-frontend", action="store_true",
+                        help="Skip the npm install + npm run build step "
+                             "(assumes a fresh frontend dist or you've "
+                             "already built it manually).")
     parser.add_argument("--dmg-only", action="store_true",
                         help="Re-pack only the DMG from a built .app.")
     args = parser.parse_args(argv)
@@ -147,6 +157,7 @@ def parse_args(argv: list[str]) -> BuildConfig:
         output_dir=(ROOT / args.output_dir).resolve(),
         sign_identity=args.sign_identity,
         skip_venv=args.skip_venv,
+        skip_frontend=args.skip_frontend,
         dmg_only=args.dmg_only,
     )
 
@@ -161,6 +172,53 @@ def run(cmd: list[str], **kwargs) -> None:
 def section(title: str) -> None:
     bar = "─" * (len(title) + 4)
     print(f"\n{bar}\n  {title}\n{bar}", flush=True)
+
+
+# ---- 0. frontend ----------------------------------------------------------
+
+def build_frontend(cfg: BuildConfig) -> None:
+    """Build the React/Vite frontend so the bundled web UI matches the
+    current ``kimi-cli`` version. The Vite config bakes
+    ``__KIMI_CLI_VERSION__`` at build time, so a stale committed
+    ``src/kimi_cli/web/static/`` would otherwise show the wrong version
+    in the top-left after a kimi-cli version bump.
+    """
+    section("Building web frontend (npm run build)")
+    web_dir = KIMI_CLI / "web"
+    if not web_dir.exists():
+        raise RuntimeError(
+            f"frontend source directory {web_dir} does not exist; cannot "
+            "build the web UI. Pass --skip-frontend to bypass."
+        )
+
+    if shutil.which("node") is None or shutil.which("npm") is None:
+        raise RuntimeError(
+            "node and/or npm not found on PATH. Install Node.js from "
+            "https://nodejs.org/ (LTS is fine), or pass --skip-frontend to "
+            "reuse the existing frontend build."
+        )
+
+    node_modules = web_dir / "node_modules"
+    package_json = web_dir / "package.json"
+    install_marker = node_modules / ".package-lock.json"
+    needs_install = (
+        not node_modules.exists()
+        or not install_marker.exists()
+        or package_json.stat().st_mtime > install_marker.stat().st_mtime
+    )
+    if needs_install:
+        run(["npm", "install"], cwd=str(web_dir))
+    else:
+        print(f"  node_modules in {web_dir} looks fresh; skipping npm install.")
+
+    run(["npm", "run", "build"], cwd=str(web_dir))
+
+    dist = web_dir / "dist"
+    if not dist.exists() or not any(dist.iterdir()):
+        raise RuntimeError(
+            f"npm run build completed but {dist} is empty or missing. "
+            "Check the Vite output above for errors."
+        )
 
 
 # ---- 1. wheels ------------------------------------------------------------
@@ -323,6 +381,14 @@ def _create_icon(cfg: BuildConfig, dest: Path) -> Path:
     icns = dest
     icns.parent.mkdir(parents=True, exist_ok=True)
     run(["iconutil", "-c", "icns", "-o", str(icns), str(iconset)])
+
+    # Menu-bar icon: a small PNG sized for the status item (22pt @ 2x = 44px).
+    # rumps loads this via NSImage; we keep it colored (not template) so the
+    # brand is recognisable even on the dark menu bar.
+    menubar = dest.parent / "MenuBarIcon.png"
+    run(["sips", "-z", "44", "44", str(cfg.icon),
+         "--out", str(menubar)],
+        stdout=subprocess.DEVNULL)
     return icns
 
 
@@ -518,21 +584,25 @@ def create_app_bundle(cfg: BuildConfig, export_dir: Path) -> Path:
         # When skipping venv, reuse whatever is on disk if available.
         copy_runtimes(export_dir, runtimes)
 
-    # Pre-build static frontend (best-effort; warn but don't fail if missing).
-    static_src = KIMI_CLI / "web" / "dist"
-    static_alt = KIMI_CLI / "src" / "kimi_cli" / "web" / "static"
+    # A freshly built Vite dist always wins over the committed pre-built
+    # artefact. Otherwise the version-string baked into the committed copy
+    # at last commit would override whatever the current kimi-cli version is.
+    static_src = KIMI_CLI / "web" / "dist"           # fresh Vite build output
+    static_alt = KIMI_CLI / "src" / "kimi_cli" / "web" / "static"  # committed pre-built fallback
     static_dest = resources / "kimi_cli" / "web" / "static"
-    if static_alt.exists() and any(static_alt.iterdir()):
-        # Already copied via copy_kimi_cli_source.
-        pass
-    elif static_src.exists():
+    if static_src.exists() and any(static_src.iterdir()):
+        # Fresh Vite build — replace whatever copy_kimi_cli_source brought over.
         if static_dest.exists():
             shutil.rmtree(static_dest)
         shutil.copytree(static_src, static_dest)
+    elif static_alt.exists() and any(static_alt.iterdir()):
+        # No fresh build; fall back to the committed pre-built artefact already
+        # copied by copy_kimi_cli_source. No-op.
+        pass
     else:
         print("  ! frontend not built; KIMI_WEB_STATIC_DIR will be empty.\n"
               "    Run `cd kimi-cli/web && npm install && npm run build` "
-              "before packaging.")
+              "before packaging, or remove --skip-frontend.")
 
     return bundle
 
@@ -647,6 +717,9 @@ def main(argv: list[str]) -> int:
             return 2
         create_dmg(cfg, bundle)
         return 0
+
+    if not cfg.skip_frontend:
+        build_frontend(cfg)
 
     if not cfg.skip_venv:
         wheels_dir = build_local_wheels(cfg)

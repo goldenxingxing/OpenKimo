@@ -73,7 +73,17 @@ def _write_terminal_init(p: paths_mod.AppPaths) -> Path:
 
 class OpenKimoApp(rumps.App):
     def __init__(self, p: paths_mod.AppPaths):
-        super().__init__(p.app_name, title=p.app_name, quit_button=None)
+        # Show only the brand glyph in the menu bar; fall back to the app name
+        # as text if the packaged icon is somehow missing. (If the bar item
+        # disappears entirely on notch-equipped Macs, that's macOS overflow —
+        # close other menu-bar apps or drag the item left of the notch.)
+        icon_path = str(p.menubar_icon) if p.menubar_icon.exists() else None
+        kwargs: dict = {"quit_button": None}
+        if icon_path:
+            kwargs["icon"] = icon_path
+        else:
+            kwargs["title"] = p.app_name
+        super().__init__(p.app_name, **kwargs)
         self.paths = p
         self.supervisor = UvicornSupervisor(p, on_state_change=self._on_state_change)
         self._build_menu()
@@ -204,6 +214,10 @@ class OpenKimoApp(rumps.App):
 
     def _needs_setup(self) -> bool:
         env = dotenv_io.read_env(self.paths.env_file)
+        # New multi-provider config takes precedence: any non-empty LLM_PROVIDERS
+        # blob is treated as "configured", regardless of legacy keys.
+        if (env.get("LLM_PROVIDERS") or "").strip():
+            return False
         return not any(env.get(k) for k in ("KIMI_API_KEY", "OPENAI_API_KEY", "ANTHROPIC_API_KEY"))
 
     def _open_settings_first_run(self, timer: rumps.Timer) -> None:
