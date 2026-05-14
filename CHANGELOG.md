@@ -6,6 +6,13 @@ this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed
+
+- **HEIC/HEIF/AVIF 图片导致对话挂掉**：用户上传 HEIC 图片后，前端把 `data:image/heic;base64,...` 直接发给 LLM，主流 vision 模型（Kimi/OpenAI/Anthropic）一律拒收并把消息留在 conversation history，导致**后续每一轮对话都重发同一张图、每一轮都失败**。子模块改动：
+  - 前端 (`web/`)：新增 `lib/heic.ts`，附件入口（drop / paste / picker）统一通过 `heic2any` 把 HEIC/HEIF 转 JPEG 后再进 attachments，缩略图也能正常预览；转码失败时丢弃文件并 toast 提示。
+  - 后端 `tools/file/read_media.py`：注册 `pillow-heif` opener，`ReadMediaFile` 工具命中 HEIC/HEIF/AVIF 时主动转 JPEG (q=90)。
+  - 后端 `soul/message.py`：新增 `LLM_SAFE_IMAGE_MIMES` 白名单（jpeg/png/webp/gif）和 `sanitize_image_parts()`，在每次 LLM 调用前清洗一份消息副本，HEIC 转 JPEG 失败则替换为 `[image attachment removed: ...]` 文本占位。**只清洗发出去的副本**，原 history 保留用户上传的原图，UI 不受影响。
+
 ## [v0.1.3] — 2026-05-10
 
 本版本以"打包稳定性 + 上游同步"为主线：升级 kimi-cli 到 1.41.0，重写 macOS Settings 窗口为单页滚动布局，并把前端 build 接入打包流水线，避免 .app 内 UI 卡在旧版本号。
