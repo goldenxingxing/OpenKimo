@@ -8,6 +8,7 @@ this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- **新建 session dialog 显示的是 app 目录而非配置的工作目录**：`GET /api/work-dirs/startup` 端点返回 `os.getcwd()`，但 macOS .app bundle 启动 uvicorn 时的 CWD 是 `~/Library/Application Support/OpenKimo`，导致 "Current" 那项指向用户根本不认识的路径。改为优先读 `KIMI_DEFAULT_WORK_DIR`（OpenKimo wrapper 已在导出，且 sessions.py/admin.py 早已用它做新会话默认目录），未设置时回落到原 `os.getcwd()` 路径。CLI 直接 `kimi web` 行为不变。
 - **HEIC/HEIF/AVIF 图片导致对话挂掉**：用户上传 HEIC 图片后，前端把 `data:image/heic;base64,...` 直接发给 LLM，主流 vision 模型（Kimi/OpenAI/Anthropic）一律拒收并把消息留在 conversation history，导致**后续每一轮对话都重发同一张图、每一轮都失败**。子模块改动：
   - 前端 (`web/`)：新增 `lib/heic.ts`，附件入口（drop / paste / picker）统一通过 `heic2any` 把 HEIC/HEIF 转 JPEG 后再进 attachments，缩略图也能正常预览；转码失败时丢弃文件并 toast 提示。
   - 后端 `tools/file/read_media.py`：注册 `pillow-heif` opener，`ReadMediaFile` 工具命中 HEIC/HEIF/AVIF 时主动转 JPEG (q=90)。
