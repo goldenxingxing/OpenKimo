@@ -1,0 +1,298 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>OpenKimo Settings</title>
+  <style>
+    :root {
+      --bg: #f5f5f7;
+      --panel: #ffffff;
+      --fg: #1d1d1f;
+      --muted: #6e6e73;
+      --border: #d2d2d7;
+      --accent: #0a84ff;
+    }
+    * { box-sizing: border-box; }
+    html, body {
+      margin: 0;
+      padding: 0;
+      height: 100%;
+      background: var(--bg);
+      color: var(--fg);
+      font-family: "Segoe UI", -apple-system, BlinkMacSystemFont,
+                   "Helvetica Neue", Arial, sans-serif;
+      font-size: 13px;
+    }
+    .wrap {
+      max-width: 640px;
+      margin: 0 auto;
+      padding: 24px 28px 16px;
+    }
+    h1 {
+      font-size: 18px;
+      font-weight: 600;
+      margin: 0 0 4px;
+    }
+    .sub {
+      color: var(--muted);
+      margin: 0 0 20px;
+      font-size: 12px;
+    }
+    .panel {
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 16px 18px;
+      margin-bottom: 16px;
+    }
+    .panel h2 {
+      font-size: 13px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+      color: var(--muted);
+      margin: 0 0 12px;
+    }
+    .row {
+      display: flex;
+      align-items: center;
+      margin: 10px 0;
+      gap: 12px;
+    }
+    .row > label {
+      flex: 0 0 130px;
+      color: var(--fg);
+    }
+    .row > .control {
+      flex: 1;
+      display: flex;
+      gap: 8px;
+      align-items: center;
+    }
+    input[type="text"],
+    input[type="password"],
+    input[type="number"] {
+      flex: 1;
+      padding: 6px 8px;
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      background: #fff;
+      font-size: 13px;
+      color: var(--fg);
+      font-family: inherit;
+    }
+    input[type="number"] { max-width: 120px; }
+    input:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
+    .radio-group { display: flex; gap: 12px; }
+    .radio-group label { flex: initial; color: var(--fg); }
+    .radio-group input { margin-right: 4px; }
+    .checkbox-row > label { flex: 1; }
+    button {
+      padding: 6px 14px;
+      border-radius: 4px;
+      border: 1px solid var(--border);
+      background: #fff;
+      cursor: pointer;
+      font-size: 13px;
+      font-family: inherit;
+      color: var(--fg);
+    }
+    button.primary {
+      background: var(--accent);
+      color: #fff;
+      border-color: var(--accent);
+    }
+    button.primary:hover { filter: brightness(1.08); }
+    button:hover { background: #f0f0f0; }
+    button.primary:hover { background: var(--accent); }
+    .actions {
+      display: flex;
+      justify-content: flex-end;
+      gap: 8px;
+      padding: 12px 28px 20px;
+      border-top: 1px solid var(--border);
+      background: var(--bg);
+    }
+    .footer-wrap {
+      position: sticky;
+      bottom: 0;
+      background: var(--bg);
+    }
+    .error {
+      color: #d70015;
+      margin: 0 28px 8px;
+      font-size: 12px;
+      min-height: 1em;
+    }
+    .help {
+      color: var(--muted);
+      font-size: 12px;
+      margin-left: 142px;
+      margin-top: -4px;
+      margin-bottom: 10px;
+    }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <h1>OpenKimo Settings</h1>
+    <p class="sub">Edits to your local <code>.env</code>. Save &amp; Restart applies changes immediately.</p>
+
+    <div class="panel">
+      <h2>LLM Provider</h2>
+      <div class="row">
+        <label>Provider</label>
+        <div class="control radio-group">
+          <label><input type="radio" name="provider" value="kimi" /> Kimi</label>
+          <label><input type="radio" name="provider" value="openai" /> OpenAI</label>
+          <label><input type="radio" name="provider" value="anthropic" /> Anthropic</label>
+        </div>
+      </div>
+      <div class="row">
+        <label>API Key</label>
+        <div class="control">
+          <input type="password" id="api_key" placeholder="sk-..." autocomplete="off" />
+        </div>
+      </div>
+      <div class="row">
+        <label>Base URL</label>
+        <div class="control">
+          <input type="text" id="base_url" placeholder="https://api.moonshot.cn/v1" />
+        </div>
+      </div>
+      <div class="row">
+        <label>Model</label>
+        <div class="control">
+          <input type="text" id="model_name" placeholder="kimi-k2" />
+        </div>
+      </div>
+      <div class="row">
+        <label>Temperature</label>
+        <div class="control">
+          <input type="number" id="temperature" step="0.1" min="0" max="2" placeholder="0.6" />
+        </div>
+      </div>
+      <div class="row checkbox-row">
+        <label for="thinking">Thinking mode</label>
+        <div class="control">
+          <input type="checkbox" id="thinking" />
+          <span class="sub" style="margin:0">Stream model reasoning in the chat.</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="panel">
+      <h2>Web Server</h2>
+      <div class="row">
+        <label>Port</label>
+        <div class="control">
+          <input type="number" id="web_port" min="1024" max="65535" placeholder="5494" />
+        </div>
+      </div>
+    </div>
+
+    <div class="panel">
+      <h2>Paths</h2>
+      <div class="row">
+        <label>Work directory</label>
+        <div class="control">
+          <input type="text" id="work_dir" placeholder="C:\\Users\\you\\OpenKimo\\work" />
+          <button type="button" id="pick_work_dir">Choose…</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="footer-wrap">
+    <p id="error" class="error"></p>
+    <div class="actions">
+      <button id="cancel">Cancel</button>
+      <button id="save">Save</button>
+      <button id="save_restart" class="primary">Save &amp; Restart</button>
+    </div>
+  </div>
+
+  <script>
+    const $ = (id) => document.getElementById(id);
+
+    function setError(msg) {
+      $("error").textContent = msg || "";
+    }
+
+    async function load() {
+      try {
+        const data = await window.pywebview.api.load_env();
+        const provider = (data.LLM_PROVIDER || "kimi").toLowerCase();
+        const radio = document.querySelector(`input[name="provider"][value="${provider}"]`);
+        if (radio) radio.checked = true;
+        else document.querySelector('input[name="provider"][value="kimi"]').checked = true;
+
+        $("api_key").value = data[providerToApiKey(provider)] || "";
+        $("base_url").value = data[providerToBaseUrl(provider)] || "";
+        $("model_name").value = data.KIMI_MODEL_NAME || "";
+        $("temperature").value = data.LLM_TEMPERATURE || "";
+        $("thinking").checked = (data.LLM_THINKING || "").toLowerCase() === "true";
+        $("web_port").value = data.KIMI_WEB_PORT || "5494";
+        $("work_dir").value = data.KIMI_DEFAULT_WORK_DIR || "";
+      } catch (e) {
+        setError("Failed to load settings: " + e);
+      }
+    }
+
+    function providerToApiKey(p) {
+      return p === "openai" ? "OPENAI_API_KEY"
+        : p === "anthropic" ? "ANTHROPIC_API_KEY"
+        : "KIMI_API_KEY";
+    }
+    function providerToBaseUrl(p) {
+      return p === "openai" ? "OPENAI_BASE_URL"
+        : p === "anthropic" ? "ANTHROPIC_BASE_URL"
+        : "KIMI_BASE_URL";
+    }
+
+    // Re-load API key + base URL when the user switches provider so the
+    // displayed values match the selected provider's stored credentials.
+    document.querySelectorAll('input[name="provider"]').forEach((el) => {
+      el.addEventListener("change", load);
+    });
+
+    function gather() {
+      const provider = document.querySelector('input[name="provider"]:checked').value;
+      const updates = {
+        LLM_PROVIDER: provider,
+        KIMI_MODEL_NAME: $("model_name").value.trim(),
+        LLM_TEMPERATURE: $("temperature").value.trim(),
+        LLM_THINKING: $("thinking").checked ? "true" : "false",
+        KIMI_WEB_PORT: $("web_port").value.trim(),
+        KIMI_DEFAULT_WORK_DIR: $("work_dir").value.trim(),
+      };
+      updates[providerToApiKey(provider)] = $("api_key").value;
+      updates[providerToBaseUrl(provider)] = $("base_url").value.trim();
+      return updates;
+    }
+
+    async function save(restart) {
+      setError("");
+      try {
+        await window.pywebview.api.save_env(gather(), !!restart);
+      } catch (e) {
+        setError("Failed to save: " + e);
+      }
+    }
+
+    $("save").addEventListener("click", () => save(false));
+    $("save_restart").addEventListener("click", () => save(true));
+    $("cancel").addEventListener("click", () => window.pywebview.api.cancel());
+    $("pick_work_dir").addEventListener("click", async () => {
+      try {
+        const chosen = await window.pywebview.api.pick_work_dir();
+        if (chosen) $("work_dir").value = chosen;
+      } catch (e) {
+        setError("Folder picker failed: " + e);
+      }
+    });
+
+    window.addEventListener("pywebviewready", load);
+  </script>
+</body>
+</html>

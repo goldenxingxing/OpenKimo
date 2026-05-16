@@ -1,8 +1,11 @@
 # Build artifacts
 .build/
+.cache/
 dist/
+dist-win/
 *.dmg
 *.app
+*.exe
 
 # Generated requirements (recreated by venvstacks lock)
 requirements/
