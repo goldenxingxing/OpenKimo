@@ -119,6 +119,51 @@ export NOTARY_PROFILE="AC_NOTARY"   # set up via `xcrun notarytool store-credent
 python3 build_release.py
 ```
 
+## Windows builds
+
+Windows packaging is driven by `build_windows.py` (parallel to `build.py`)
+and produces a single-file installer (`OpenKimoSetup-<version>.exe`).
+
+```bash
+# Default build (must run on Windows for the .exe + installer steps;
+# on macOS the script stages the layout and skips PyInstaller/Inno Setup).
+python3 build_windows.py
+
+# Layout-only dry run on macOS (useful when iterating on packaging code):
+python3 build_windows.py --skip-installer --skip-frontend
+```
+
+What the pipeline produces:
+
+```
+build/runtime-staging/
+├── OpenKimo.exe                 # PyInstaller launcher (Windows-built)
+├── brand.json                   # runtime brand metadata
+├── TrayIcon.ico
+└── runtime/
+    ├── python/                  # python-build-standalone (CPython)
+    ├── site-packages/           # kimi-cli wheel + pystray/Pillow/pywebview/playwright
+    ├── kimi_cli/kimi_cli/...    # kimi_cli source incl. web/static
+    ├── packaging/{__init__,app_main,app_main_win}/
+    ├── playwright-browsers/     # bundled chromium
+    └── OpenKimo.ico
+
+dist-win/
+└── OpenKimoSetup-<version>.exe  # Inno Setup output
+```
+
+Prerequisites on Windows:
+
+- Python 3.12+ on PATH (for running `build_windows.py` itself).
+- `uv` (`pipx install uv` or the Astral installer) — used to build the
+  kimi-cli wheel.
+- `pyinstaller` (`pip install pyinstaller`) — bundles the thin launcher.
+- [Inno Setup 6](https://jrsoftware.org/isdl.php) — compiles the installer.
+- Node.js LTS (for the frontend build; omit with `--skip-frontend`).
+
+Runtime deps installed into `runtime/site-packages/` are listed in
+`packaging/requirements-windows.txt`.
+
 ## Troubleshooting
 
 - **`venvstacks lock` fails with "no usable wheels"** — usually means a dep
