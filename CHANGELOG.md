@@ -6,13 +6,28 @@ this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [v0.1.4] — 2026-05-16
+
+本版本以"会话定制 + 配置闭环 + HEIC 兼容性收尾"为主线：新增自定义 Agent 启动会话功能，把 macOS Settings 写入 `.env` 后真正同步到 `config.toml`（之前 base_url/api_key 改了没生效），并补齐 HEIC 上传链路上的两处兜底。
+
+### Highlights
+
+- **自定义 Agent — 启动会话时挂载用户 spec**：可以从 `~/.kimi/agents/` 或 `<work_dir>/.kimi/agents/` 加载 YAML spec，精确控制可用工具、skills、MCP 权限、是否注入知识库、系统提示词。Web 新建会话对话框「高级设置」新增 Agent 下拉框；CLI `--agent <name>` 也走同一发现链。详见 `docs/CUSTOM-AGENTS.md`。
+- **Settings 写盘真正生效**：之前在 macOS Settings 窗口里改 provider 的 `base_url` / `api_key` 只更新 `.env`，但 `config.toml` 中已有的 `[providers.X]` / `[models.X]` 表项被 `_build_global_config` 优先吃掉，导致编辑被"静默吞掉"。这版补齐了 `configtoml.update_providers` / `update_models` / `set_default_model`，保存时按 .env 上 LLM_PROVIDERS 重新 upsert 这些表项，保留手写注释和无关字段。
+
+### Added
+
+- **`skills/grounding-dino-seg2`**：基于 Grounding DINO 的图像分割 + 背景替换 skill。
+- **CHANGELOG**：本条目。
+
 ### Fixed
 
 - **新建 session dialog 显示的是 app 目录而非配置的工作目录**：`GET /api/work-dirs/startup` 端点返回 `os.getcwd()`，但 macOS .app bundle 启动 uvicorn 时的 CWD 是 `~/Library/Application Support/OpenKimo`，导致 "Current" 那项指向用户根本不认识的路径。改为优先读 `KIMI_DEFAULT_WORK_DIR`（OpenKimo wrapper 已在导出，且 sessions.py/admin.py 早已用它做新会话默认目录），未设置时回落到原 `os.getcwd()` 路径。CLI 直接 `kimi web` 行为不变。
 - **HEIC/HEIF/AVIF 图片导致对话挂掉**：用户上传 HEIC 图片后，前端把 `data:image/heic;base64,...` 直接发给 LLM，主流 vision 模型（Kimi/OpenAI/Anthropic）一律拒收并把消息留在 conversation history，导致**后续每一轮对话都重发同一张图、每一轮都失败**。子模块改动：
-  - 前端 (`web/`)：新增 `lib/heic.ts`，附件入口（drop / paste / picker）统一通过 `heic2any` 把 HEIC/HEIF 转 JPEG 后再进 attachments，缩略图也能正常预览；转码失败时丢弃文件并 toast 提示。
+  - 前端 (`web/`)：新增 `lib/heic.ts`，附件入口（drop / paste / picker）统一通过 `heic2any` 把 HEIC/HEIF 转 JPEG 后再进 attachments，缩略图也能正常预览；**转码失败时不再丢文件**，把原 HEIC 透传给服务端 fallback。
   - 后端 `tools/file/read_media.py`：注册 `pillow-heif` opener，`ReadMediaFile` 工具命中 HEIC/HEIF/AVIF 时主动转 JPEG (q=90)。
   - 后端 `soul/message.py`：新增 `LLM_SAFE_IMAGE_MIMES` 白名单（jpeg/png/webp/gif）和 `sanitize_image_parts()`，在每次 LLM 调用前清洗一份消息副本，HEIC 转 JPEG 失败则替换为 `[image attachment removed: ...]` 文本占位。**只清洗发出去的副本**，原 history 保留用户上传的原图，UI 不受影响。
+  - 后端 `web/runner/process.py`：上传附件入口同样注册 `pillow_heif` opener（之前只在 `read_media.py` 注册，Web 直传走的是 `process.py` 这条路），并把原先吞掉所有图片编码异常的 bare `except` 改成 `logger.exception`，方便定位失败原因。
 
 ## [v0.1.3] — 2026-05-10
 

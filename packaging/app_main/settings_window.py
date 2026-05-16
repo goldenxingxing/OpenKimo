@@ -519,24 +519,30 @@ class SettingsController(NSWindowController):
             log.exception("failed to write .env")
             self._error(f"Failed to save settings:\n{e}")
             return
-        # Prune stale [models.X] / [providers.X] from config.toml so the
-        # runtime selector matches the UI.
+        # Sync config.toml with what's now in .env: prune stale entries the
+        # user removed, then upsert the surviving ones so edits to
+        # base_url / api_key / type / max_context / capabilities / default
+        # actually take effect (otherwise _build_global_config keeps the
+        # stale toml values).
         providers_json = updates.get("LLM_PROVIDERS", "")
         if providers_json:
             try:
                 from . import configtoml
-                keep_names = {
-                    str(p.get("name", ""))
-                    for p in json.loads(providers_json)
+                parsed = [
+                    p for p in json.loads(providers_json)
                     if isinstance(p, dict) and p.get("name")
-                }
+                ]
+                keep_names = {str(p["name"]) for p in parsed}
+                toml_path = self.paths_ref.sessions_dir / "config.toml"
                 if keep_names:
-                    configtoml.prune(
-                        self.paths_ref.sessions_dir / "config.toml",
-                        keep_names,
+                    configtoml.prune(toml_path, keep_names)
+                    configtoml.update_providers(toml_path, parsed)
+                    configtoml.update_models(toml_path, parsed)
+                    configtoml.set_default_model(
+                        toml_path, updates.get("LLM_DEFAULT_PROVIDER", "")
                     )
             except Exception:
-                log.exception("config.toml prune failed; continuing")
+                log.exception("config.toml sync failed; continuing")
         if self.on_save:
             try:
                 self.on_save(restart)
