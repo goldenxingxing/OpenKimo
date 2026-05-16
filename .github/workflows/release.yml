@@ -122,7 +122,13 @@ jobs:
           cd packaging
           python build.py
 
+      - name: Verify DMG was produced
+        run: |
+          ls -lh dist/*.dmg
+          test -n "$(ls dist/*.dmg 2>/dev/null)" || { echo '::error::No DMG found under dist/'; exit 1; }
+
       - name: Upload DMG to Release
         uses: softprops/action-gh-release@v2
         with:
-          files: packaging/dist/*.dmg
+          files: dist/*.dmg
+          fail_on_unmatched_files: true
