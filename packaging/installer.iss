@@ -11,6 +11,11 @@
 ; (iscc.exe installer.iss) without args — it will fail at [Files] because
 ; StagingDir doesn't exist, but the preprocessor validates first.
 
+#ifndef AppId
+  ; Double braces escape the literal "{" — Inno Setup would otherwise treat
+  ; it as the start of a constant. White-label builds may override via /DAppId=...
+  #define AppId "{{38AF4995-832E-45E5-A517-81A770BF3A69}}"
+#endif
 #ifndef AppName
   #define AppName "OpenKimo"
 #endif
@@ -28,6 +33,7 @@
 #endif
 
 [Setup]
+AppId={#AppId}
 AppName={#AppName}
 AppVersion={#AppVersion}
 AppPublisher=OpenKimo Contributors
