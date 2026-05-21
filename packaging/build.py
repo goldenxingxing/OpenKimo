@@ -28,6 +28,7 @@ import base64
 import datetime as dt
 import json
 import os
+import platform
 import plistlib
 import re
 import shlex
@@ -65,6 +66,7 @@ class BuildConfig:
     brand_name: str
     page_title: str
     output_dir: Path
+    arch: str
     sign_identity: str = "-"  # "-" = ad-hoc
     skip_venv: bool = False
     skip_frontend: bool = False
@@ -124,6 +126,8 @@ def parse_args(argv: list[str]) -> BuildConfig:
                              "already built it manually).")
     parser.add_argument("--dmg-only", action="store_true",
                         help="Re-pack only the DMG from a built .app.")
+    parser.add_argument("--arch", choices=["arm64", "x86_64"], default=platform.machine(),
+                        help="Target CPU architecture (default: host).")
     args = parser.parse_args(argv)
 
     app_name = args.app_name.strip()
@@ -155,6 +159,7 @@ def parse_args(argv: list[str]) -> BuildConfig:
         brand_name=args.brand_name or app_name,
         page_title=args.page_title or app_name,
         output_dir=(ROOT / args.output_dir).resolve(),
+        arch=args.arch,
         sign_identity=args.sign_identity,
         skip_venv=args.skip_venv,
         skip_frontend=args.skip_frontend,
@@ -399,7 +404,7 @@ def compile_launcher(cfg: BuildConfig, output: Path) -> None:
     output.parent.mkdir(parents=True, exist_ok=True)
     run([
         "cc",
-        "-arch", "arm64",
+        "-arch", cfg.arch,
         f"-mmacosx-version-min={cfg.min_macos}",
         "-O2",
         f'-DCPYTHON_PREFIX="cpython-{cfg.py_version}"',
@@ -680,7 +685,7 @@ _LAUNCHER_ENTITLEMENTS = """<?xml version="1.0" encoding="UTF-8"?>
 def create_dmg(cfg: BuildConfig, bundle: Path) -> Path:
     section("Building DMG")
     cfg.output_dir.mkdir(parents=True, exist_ok=True)
-    dmg = cfg.output_dir / f"{cfg.app_name}-{cfg.version}.dmg"
+    dmg = cfg.output_dir / f"{cfg.app_name}-{cfg.version}-{cfg.arch}.dmg"
     if dmg.exists():
         dmg.unlink()
     with tempfile.TemporaryDirectory(prefix="kimi-dmg-") as tmp:
@@ -708,7 +713,11 @@ def main(argv: list[str]) -> int:
     print(f"Bundle ID:  {cfg.bundle_id}")
     print(f"Version:    {cfg.version} ({cfg.build_number})")
     print(f"Python:     {cfg.py_version}")
+    print(f"Arch:       {cfg.arch}")
     print(f"Output:     {cfg.output_dir}")
+
+    if cfg.arch != platform.machine():
+        print(f"!! Warning: --arch {cfg.arch} differs from host {platform.machine()}; venvstacks layers will follow the host platform and the resulting app likely won't run on the target arch.", file=sys.stderr)
 
     if cfg.dmg_only:
         bundle = cfg.output_dir / f"{cfg.app_name}.app"

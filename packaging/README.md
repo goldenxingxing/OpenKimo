@@ -6,7 +6,7 @@ without requiring the user to install Python, Node, or any other runtime.
 ## Prerequisites
 
 - macOS 14.0+ (Sonoma or later)
-- Apple Silicon (arm64) — Universal builds are out of scope for now
+- macOS host matching target architecture: Apple Silicon (arm64) for arm64 DMG, Intel (x86_64) for x86_64 DMG. Cross-compiling from arm64 host to x86_64 wheels is not supported.
 - Xcode Command Line Tools (`xcode-select --install`) — for `cc`, `codesign`, `hdiutil`, `iconutil`, `sips`
 - [`uv`](https://github.com/astral-sh/uv) (`brew install uv`) — workspace-aware Python build; `uvx` runs `venvstacks` in isolation
 
@@ -23,6 +23,9 @@ python3 build.py --skip-venv
 
 # Just rebuild the DMG from an existing .app
 python3 build.py --dmg-only
+
+# Build for Intel x86_64 (must run on an Intel Mac)
+python3 build.py --arch x86_64
 ```
 
 Output:
@@ -30,7 +33,7 @@ Output:
 ```
 dist/
 ├── OpenKimo.app
-└── OpenKimo-<version>.dmg
+└── OpenKimo-<version>-<arch>.dmg    # arch = arm64 or x86_64
 ```
 
 ## White-Label / OEM builds
@@ -163,6 +166,8 @@ Prerequisites on Windows:
 
 Runtime deps installed into `runtime/site-packages/` are listed in
 `packaging/requirements-windows.txt`.
+
+On tag push, CI builds all three artifacts in parallel — macOS arm64 DMG, macOS x86_64 DMG, and Windows x64 installer .exe — and uploads them to the GitHub Release. See `.github/workflows/release.yml`.
 
 ## Troubleshooting
 

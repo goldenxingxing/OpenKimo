@@ -17,6 +17,7 @@ import os
 import signal
 import socket
 import subprocess
+import sys
 import threading
 import time
 from enum import Enum
@@ -32,6 +33,19 @@ MAX_AUTO_RESTARTS = 3
 GRACEFUL_KILL_TIMEOUT = 5.0
 HEALTHCHECK_DEADLINE = 30.0
 EXIT_CODE_RESTART = 3
+
+# Windows graceful-shutdown plumbing. On POSIX the supervisor uses
+# `start_new_session=True` so the uvicorn child has its own process group
+# and signals don't fan out to siblings. On Windows that kwarg is a no-op;
+# the equivalent is the CREATE_NEW_PROCESS_GROUP creation flag, which lets
+# us send CTRL_BREAK_EVENT to the child (and only the child) at shutdown.
+_IS_WINDOWS = sys.platform == "win32"
+if _IS_WINDOWS:
+    _POPEN_NEW_GROUP_KWARGS: dict = {
+        "creationflags": subprocess.CREATE_NEW_PROCESS_GROUP,
+    }
+else:
+    _POPEN_NEW_GROUP_KWARGS = {"start_new_session": True}
 
 # Uvicorn ships a default LOGGING_CONFIG without timestamps. Inject one with
 # ISO-style timestamps in both default and access formatters; written to a
@@ -267,7 +281,7 @@ class UvicornSupervisor:
         with self._lock:
             self._explicit_stop = False
             if self._proc and self._proc.poll() is None:
-                self._proc.terminate()
+                self._send_graceful_signal(self._proc)
 
     def shutdown(self) -> None:
         """Final teardown on app quit."""
@@ -316,7 +330,7 @@ class UvicornSupervisor:
             stdout=log_fp,
             stderr=subprocess.STDOUT,
             cwd=str(self.paths.app_support),
-            start_new_session=True,
+            **_POPEN_NEW_GROUP_KWARGS,
         )
         self._healthcheck_deadline = time.monotonic() + HEALTHCHECK_DEADLINE
         self._set_state(ServerState.STARTING)
@@ -329,16 +343,42 @@ class UvicornSupervisor:
             self._proc = None
             return
         try:
-            self._proc.terminate()
+            self._send_graceful_signal(self._proc)
             self._proc.wait(timeout=GRACEFUL_KILL_TIMEOUT)
         except subprocess.TimeoutExpired:
-            self._proc.kill()
+            # Forced kill: terminate() on POSIX is SIGTERM (already sent), so
+            # escalate to kill() (SIGKILL); on Windows terminate() is itself
+            # TerminateProcess() — hard kill — which is the right escalation
+            # after CTRL_BREAK_EVENT was ignored.
+            if _IS_WINDOWS:
+                self._proc.terminate()
+            else:
+                self._proc.kill()
             try:
                 self._proc.wait(timeout=2)
             except subprocess.TimeoutExpired:
                 pass
         finally:
             self._proc = None
+
+    @staticmethod
+    def _send_graceful_signal(proc: subprocess.Popen) -> None:
+        """Politely ask the child to shut down.
+
+        POSIX: SIGTERM via Popen.terminate() — unchanged from prior behavior.
+        Windows: CTRL_BREAK_EVENT, which uvicorn handles like SIGINT and
+        which only reaches the child because we spawned it with
+        CREATE_NEW_PROCESS_GROUP.
+        """
+        if _IS_WINDOWS:
+            try:
+                proc.send_signal(signal.CTRL_BREAK_EVENT)
+            except (OSError, ValueError):
+                # Process already gone or signal not supported on this build —
+                # fall back to TerminateProcess so we don't leave it running.
+                proc.terminate()
+        else:
+            proc.terminate()
 
     def _ensure_watcher(self) -> None:
         if self._watcher and self._watcher.is_alive():

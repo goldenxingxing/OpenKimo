@@ -617,6 +617,12 @@ def main() -> int:
         return 1
 
     env = os.environ.copy()
+    # runtime/ first so our packaging shim (runtime/packaging/, providing
+    # packaging.app_main_win) wins the top-level `packaging` name. If any
+    # future dep ever lands a PyPI `packaging/` in site-packages, this
+    # ordering keeps the launcher importable. The shim has no other
+    # top-level collisions with site-packages today, so site-packages
+    # comes second.
     pythonpath_parts = [str(runtime), str(runtime / "site-packages")]
     if env.get("PYTHONPATH"):
         pythonpath_parts.append(env["PYTHONPATH"])
@@ -691,6 +697,15 @@ def build_launcher_exe(
         "--distpath", str(pyinst_dist),
         "--workpath", str(pyinst_work),
         "--specpath", str(pyinst_spec),
+        # The launcher is a thin script; PyInstaller's static analysis won't
+        # follow transitive imports done by the spawned pythonw runtime
+        # (pystray, PIL, packaging shim). Pin them explicitly so the frozen
+        # .exe doesn't ModuleNotFoundError on first run.
+        "--hidden-import", "pystray",
+        "--hidden-import", "pystray._win32",
+        "--hidden-import", "PIL.Image",
+        "--hidden-import", "PIL.ImageDraw",
+        "--collect-submodules", "pystray",
     ]
     if icon_ico.exists():
         cmd += ["--icon", str(icon_ico)]
@@ -729,8 +744,14 @@ def run_inno_setup(
     staging: Path,
     icon_ico: Path,
     iss_path: Path,
+    extra_defines: dict[str, str] | None = None,
 ) -> Path | None:
     """Compile installer.iss into the final .exe installer.
+
+    ``extra_defines`` lets callers pass additional ``/D<name>=<value>``
+    preprocessor defines to iscc — e.g. ``{"AppId": "{{...}}"}`` for
+    white-label rebuilds. When omitted, the script's ``#ifndef`` defaults
+    apply (including the hardcoded OpenKimo AppId GUID).
 
     Returns the produced installer path, or None on skip/failure.
     """
@@ -756,8 +777,11 @@ def run_inno_setup(
         f"/DStagingDir={staging}",
         f"/DIconFile={icon_ico}",
         f"/DOutputDir={cfg.output_dir}",
-        str(iss_path),
     ]
+    if extra_defines:
+        for name, value in extra_defines.items():
+            cmd.append(f"/D{name}={value}")
+    cmd.append(str(iss_path))
     rc = run_ok(cmd)
     if rc != 0:
         print(f"  ! iscc returned {rc}.")

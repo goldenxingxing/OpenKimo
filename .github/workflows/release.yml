@@ -113,14 +113,14 @@ jobs:
           path: |
             packaging/.build
             packaging/wheels
-          key: ${{ runner.os }}-venvstacks-${{ hashFiles('packaging/venvstacks.toml', 'packaging/venvstacks.resolved.toml') }}
+          key: ${{ runner.os }}-${{ runner.arch }}-venvstacks-${{ hashFiles('packaging/venvstacks.toml', 'packaging/venvstacks.resolved.toml') }}
           restore-keys: |
-            ${{ runner.os }}-venvstacks-
+            ${{ runner.os }}-${{ runner.arch }}-venvstacks-
 
       - name: Build .app + DMG
         run: |
           cd packaging
-          python build.py
+          python build.py --version "${GITHUB_REF_NAME#v}"
 
       - name: Verify DMG was produced
         run: |
@@ -131,4 +131,109 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           files: dist/*.dmg
+          fail_on_unmatched_files: true
+
+  build-macos-intel:
+    name: Build macOS .app DMG (Intel x86_64)
+    runs-on: macos-13   # last Intel runner from GitHub Actions
+    permissions:
+      contents: write       # upload release assets
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install build dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install venvstacks uv
+
+      - name: Cache venvstacks layers
+        uses: actions/cache@v4
+        with:
+          path: |
+            packaging/.build
+            packaging/wheels
+          key: ${{ runner.os }}-${{ runner.arch }}-venvstacks-${{ hashFiles('packaging/venvstacks.toml', 'packaging/venvstacks.resolved.toml') }}
+          restore-keys: |
+            ${{ runner.os }}-${{ runner.arch }}-venvstacks-
+
+      - name: Build .app + DMG
+        run: |
+          cd packaging
+          python build.py --arch x86_64 --version "${GITHUB_REF_NAME#v}"
+
+      - name: Verify DMG was produced
+        run: |
+          ls -lh dist/*.dmg
+          test -n "$(ls dist/*.dmg 2>/dev/null)" || { echo '::error::No DMG found under dist/'; exit 1; }
+
+      - name: Upload DMG to Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*.dmg
+          fail_on_unmatched_files: true
+
+  build-windows:
+    name: Build Windows x64 installer
+    runs-on: windows-latest
+    permissions:
+      contents: write
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Set up Node.js LTS
+        uses: actions/setup-node@v4
+        with:
+          node-version: 'lts/*'
+
+      - name: Install build dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install uv pyinstaller
+
+      - name: Cache packaging artifacts
+        uses: actions/cache@v4
+        with:
+          path: |
+            packaging/.cache
+            build/runtime-staging
+          key: ${{ runner.os }}-${{ runner.arch }}-winpkg-${{ hashFiles('packaging/requirements-windows.txt', 'packaging/build_windows.py') }}
+          restore-keys: |
+            ${{ runner.os }}-${{ runner.arch }}-winpkg-
+
+      - name: Build installer .exe
+        shell: pwsh
+        run: |
+          $version = $env:GITHUB_REF_NAME -replace '^v',''
+          cd packaging
+          python build_windows.py --version $version
+
+      - name: Verify installer was produced
+        shell: pwsh
+        run: |
+          Get-ChildItem dist-win/*.exe
+          if (-not (Get-ChildItem dist-win/*.exe -ErrorAction SilentlyContinue)) {
+            Write-Error "No .exe found under dist-win/"
+            exit 1
+          }
+
+      - name: Upload installer to Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist-win/*.exe
           fail_on_unmatched_files: true

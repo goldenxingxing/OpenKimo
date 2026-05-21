@@ -23,7 +23,7 @@
 //      turn appends every layer's site-packages to sys.path.
 //
 // build.py compiles this with:
-//   cc -arch arm64 -mmacosx-version-min=14.0 -O2 \
+//   cc -arch <arch> -mmacosx-version-min=14.0 -O2 \
 //      -DCPYTHON_PREFIX='"cpython-3.12"' \
 //      -o "<bundle>/Contents/MacOS/<AppName>" launcher.c
 
