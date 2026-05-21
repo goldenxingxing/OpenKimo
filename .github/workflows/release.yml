@@ -185,6 +185,11 @@ jobs:
     runs-on: windows-latest
     permissions:
       contents: write
+    env:
+      # build_windows.py prints box-drawing chars and © via Python's default
+      # stdout encoding, which is cp1252 on Windows and rejects non-ASCII.
+      PYTHONIOENCODING: utf-8
+      PYTHONUTF8: '1'
 
     steps:
       - uses: actions/checkout@v4
