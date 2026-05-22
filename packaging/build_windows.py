@@ -191,14 +191,25 @@ def parse_args(argv: list[str]) -> BuildConfig:
 
 # ---- shell helpers --------------------------------------------------------
 
+def _resolve_cmd(cmd: list[str]) -> list[str]:
+    # Windows CreateProcess does not consult PATHEXT, so bare names like
+    # "npm" fail to launch the actual "npm.cmd" shim that setup-node installs.
+    # shutil.which walks PATHEXT, so resolving cmd[0] up front lets us invoke
+    # .cmd/.bat shims (npm, npx) and plain .exe binaries (uv) uniformly.
+    if sys.platform != "win32" or not cmd:
+        return cmd
+    resolved = shutil.which(cmd[0])
+    return [resolved, *cmd[1:]] if resolved else cmd
+
+
 def run(cmd: list[str], **kwargs) -> None:
     print(f"$ {shlex.join(cmd)}", flush=True)
-    subprocess.run(cmd, check=True, **kwargs)
+    subprocess.run(_resolve_cmd(cmd), check=True, **kwargs)
 
 
 def run_ok(cmd: list[str], **kwargs) -> int:
     print(f"$ {shlex.join(cmd)}", flush=True)
-    return subprocess.run(cmd, check=False, **kwargs).returncode
+    return subprocess.run(_resolve_cmd(cmd), check=False, **kwargs).returncode
 
 
 def section(title: str) -> None:
