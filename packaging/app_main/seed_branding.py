@@ -1,13 +1,14 @@
-"""Seed Web UI branding (logo / brand_name / favicon) on first launch.
+"""Seed Web UI branding (logo / brand_name / version / …) from the bundle.
 
-The build step embeds an optional ``branding_seed`` block inside
-``Resources/brand.json``. On first launch — when the ``branding`` SQLite
-table is still empty — we copy that seed into the DB so the user opens
-the browser to a pre-branded UI.
+The build step embeds a ``branding_seed`` block inside
+``Resources/brand.json``. On every launch we reconcile per-field:
 
-Once any branding row exists (either from the seed or from later admin
-edits), we leave the table alone. That way upgrading the .app never
-clobbers customisations the user made through the admin panel.
+* User-facing fields (``brand_name``, ``logo``, ``page_title``, ``favicon``)
+  are seeded only when the DB row is empty, so admin-panel customisations
+  survive upgrades.
+* Build-derived fields (``version``) are re-synced to the packaged value
+  every launch, so upgrading the .app refreshes the displayed version and
+  installs that predate a field get it populated retroactively.
 """
 
 from __future__ import annotations
@@ -23,6 +24,12 @@ from .paths import AppPaths
 log = logging.getLogger(__name__)
 
 _BRANDING_FIELDS = ("brand_name", "version", "page_title", "logo", "favicon")
+
+# Build-derived fields the user cannot meaningfully customise via the admin
+# panel. We re-sync these to the packaged value on every launch so upgrading
+# the .app updates the displayed version, and so installs that predate the
+# field (e.g. <= v0.1.5) get it populated retroactively.
+_BUILD_DERIVED_FIELDS = ("version",)
 
 
 def _ensure_kimi_cli_on_path(p: AppPaths) -> None:
@@ -65,10 +72,18 @@ def seed_if_needed(p: AppPaths) -> None:
         init_db()
         with get_db() as db:
             existing = get_branding(db)
-            if any(v for v in existing.values()):
+            to_write: dict[str, str] = {}
+            for key, value in seed.items():
+                current = existing.get(key)
+                if key in _BUILD_DERIVED_FIELDS:
+                    if current != value:
+                        to_write[key] = value
+                elif not current:
+                    to_write[key] = value
+            if not to_write:
                 return
-            upsert_branding(db, seed)
-            log.info("seeded branding from brand.json (%s)", ", ".join(seed))
+            upsert_branding(db, to_write)
+            log.info("seeded branding from brand.json (%s)", ", ".join(to_write))
     except Exception:
         log.exception("branding seed failed")
 
