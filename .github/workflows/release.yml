@@ -209,7 +209,19 @@ jobs:
       - name: Install build dependencies
         run: |
           python -m pip install --upgrade pip
-          python -m pip install uv pyinstaller
+          # uv: build kimi-cli wheel
+          # pyinstaller: freeze the launcher .exe
+          # pillow: generate_ico converts packaging/icon.png -> .ico (host-side)
+          # pystray: required by pyinstaller's --collect-submodules pystray for
+          # the launcher build; without it PyInstaller errors out.
+          python -m pip install uv pyinstaller pillow pystray
+
+      - name: Install Inno Setup
+        shell: pwsh
+        # The build script's find_iscc() searches PATH then falls back to
+        # "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" — exactly where the
+        # chocolatey package lands. windows-latest ships choco preinstalled.
+        run: choco install innosetup --no-progress -y
 
       - name: Cache packaging artifacts
         uses: actions/cache@v4
