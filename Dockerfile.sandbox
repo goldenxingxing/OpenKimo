@@ -82,10 +82,10 @@ COPY app/ /app/
 COPY kimi-cli/src/ /usr/local/lib/python3.12/site-packages/
 
 # Register kimi-cli package metadata so importlib.metadata works
-RUN mkdir -p /usr/local/lib/python3.12/site-packages/kimi_cli-1.39.0.dist-info \
-    && printf 'Name: kimi-cli\nVersion: 1.37.0\n' > /usr/local/lib/python3.12/site-packages/kimi_cli-1.39.0.dist-info/METADATA \
-    && touch /usr/local/lib/python3.12/site-packages/kimi_cli-1.39.0.dist-info/INSTALLER \
-    && touch /usr/local/lib/python3.12/site-packages/kimi_cli-1.39.0.dist-info/RECORD
+RUN mkdir -p /usr/local/lib/python3.12/site-packages/kimi_cli-1.49.0.dist-info \
+    && printf 'Name: kimi-cli\nVersion: 1.49.0\n' > /usr/local/lib/python3.12/site-packages/kimi_cli-1.49.0.dist-info/METADATA \
+    && touch /usr/local/lib/python3.12/site-packages/kimi_cli-1.49.0.dist-info/INSTALLER \
+    && touch /usr/local/lib/python3.12/site-packages/kimi_cli-1.49.0.dist-info/RECORD
 
 # 创建必要的目录
 RUN mkdir -p /app/data/chrome_data /app/logs /tmp/chromium_user_data
