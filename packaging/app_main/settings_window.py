@@ -62,7 +62,7 @@ _PROVIDER_TYPES: tuple[str, ...] = ("kimi", "openai_legacy", "anthropic")
 
 # Default max context used when the user leaves the field blank (matches the
 # placeholder shown in the Settings UI and kimi-cli's documented default).
-_DEFAULT_MAX_CONTEXT: int = 262144
+_DEFAULT_MAX_CONTEXT: int = 1000000
 
 # Capability flags exposed under each row's "Advanced" disclosure.
 _CAPABILITIES: tuple[str, ...] = (
@@ -448,7 +448,7 @@ def _legacy_entries(values: dict[str, str]) -> list[dict[str, Any]]:
             "api_key": values.get("KIMI_API_KEY", ""),
             "base_url": values.get("KIMI_BASE_URL", "") or "https://api.moonshot.cn/v1",
             "model": values.get("KIMI_MODEL_NAME", "") or "kimi-k2",
-            "max_context_size": int(values.get("KIMI_MODEL_MAX_CONTEXT_SIZE") or 262144),
+            "max_context_size": int(values.get("KIMI_MODEL_MAX_CONTEXT_SIZE") or 1000000),
         })
     if values.get("OPENAI_API_KEY"):
         out.append({
@@ -822,7 +822,7 @@ def _build_provider_row(controller, entry: dict[str, Any] | None = None) -> _Pro
     max_ctx_val = entry.get("max_context_size", "")
     max_context = _text(
         str(max_ctx_val) if max_ctx_val else "",
-        placeholder="262144",
+        placeholder="1000000",
     )
 
     fr_name = _form_row(_label("Name"), name_field)
