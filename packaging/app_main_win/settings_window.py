@@ -79,6 +79,23 @@ class Api:
                 continue
             clean[k] = "" if v is None else str(v)
 
+        # LLM settings only reach a session worker when it (re)starts, so a
+        # plain Save would leave every live session on the old provider
+        # config indefinitely. Promote to restart when an LLM key changed.
+        if not restart:
+            try:
+                current = dotenv_io.read_env(self.paths.env_file)
+                restart = any(
+                    (clean.get(k) or "") != (current.get(k) or "")
+                    for k in clean
+                    if k.startswith(("LLM_", "KIMI_API", "KIMI_BASE", "KIMI_MODEL",
+                                     "OPENAI_", "ANTHROPIC_"))
+                )
+                if restart:
+                    log.info("LLM config changed; promoting Save to Save & Restart")
+            except Exception:
+                log.exception("failed to diff LLM keys; leaving restart flag as-is")
+
         try:
             dotenv_io.write_env(self.paths.env_file, clean)
         except Exception as e:

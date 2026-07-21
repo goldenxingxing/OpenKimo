@@ -513,6 +513,22 @@ class SettingsController(NSWindowController):
         except ValueError as e:
             self._error(str(e))
             return
+        # LLM settings only reach a session worker when it (re)starts, so a
+        # plain Save would leave every live session on the old provider
+        # config indefinitely. Promote to restart when an LLM key changed.
+        if not restart:
+            try:
+                current = dotenv_io.read_env(self.paths_ref.env_file)
+                llm_keys = ("LLM_PROVIDERS", "LLM_DEFAULT_PROVIDER", *_LEGACY_LLM_KEYS)
+                restart = any(
+                    (updates.get(k) or "") != (current.get(k) or "")
+                    for k in llm_keys
+                    if k in updates
+                )
+                if restart:
+                    log.info("LLM config changed; promoting Save to Save & Restart")
+            except Exception:
+                log.exception("failed to diff LLM keys; leaving restart flag as-is")
         try:
             dotenv_io.write_env(self.paths_ref.env_file, updates)
         except Exception as e:
