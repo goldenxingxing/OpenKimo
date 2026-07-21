@@ -135,7 +135,7 @@ jobs:
 
   build-macos-intel:
     name: Build macOS .app DMG (Intel x86_64)
-    runs-on: macos-13   # last Intel runner from GitHub Actions
+    runs-on: macos-15-intel   # current Intel runner from GitHub Actions (macos-13 retired)
     permissions:
       contents: write       # upload release assets
 
