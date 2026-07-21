@@ -634,7 +634,19 @@ def main() -> int:
     # ordering keeps the launcher importable. The shim has no other
     # top-level collisions with site-packages today, so site-packages
     # comes second.
-    pythonpath_parts = [str(runtime), str(runtime / "site-packages")]
+    # pywin32 (needed by mcp on Windows) normally relies on pywin32.pth to
+    # expose win32/, win32/lib/ and Pythonwin/; .pth files are processed
+    # only for real site dirs, never for PYTHONPATH entries, so list those
+    # directories explicitly. pywintypes locates its DLLs by scanning
+    # sys.path for pywin32_system32/, which resolves via site-packages.
+    sp = runtime / "site-packages"
+    pythonpath_parts = [
+        str(runtime),
+        str(sp),
+        str(sp / "win32"),
+        str(sp / "win32" / "lib"),
+        str(sp / "Pythonwin"),
+    ]
     if env.get("PYTHONPATH"):
         pythonpath_parts.append(env["PYTHONPATH"])
     env["PYTHONPATH"] = os.pathsep.join(pythonpath_parts)
