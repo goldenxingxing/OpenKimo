@@ -61,6 +61,7 @@ class GiteeReleaseTargetTests(unittest.TestCase):
         self.assertEqual(api.calls[-1].method, "POST")
         self.assertEqual(api.calls[-1].path, "/repos/qunwei/OpenKimo/releases")
         self.assertEqual(api.calls[-1].fields["tag_name"], "v0.1.19")
+        self.assertEqual(api.calls[-1].fields["target_commitish"], "main")
 
     def test_updates_release_when_tag_exists(self):
         api = FakeApi([{"id": 7}, {"id": 7}])
