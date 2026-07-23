@@ -15,7 +15,7 @@
 - `GITEE_RSA_PRIVATE_KEY` is used only for Git mirroring.
 - `GITEE_ACCESS_TOKEN` is used only for Gitee Release API calls.
 - Gitee synchronization failure must not alter the result or artifacts of the GitHub `Release` workflow.
-- Release synchronization must be idempotent and enumerate all attachments instead of hard-coding platform filenames.
+- Release synchronization must be idempotent, enumerate all attachments instead of hard-coding platform filenames, and publish GitHub direct-download links because Gitee community attachments are limited to 100 MB per file.
 - Existing `v*` releases must be manually synchronizable without rebuilding platform packages.
 - No secret value may be logged or committed.
 

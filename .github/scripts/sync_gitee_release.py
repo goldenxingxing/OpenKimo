@@ -7,7 +7,6 @@ import argparse
 import json
 import mimetypes
 import os
-import tempfile
 import time
 import urllib.error
 import urllib.parse
@@ -22,6 +21,8 @@ from typing import Any, Callable
 class Asset:
     name: str
     url: str
+    download_url: str = ""
+    size: int = 0
 
 
 @dataclass(frozen=True)
@@ -31,6 +32,17 @@ class Release:
     body: str
     assets: list[Asset]
     target_commitish: str = "main"
+
+    def body_with_downloads(self) -> str:
+        if not self.assets:
+            return self.body
+        lines = ["## 安装包下载", ""]
+        for asset in self.assets:
+            download_url = asset.download_url or asset.url
+            size = f"（{asset.size / 1024 / 1024:.1f} MiB）" if asset.size else ""
+            lines.append(f"- [{asset.name}]({download_url}) {size}".rstrip())
+        sections = [self.body.rstrip(), "\n".join(lines)]
+        return "\n\n".join(section for section in sections if section)
 
 
 class ApiError(RuntimeError):
@@ -184,7 +196,12 @@ class GitHubReleaseSource:
             name=payload.get("name") or payload["tag_name"],
             body=payload.get("body") or "",
             assets=[
-                Asset(asset["name"], asset["url"])
+                Asset(
+                    asset["name"],
+                    asset["url"],
+                    asset.get("browser_download_url") or asset["url"],
+                    int(asset.get("size") or 0),
+                )
                 for asset in payload.get("assets", [])
             ],
             target_commitish=payload.get("target_commitish") or "main",
@@ -218,7 +235,7 @@ class GiteeReleaseTarget:
         fields = {
             "tag_name": release.tag,
             "name": release.name,
-            "body": release.body,
+            "body": release.body_with_downloads(),
             "prerelease": "false",
         }
         if existing is None:
@@ -246,17 +263,8 @@ class GiteeReleaseTarget:
                 )
         self.api.upload(attachments_path, fields={}, file_path=file_path)
 
-    def sync(
-        self,
-        release: Release,
-        source: GitHubReleaseSource,
-        directory: Path,
-    ) -> None:
-        release_id = self.sync_metadata(release)
-        for asset in release.assets:
-            destination = directory / asset.name
-            source.download_asset(asset, destination)
-            self.replace_asset(release_id, asset, destination)
+    def sync(self, release: Release) -> None:
+        self.sync_metadata(release)
 
 
 def parse_repository(value: str, variable_name: str) -> tuple[str, str]:
@@ -302,11 +310,10 @@ def main() -> None:
     target = GiteeReleaseTarget(gitee_api, gitee_owner, gitee_repository)
     release = source.get_release(arguments.tag)
 
-    with tempfile.TemporaryDirectory(prefix="openkimo-gitee-release-") as directory:
-        target.sync(release, source, Path(directory))
+    target.sync(release)
 
     print(
-        f"Synchronized {release.tag} with {len(release.assets)} attachment(s) to Gitee"
+        f"Synchronized {release.tag} with {len(release.assets)} download link(s) to Gitee"
     )
 
 

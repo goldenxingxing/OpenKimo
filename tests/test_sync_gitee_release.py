@@ -49,6 +49,30 @@ class FakeApi:
 
 
 class GiteeReleaseTargetTests(unittest.TestCase):
+    def test_release_body_contains_direct_download_links(self):
+        release = sync.Release(
+            tag="v0.1.19",
+            name="v0.1.19",
+            body="release notes",
+            assets=[
+                sync.Asset(
+                    "OpenKimo.dmg",
+                    "https://api.github.invalid/asset/1",
+                    "https://github.com/example/OpenKimo.dmg",
+                    257_396_137,
+                )
+            ],
+        )
+
+        body = release.body_with_downloads()
+
+        self.assertIn("release notes", body)
+        self.assertIn("## 安装包下载", body)
+        self.assertIn(
+            "[OpenKimo.dmg](https://github.com/example/OpenKimo.dmg)", body
+        )
+        self.assertIn("245.5 MiB", body)
+
     def test_creates_release_when_tag_is_absent(self):
         api = FakeApi([sync.ApiError(404, "request failed with HTTP 404"), {"id": 7}])
         target = sync.GiteeReleaseTarget(api, "qunwei", "OpenKimo")
@@ -81,6 +105,27 @@ class GiteeReleaseTargetTests(unittest.TestCase):
         self.assertEqual(
             api.calls[-1].path, "/repos/qunwei/OpenKimo/releases/7"
         )
+
+    def test_sync_does_not_upload_release_assets(self):
+        api = FakeApi([{"id": 7}, {"id": 7}])
+        target = sync.GiteeReleaseTarget(api, "qunwei", "OpenKimo")
+        release = sync.Release(
+            tag="v0.1.19",
+            name="v0.1.19",
+            body="notes",
+            assets=[
+                sync.Asset(
+                    "OpenKimo.dmg",
+                    "https://api.github.invalid/asset/1",
+                    "https://github.com/example/OpenKimo.dmg",
+                    257_396_137,
+                )
+            ],
+        )
+
+        target.sync(release)
+
+        self.assertEqual([call.method for call in api.calls], ["GET", "PATCH"])
 
     def test_replaces_same_named_asset_and_keeps_other_assets(self):
         existing = [
