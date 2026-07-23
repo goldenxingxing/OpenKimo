@@ -1,17 +1,50 @@
 name: Sync to Gitee
+
 on:
- push:
-   branches: [ main ]
+  push:
+    branches: [main]
+    tags:
+      - 'v*'
+  delete:
+  workflow_run:
+    workflows: [Release]
+    types: [completed]
+
 jobs:
- sync:
-   runs-on: ubuntu-latest
-   steps:
-     - uses: actions/checkout@v4
-       with:
-         fetch-depth: 0
-     - uses: wearerequired/git-mirror-action@v1
-       env:
-         SSH_PRIVATE_KEY: ${{ secrets.GITEE_RSA_PRIVATE_KEY }}
-       with:
-         source-repo: git@github.com:goldenxingxing/OpenKimo.git
-         destination-repo: git@gitee.com:qunwei/OpenKimo.git
+  mirror:
+    if: github.event_name == 'push' || github.event_name == 'delete'
+    concurrency:
+      group: gitee-git-mirror
+      cancel-in-progress: false
+    runs-on: ubuntu-latest
+    steps:
+      - uses: wearerequired/git-mirror-action@v1
+        env:
+          SSH_PRIVATE_KEY: ${{ secrets.GITEE_RSA_PRIVATE_KEY }}
+        with:
+          source-repo: git@github.com:goldenxingxing/OpenKimo.git
+          destination-repo: git@gitee.com:qunwei/OpenKimo.git
+
+  sync-release:
+    if: >-
+      github.event_name == 'workflow_run' &&
+      github.event.workflow_run.conclusion == 'success' &&
+      startsWith(github.event.workflow_run.head_branch, 'v')
+    concurrency:
+      group: gitee-release-${{ github.event.workflow_run.head_branch }}
+      cancel-in-progress: false
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
+      - name: Synchronize Gitee Release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITEE_ACCESS_TOKEN: ${{ secrets.GITEE_ACCESS_TOKEN }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          GITEE_REPOSITORY: qunwei/OpenKimo
+          RELEASE_TAG: ${{ github.event.workflow_run.head_branch }}
+        run: python3 .github/scripts/sync_gitee_release.py --tag "$RELEASE_TAG"
