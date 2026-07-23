@@ -48,6 +48,14 @@ class SyncToGiteeWorkflowTests(unittest.TestCase):
         self.assertIn("${{ secrets.GITEE_ACCESS_TOKEN }}", text)
         self.assertNotRegex(text, r"\b(?:ghp_|gitee_)[A-Za-z0-9_-]{20,}")
 
+    def test_public_github_source_does_not_require_the_gitee_ssh_key(self):
+        text = WORKFLOW.read_text()
+
+        self.assertIn(
+            "source-repo: https://github.com/goldenxingxing/OpenKimo.git",
+            text,
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

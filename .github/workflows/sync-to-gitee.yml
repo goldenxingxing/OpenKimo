@@ -22,7 +22,7 @@ jobs:
         env:
           SSH_PRIVATE_KEY: ${{ secrets.GITEE_RSA_PRIVATE_KEY }}
         with:
-          source-repo: git@github.com:goldenxingxing/OpenKimo.git
+          source-repo: https://github.com/goldenxingxing/OpenKimo.git
           destination-repo: git@gitee.com:qunwei/OpenKimo.git
 
   sync-release:
