@@ -44,7 +44,6 @@ class SyncToGiteeWorkflowTests(unittest.TestCase):
     def test_workflow_references_secrets_without_literal_values(self):
         text = WORKFLOW.read_text()
 
-        self.assertIn("${{ secrets.GITEE_RSA_PRIVATE_KEY }}", text)
         self.assertIn("${{ secrets.GITEE_ACCESS_TOKEN }}", text)
         self.assertNotRegex(text, r"\b(?:ghp_|gitee_)[A-Za-z0-9_-]{20,}")
 
@@ -52,9 +51,23 @@ class SyncToGiteeWorkflowTests(unittest.TestCase):
         text = WORKFLOW.read_text()
 
         self.assertIn(
-            "source-repo: https://github.com/goldenxingxing/OpenKimo.git",
+            "git clone --mirror https://github.com/goldenxingxing/OpenKimo.git",
             text,
         )
+
+    def test_git_mirror_uses_gitee_token_over_https(self):
+        text = WORKFLOW.read_text()
+
+        self.assertIn(
+            "GITEE_ACCESS_TOKEN: ${{ secrets.GITEE_ACCESS_TOKEN }}", text
+        )
+        self.assertIn(
+            "https://gitee.com/qunwei/OpenKimo.git",
+            text,
+        )
+        self.assertIn("git push --mirror", text)
+        self.assertNotIn("GITEE_RSA_PRIVATE_KEY", text)
+        self.assertNotIn("wearerequired/git-mirror-action", text)
 
 
 if __name__ == "__main__":
