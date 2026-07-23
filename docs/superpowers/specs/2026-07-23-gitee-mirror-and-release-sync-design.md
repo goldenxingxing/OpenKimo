@@ -29,6 +29,8 @@ Git 镜像在以下事件发生时运行：
 
 Release 同步由 `workflow_run` 监听名为 `Release` 的 GitHub workflow。只有上游运行结论为 `success`，且关联 ref 是 `v*` 标签时才运行。这样可以确保所有平台构建和附件上传都已结束。
 
+工作流同时提供 `workflow_dispatch` 手动入口，接受一个已有的 `v*` 标签。手动同步直接读取 GitHub 上已经存在的 Release 和附件，不运行任何平台构建，用于补同步旧版本或重试失败的 Gitee 发布。
+
 为 Git 镜像和 Release 同步分别设置并发组，避免多个运行同时修改 Gitee 仓库或同一发行版。新运行不主动取消已开始的发布同步。
 
 ## 凭据

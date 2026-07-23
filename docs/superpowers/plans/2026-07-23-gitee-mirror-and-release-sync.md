@@ -16,6 +16,7 @@
 - `GITEE_ACCESS_TOKEN` is used only for Gitee Release API calls.
 - Gitee synchronization failure must not alter the result or artifacts of the GitHub `Release` workflow.
 - Release synchronization must be idempotent and enumerate all attachments instead of hard-coding platform filenames.
+- Existing `v*` releases must be manually synchronizable without rebuilding platform packages.
 - No secret value may be logged or committed.
 
 ---
