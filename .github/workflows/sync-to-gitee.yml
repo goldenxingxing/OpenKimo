@@ -18,12 +18,19 @@ jobs:
       cancel-in-progress: false
     runs-on: ubuntu-latest
     steps:
-      - uses: wearerequired/git-mirror-action@v1
+      - name: Mirror Git repository
         env:
-          SSH_PRIVATE_KEY: ${{ secrets.GITEE_RSA_PRIVATE_KEY }}
-        with:
-          source-repo: https://github.com/goldenxingxing/OpenKimo.git
-          destination-repo: git@gitee.com:qunwei/OpenKimo.git
+          GITEE_ACCESS_TOKEN: ${{ secrets.GITEE_ACCESS_TOKEN }}
+          GIT_TERMINAL_PROMPT: '0'
+        run: |
+          git clone --mirror https://github.com/goldenxingxing/OpenKimo.git mirror.git
+          cd mirror.git
+          git remote set-url --push origin https://gitee.com/qunwei/OpenKimo.git
+          git config credential.helper \
+            '!f() { test "$1" = get && echo username=qunwei && echo "password=$GITEE_ACCESS_TOKEN"; }; f'
+          git for-each-ref --format='delete %(refname)' refs/pull |
+            git update-ref --stdin
+          git push --mirror
 
   sync-release:
     if: >-
