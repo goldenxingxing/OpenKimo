@@ -85,7 +85,7 @@ def _find_bundle_root() -> Path:
 def _read_brand(resources: Path) -> tuple[str, dict]:
     brand_json = resources / "brand.json"
     if brand_json.exists():
-        data = json.loads(brand_json.read_text())
+        data = json.loads(brand_json.read_text(encoding="utf-8"))
         return data.get("app_name", "OpenKimo"), data
     info_plist = resources.parent / "Info.plist"
     if info_plist.exists():
@@ -163,7 +163,7 @@ def load_brand_json() -> dict:
     p = app_paths()
     if p.brand_json.exists():
         try:
-            return json.loads(p.brand_json.read_text())
+            return json.loads(p.brand_json.read_text(encoding="utf-8"))
         except json.JSONDecodeError:
             pass
     return {}

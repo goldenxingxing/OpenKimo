@@ -70,7 +70,7 @@ Source: "{#StagingDir}\TrayIcon.ico"; DestDir: "{app}"; Flags: ignoreversion
 [Icons]
 Name: "{group}\{#AppName}"; Filename: "{app}\OpenKimo.exe"; IconFilename: "{app}\TrayIcon.ico"
 Name: "{group}\Uninstall {#AppName}"; Filename: "{uninstallexe}"
-Name: "{commondesktop}\{#AppName}"; Filename: "{app}\OpenKimo.exe"; IconFilename: "{app}\TrayIcon.ico"; Tasks: desktopicon
+Name: "{autodesktop}\{#AppName}"; Filename: "{app}\OpenKimo.exe"; IconFilename: "{app}\TrayIcon.ico"; Tasks: desktopicon
 
 [Run]
 Filename: "{app}\OpenKimo.exe"; Description: "Launch {#AppName}"; Flags: nowait postinstall skipifsilent
