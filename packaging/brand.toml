@@ -14,10 +14,9 @@ copyright = "© 2026 OpenKimo Contributors. Apache License 2.0."
 min_macos_version = "14.0"
 
 # Asset paths are resolved relative to this file (packaging/).
-icon = "icon.png"
-# logo / favicon default to icon when omitted.
-# logo = "logo.png"
-# favicon = "favicon.png"
+icon = "../kimi-cli/web/public/logo.png"
+logo = "../kimi-cli/web/public/logo.png"
+favicon = "../kimi-cli/web/public/logo.png"
 
 [branding]
 # Web UI branding seeded into the SQLite branding table on first run.
