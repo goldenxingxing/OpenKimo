@@ -30,6 +30,7 @@ class Release:
     name: str
     body: str
     assets: list[Asset]
+    target_commitish: str = "main"
 
 
 class ApiError(RuntimeError):
@@ -186,6 +187,7 @@ class GitHubReleaseSource:
                 Asset(asset["name"], asset["url"])
                 for asset in payload.get("assets", [])
             ],
+            target_commitish=payload.get("target_commitish") or "main",
         )
 
     def download_asset(self, asset: Asset, destination: Path) -> None:
@@ -220,6 +222,7 @@ class GiteeReleaseTarget:
             "prerelease": "false",
         }
         if existing is None:
+            fields["target_commitish"] = release.target_commitish
             synchronized = self.api.request_json(
                 "POST", self.releases_path, fields=fields
             )
