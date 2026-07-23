@@ -15,6 +15,8 @@ class SyncToGiteeWorkflowTests(unittest.TestCase):
     def test_workflow_has_git_and_release_triggers(self):
         text = WORKFLOW.read_text()
 
+        self.assertIn("workflow_dispatch:", text)
+        self.assertIn("description: Existing v* release tag to synchronize", text)
         self.assertIn("workflow_run:", text)
         self.assertIn("workflows: [Release]", text)
         self.assertIn("types: [completed]", text)
@@ -25,6 +27,8 @@ class SyncToGiteeWorkflowTests(unittest.TestCase):
     def test_release_job_waits_for_successful_version_run(self):
         text = WORKFLOW.read_text()
 
+        self.assertIn("github.event_name == 'workflow_dispatch'", text)
+        self.assertIn("startsWith(inputs.tag, 'v')", text)
         self.assertIn(
             "github.event.workflow_run.conclusion == 'success'", text
         )
@@ -33,6 +37,9 @@ class SyncToGiteeWorkflowTests(unittest.TestCase):
         )
         self.assertIn("GITEE_ACCESS_TOKEN", text)
         self.assertIn("sync_gitee_release.py", text)
+        self.assertIn(
+            "github.event_name == 'workflow_dispatch' && inputs.tag", text
+        )
 
     def test_jobs_have_separate_concurrency_groups(self):
         text = WORKFLOW.read_text()

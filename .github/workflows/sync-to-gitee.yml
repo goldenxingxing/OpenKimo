@@ -1,6 +1,12 @@
 name: Sync to Gitee
 
 on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing v* release tag to synchronize
+        required: true
+        type: string
   push:
     branches: [main]
     tags:
@@ -34,11 +40,13 @@ jobs:
 
   sync-release:
     if: >-
-      github.event_name == 'workflow_run' &&
+      (github.event_name == 'workflow_dispatch' &&
+      startsWith(inputs.tag, 'v')) ||
+      (github.event_name == 'workflow_run' &&
       github.event.workflow_run.conclusion == 'success' &&
-      startsWith(github.event.workflow_run.head_branch, 'v')
+      startsWith(github.event.workflow_run.head_branch, 'v'))
     concurrency:
-      group: gitee-release-${{ github.event.workflow_run.head_branch }}
+      group: gitee-release-${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.event.workflow_run.head_branch }}
       cancel-in-progress: false
     runs-on: ubuntu-latest
     permissions:
@@ -46,12 +54,12 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ github.event.workflow_run.head_sha }}
+          ref: ${{ github.event_name == 'workflow_dispatch' && github.sha || github.event.workflow_run.head_sha }}
       - name: Synchronize Gitee Release
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GITEE_ACCESS_TOKEN: ${{ secrets.GITEE_ACCESS_TOKEN }}
           GITHUB_REPOSITORY: ${{ github.repository }}
           GITEE_REPOSITORY: qunwei/OpenKimo
-          RELEASE_TAG: ${{ github.event.workflow_run.head_branch }}
+          RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.event.workflow_run.head_branch }}
         run: python3 .github/scripts/sync_gitee_release.py --tag "$RELEASE_TAG"
