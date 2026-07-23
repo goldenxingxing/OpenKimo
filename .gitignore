@@ -114,3 +114,4 @@ CLAUDE.md
 custom-skills/
 .claude/
 .agents/
+.worktrees/
