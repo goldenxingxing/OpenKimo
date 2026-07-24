@@ -544,3 +544,19 @@ report any change to these failures separately.
 - Verification passed related `789 passed, 2 skipped, 2 warnings`, superproject
   `75 passed, 2 warnings`, Ruff check/format, Pyright (`0 errors`), Web
   typecheck/lint/unit (`3 passed`)/build, and both diff checks.
+- Independent review follow-up added a Wiki `session_only` Approval policy so
+  AFK creates and waits on a real request while action-scoped session approval
+  remains effective. YOLO alone bypasses the popup.
+- Trusted turn text now adds hash provenance without setting high-value or
+  stability. Conservative explicit remember intent and verified
+  workspace/reliable source evidence are separate deterministic signals; plain
+  `hi` plus model-declared high value is discarded in both Normal and YOLO.
+- Wiki approval metadata now uses unique structured page/source/duplicate/
+  conflict lists with per-category item limits, per-string character/UTF-8 byte
+  limits, an 8 KiB serialized limit, and category-specific omitted counts
+  rendered by the collapsed Web UI.
+- Review RED reproduced AFK auto-commit, automatic `hi` elevation, a 9.5 MB
+  5000-source payload, and absent Web category rendering. Final review-fix
+  verification passed related `795 passed, 2 skipped, 2 warnings`,
+  superproject `75 passed, 2 warnings`, Web typecheck/lint/unit (`3
+  passed`)/build, Ruff check/format, Pyright (`0 errors`), and both diff checks.
