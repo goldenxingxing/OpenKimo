@@ -120,3 +120,20 @@ report any change to these failures separately.
   Re-verification passed focused `56 passed, 1 warning` and all Wiki tests `62
   passed, 1 warning`, with Ruff check/format, Pyright (0 errors), and
   `git diff --check` passing.
+- Third review follow-up: body-path handling now uses explicit syntax context
+  rather than a directory allowlist. A Markdown root-relative link target and an
+  `/api` endpoint token are web syntax and are excluded from local-path scanning;
+  every other bare POSIX-root token (for example `/data`, `/srv`, or
+  `/workspace`) is rejected. This is the documented decision for inherently
+  ambiguous slash-prefixed text.
+- Third review follow-up: current-drive-rooted Windows paths (`\\Windows...` and
+  `\\Users...`), drive paths, UNC paths, and only true `file:/`, `file://`, or
+  `file:\\` URIs are rejected. Bare `file:` prose and HTTPS URL path text such as
+  `/file:/manual` remain valid.
+- Third review follow-up: sensitive URL parameter matching is exact after percent
+  decoding/separator normalization, with bounded camel-case components only for
+  cloud-signing names. This preserves non-secret names such as `sessionTitle`,
+  `sessionization`, `tokenizer`, `credentialing`, and `apikeyword` while rejecting
+  the defined secret aliases. Focused verification passed `69 passed, 1 warning`;
+  all Wiki tests passed `77 passed, 1 warning`; Ruff check/format, Pyright (0
+  errors), and `git diff --check` passed.
