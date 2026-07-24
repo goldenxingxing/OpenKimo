@@ -50,7 +50,7 @@ report any change to these failures separately.
 - [ ] Task 7 — WikiManager, Value Gate, Merge, Audit, and Lint
 - [ ] Task 8 — Dedicated Wiki Tool and Managed-Root File Guard
 - [ ] Task 9 — Bounded Session Awareness and Shared Runtime Wiring
-- [ ] Task 10 — Compact Approval and YOLO Write Policy
+- [x] Task 10 — Compact Approval and YOLO Write Policy
 - [ ] Task 11 — Knowledge API Authorization and Global-Scope Migration
 - [ ] Task 12 — Docker/KAOS, Packaging, No-End-Hook, and Full Verification
 - [ ] Final integration review and completion workflow
@@ -519,3 +519,28 @@ report any change to these failures separately.
   check/format, Pyright (0 errors), and `git diff --check`.
 - Final review-fix commit: submodule `c478b4dc fix: close final wiki lifecycle
   gaps`. Awaiting final Task 9 review.
+
+### Task 10 — Compact Approval and YOLO Write Policy
+
+- Added the `wiki.write` Approval boundary after strict high-value/grounding
+  preparation and before revision-checked commit. Approval waits outside the
+  writer lock; decline, cancellation, or delivery failure commits nothing.
+- Normal mode retains allow-once and action-scoped allow-for-session behavior.
+  YOLO alone skips the popup, but still uses the same gate and audit/commit path;
+  AFK keeps the existing Approval semantics.
+- Added compact, bounded, portable Wiki approval metadata and a collapsed Web
+  details view with Wiki-specific labels for the existing three responses.
+  Logical paths are capped at 20 and no machine paths or raw chat transcripts
+  are exposed.
+- Real user turns and accepted steer input provide ephemeral hash-only
+  provenance. Synthetic/internal turns fail closed. The Wiki tool description
+  exposes only portable UUID and SHA-256 guidance.
+- No automatic session-end archive or end hook was added. The existing Approval
+  implementation already supplied the required scoped responses, so it needed
+  no behavior change.
+- TDD RED reproduced the absent display block/UI, trusted turn context,
+  metadata bound, action labels, steer extension, and portable tool guidance.
+  Full evidence is in `.superpowers/sdd/task-10-report.md`.
+- Verification passed related `789 passed, 2 skipped, 2 warnings`, superproject
+  `75 passed, 2 warnings`, Ruff check/format, Pyright (`0 errors`), Web
+  typecheck/lint/unit (`3 passed`)/build, and both diff checks.
