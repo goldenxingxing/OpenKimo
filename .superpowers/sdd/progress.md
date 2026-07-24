@@ -256,3 +256,12 @@ report any change to these failures separately.
 - Implementation commit: submodule `45d76eb feat: index global wiki with fts5`.
   Awaiting independent Task 5 review before the controller marks this task
   complete.
+- Review follow-up: `wal=False` now actively executes `PRAGMA journal_mode=DELETE`
+  when reopening a cache, rather than inheriting the persistent WAL mode selected
+  by a previous open. The mode switch happens during cache setup; a locked or
+  otherwise unrelated SQLite error still propagates and is not treated as corrupt.
+- Review-fix TDD: reopening one cache first with `wal=True`, then `wal=False`,
+  initially failed because SQLite remained in WAL mode. Re-verification passed
+  focused `10 passed, 1 warning` and all Wiki tests `135 passed, 1 warning`, with
+  Ruff check/format, Pyright (0 errors), and `git diff --check` passing.
+- Review-fix commit: submodule `282f51e fix: reset wiki cache journal mode`.
