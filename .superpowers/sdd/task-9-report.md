@@ -79,3 +79,29 @@ alter approval policy, or add an end-of-session write/archive hook.
 ## Review-fix commit
 
 - `8c0314c3 fix: harden global wiki session wiring`
+
+## Final review follow-up
+
+- Added exact migration for the previous Task 9 persisted, unmarked
+  `# Global Wiki` format. The matcher requires the known three guidance lines
+  and generated index grammar, so it replaces legacy, mixed, and duplicate
+  blocks without consuming adjacent custom prompt sections. A genuinely older
+  prompt without Wiki content keeps all existing text.
+- The CLI now assigns every successfully created root instance to an
+  idempotent owner immediately and closes it from the outermost `_run`
+  `finally`. SessionStart hook errors/cancellation and Reload, SwitchToWeb, and
+  SwitchToVis still preserve background workers when requested, but never keep
+  the root Wiki SQLite/WAL connection open.
+- Wiki manager construction now runs as a shielded task. If cancellation races
+  with `asyncio.to_thread(WikiManager)`, initialization waits for the thread,
+  closes the completed manager exactly once, then propagates cancellation.
+- RED evidence reproduced all three gaps: stale unmarked prompt blocks
+  remained, the CLI owner helper was absent, and constructor-race cancellation
+  reported zero close calls.
+- Final verification passed the related suite with `745 passed, 2 skipped, 2
+  warnings`, Context with `20 passed, 1 warning`, Ruff check/format, Pyright
+  (`0 errors`), and `git diff --check`.
+
+## Final review-fix commit
+
+- `c478b4dc fix: close final wiki lifecycle gaps`

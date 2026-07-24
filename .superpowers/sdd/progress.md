@@ -507,3 +507,15 @@ report any change to these failures separately.
   Ruff check/format, Pyright (0 errors), and `git diff --check` passed.
 - Review-fix commit: submodule `8c0314c3 fix: harden global wiki session wiring`.
   Awaiting independent Task 9 re-review.
+- Final Task 9 review follow-up precisely migrates the previous unmarked Wiki
+  prompt format without deleting adjacent custom content, closes every
+  successfully created CLI root runtime from the outermost owner `finally`
+  (including SessionStart failure/cancel and all UI switches), and shields Wiki
+  manager thread construction so cancellation waits for and closes the completed
+  SQLite/WAL owner.
+- Final RED probes reproduced stale legacy blocks, the missing CLI owner, and
+  zero close calls in the constructor-cancel race. Verification passed related
+  `745 passed, 2 skipped, 2 warnings`, Context `20 passed, 1 warning`, Ruff
+  check/format, Pyright (0 errors), and `git diff --check`.
+- Final review-fix commit: submodule `c478b4dc fix: close final wiki lifecycle
+  gaps`. Awaiting final Task 9 review.
