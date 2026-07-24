@@ -21,6 +21,9 @@ defaults instead of the packaged brand).
 
 from __future__ import annotations
 
+import base64
+import binascii
+import hashlib
 import json
 import logging
 import sqlite3
@@ -38,6 +41,7 @@ _BRANDING_FIELDS = ("brand_name", "version", "page_title", "logo", "favicon")
 # the app updates the displayed version, and so installs that predate the
 # field (e.g. <= v0.1.5) get it populated retroactively.
 _BUILD_DERIVED_FIELDS = ("version",)
+_PACKAGED_ASSET_FIELDS = ("logo", "favicon")
 
 # Mirrors kimi_cli.web.db.database._CREATE_BRANDING_TABLE. Both sides use
 # CREATE TABLE IF NOT EXISTS, so whichever process touches users.db first
@@ -79,6 +83,35 @@ def _load_seed(p: AppPaths) -> dict[str, str] | None:
     return {k: v for k, v in seed.items() if k in _BRANDING_FIELDS and v}
 
 
+def _load_legacy_asset_hashes(p: AppPaths) -> frozenset[str]:
+    try:
+        data = json.loads(p.brand_json.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return frozenset()
+    values = data.get("branding_legacy_asset_sha256")
+    if not isinstance(values, list):
+        return frozenset()
+    return frozenset(
+        value.lower()
+        for value in values
+        if isinstance(value, str)
+        and len(value) == 64
+        and all(char in "0123456789abcdefABCDEF" for char in value)
+    )
+
+
+def _data_url_sha256(value: str) -> str | None:
+    header, separator, payload = value.partition(",")
+    if not separator or not header.startswith("data:") or not header.endswith(";base64"):
+        return None
+    try:
+        decoded = base64.b64decode(payload, validate=True)
+    except (binascii.Error, ValueError):
+        log.warning("invalid packaged branding Data URL; preserving existing value")
+        return None
+    return hashlib.sha256(decoded).hexdigest()
+
+
 def _connect(db: Path) -> sqlite3.Connection:
     db.parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(str(db))
@@ -100,6 +133,7 @@ def seed_if_needed(p: AppPaths) -> None:
     if not seed:
         log.warning("no usable branding_seed in %s; skipping", p.brand_json)
         return
+    legacy_asset_hashes = _load_legacy_asset_hashes(p)
 
     db = _db_path(p)
     try:
@@ -115,6 +149,12 @@ def seed_if_needed(p: AppPaths) -> None:
             if key in _BUILD_DERIVED_FIELDS:
                 if current != value:
                     to_write[key] = value
+            elif (
+                key in _PACKAGED_ASSET_FIELDS
+                and current
+                and _data_url_sha256(current) in legacy_asset_hashes
+            ):
+                to_write[key] = value
             elif not current:
                 to_write[key] = value
         if not to_write:
