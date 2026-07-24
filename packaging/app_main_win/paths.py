@@ -101,6 +101,7 @@ class AppPaths:
     work_dir: Path              # localized Documents / <AppName>
     sessions_dir: Path          # app_support / sessions
     output_dir: Path            # app_support / output
+    skill_dir: Path             # app_support / skill (writable overlay)
     logs: Path                  # %LOCALAPPDATA% / <AppName> / Logs
     server_log: Path            # logs / server.log
     pip_log: Path               # logs / pip.log
@@ -203,6 +204,7 @@ def app_paths() -> AppPaths:
         work_dir=default_documents_work_dir(app_name),
         sessions_dir=app_support / "sessions",
         output_dir=app_support / "output",
+        skill_dir=app_support / "skill",
         logs=logs,
         server_log=logs / "server.log",
         pip_log=logs / "pip.log",
