@@ -406,3 +406,15 @@ report any change to these failures separately.
 - Implementation commit: submodule `e547b315 feat: add global wiki manager`.
   Awaiting independent Task 7 review before the controller marks this task
   complete.
+- Independent Task 7 review returned CHANGES_REQUIRED. All Critical and Important
+  findings were reproduced with focused RED tests, then fixed in submodule commit
+  `22ecd4da fix: harden global wiki manager`.
+- Review follow-up added complete frontmatter/source safety validation,
+  revision-CAS and cross-thread-safe SQLite access, authoritative Markdown search
+  fallback, post-authority cache error containment, safe independent-change
+  rebase with immutable approved input, malformed logical-page isolation,
+  credential-URL ingest validation, source-associated conflict blocks, and
+  registry-backed provenance lint.
+- Review-fix verification passed focused `56 passed`, all Wiki `301 passed`, and
+  approval regressions `29 passed`; Ruff check/format, Pyright (0 errors), and
+  `git diff --check` passed. Awaiting independent Task 7 re-review.
