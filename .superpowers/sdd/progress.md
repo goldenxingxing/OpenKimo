@@ -265,3 +265,48 @@ report any change to these failures separately.
   focused `10 passed, 1 warning` and all Wiki tests `135 passed, 1 warning`, with
   Ruff check/format, Pyright (0 errors), and `git diff --check` passing.
 - Review-fix commit: submodule `282f51e fix: reset wiki cache journal mode`.
+
+### Task 6 — Cross-Process Lock, Durable Transaction, and Recovery
+
+- Added deadline-based `WikiLock` shared/exclusive contexts using `fcntl.flock`
+  on POSIX and conservative exclusive byte-range locking with `msvcrt` on
+  Windows. Lock files are opened as verified regular files, symlinks are
+  rejected, and timeout failures are retryable `WikiBusyError` exceptions.
+- Shared Wiki reads use `wiki_read_lock`: recovery runs while the lock is
+  exclusive and the same descriptor is atomically downgraded to shared before
+  any Markdown is exposed. A valid partial journal whose recovery hits an I/O
+  failure blocks the read rather than exposing a half-commit; an unreadable
+  journal sets a persistent write quarantine while retaining read-only access.
+- `WikiTransaction.prepare` captures page/special-file hashes under a stable
+  shared view. `commit` acquires the global writer lock, recovers older work,
+  revalidates page hashes/revisions, special-file hashes, and global revision,
+  then durably journals old/new hashes plus rollback artifacts.
+- Commit order is deterministic: sorted content pages, `index.md`, `log.md`,
+  `.openkimo/revision`, then the committed journal marker. All artifacts and
+  sibling replacements are flushed with `fsync`; parent directory metadata is
+  flushed on POSIX; recorded targets and artifact names are strict relative
+  allowlisted paths.
+- Recovery discards an untouched prepared transaction, rolls a hash-consistent
+  partial transaction forward, restores durable backups when forward completion
+  is impossible, and reports committed Markdown as requiring FTS rebuild.
+  A successful supplied rebuild callback acknowledges/removes committed
+  journals; a failed rebuild retains them for the next attempt.
+- TDD red evidence: `cd kimi-cli && uv run pytest tests/wiki/test_locking.py
+  tests/wiki/test_transaction.py tests/wiki/test_recovery.py -q` initially
+  failed collection with three expected missing-module errors for
+  `wiki.locking` and `wiki.transaction`.
+- Focused verification passed `28 passed, 1 warning`, including two-process
+  writer serialization, a reader blocked at an injected mid-commit boundary,
+  five ordered failpoints, roll-forward/rollback, malicious journal paths,
+  write quarantine, and FTS rebuild acknowledgement/retention.
+- All Wiki tests passed `163 passed, 1 warning`. Ruff check/format passed for all
+  Wiki source/tests; Pyright on `src/kimi_cli/wiki` reported `0 errors`; staged
+  and unstaged diff checks passed. The warning is the existing Loguru Python
+  3.14 deprecation warning.
+- Implementation commit: submodule `652a6b8 feat: make wiki commits
+  recoverable`. Awaiting independent Task 6 review before the controller marks
+  this task complete.
+- Task 7 integration note: `WikiTransaction.commit()` owns the writer lock and
+  revalidation boundary. `WikiManager` must not wrap it in a second exclusive
+  lock; approval remains outside `commit`, and prepared changes are revalidated
+  inside it.
