@@ -97,3 +97,15 @@ report any change to these failures separately.
   Wiki tests passed `31 passed, 1 warning`; Ruff check/format, Pyright (0 errors),
   and `git diff --check` passed. The warning is the existing Loguru Python 3.14
   deprecation warning.
+- Review follow-up: fixed two Important findings without expanding into later
+  tasks. Portable provenance now explicitly rejects `PureWindowsPath` drive/UNC
+  forms (including slash and backslash variants); page content detects any local
+  POSIX absolute path, Windows drive path, or UNC path while preserving ordinary
+  HTTPS Markdown URLs and prose such as `and/or`.
+- Review follow-up: query parameter names are decoded by `parse_qsl`, case-folded,
+  normalized across separators, and checked for API-key, credential, cookie,
+  session, signature, auth, authorization, token, and password families,
+  including `apiKey`, percent-encoded names, and `X-Amz-Signature`.
+- Re-verification after the review fix: focused schema/path tests passed `43
+  passed, 1 warning`; all Wiki tests passed `49 passed, 1 warning`; Ruff
+  check/format, Pyright (0 errors), and `git diff --check` passed.
