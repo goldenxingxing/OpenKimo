@@ -289,8 +289,8 @@ report any change to these failures separately.
 - Recovery discards an untouched prepared transaction, rolls a hash-consistent
   partial transaction forward, restores durable backups when forward completion
   is impossible, and reports committed Markdown as requiring FTS rebuild.
-  A successful supplied rebuild callback acknowledges/removes committed
-  journals; a failed rebuild retains them for the next attempt.
+  Authoritative journal completion is independent of the disposable search-cache
+  rebuild protocol described in the review follow-up below.
 - TDD red evidence: `cd kimi-cli && uv run pytest tests/wiki/test_locking.py
   tests/wiki/test_transaction.py tests/wiki/test_recovery.py -q` initially
   failed collection with three expected missing-module errors for
@@ -310,3 +310,45 @@ report any change to these failures separately.
   revalidation boundary. `WikiManager` must not wrap it in a second exclusive
   lock; approval remains outside `commit`, and prepared changes are revalidated
   inside it.
+- Task 6 independent review returned `CHANGES_REQUIRED` with two Critical and
+  seven Important findings. TDD reproductions first produced `16 failed, 29
+  passed`; every Critical/Important finding was fixed without entering Task 7.
+- Critical recovery-protocol follow-up: committed authoritative journals now
+  create/update a separate `.openkimo/search.invalid` revision marker and clean
+  themselves independently of SQLite. Search rebuild failure leaves only that
+  marker, never a write quarantine; consecutive commits monotonically advance
+  it, restart recovery remains writable, and `acknowledge_reindex` clears it
+  only when the rebuilt revision still equals the current required revision.
+- Critical unknown-content follow-up: a current target hash outside the
+  journal's recorded old/new set is never overwritten or rolled back. Recovery
+  preserves the complete on-disk state and persistently quarantines writes for
+  operator review.
+  Rollback is allowed only when every current hash is known and every required
+  old artifact was hash-validated.
+- Artifact recovery now opens each durable artifact once, verifies its hash and
+  page/special-file semantics, and passes those exact bytes to `os.replace`.
+  Prepared records validate logical page paths, old/new page revisions, strict
+  page schema, expected page revisions, UTF-8 special Markdown, and exact old/new
+  global revision artifact bytes. A completed authoritative commit no longer
+  depends on disposable journal artifact copies.
+- `expected_global_revision` and rebuilt revisions are strict non-boolean
+  integers. Lock timeouts must be finite non-negative built-in numbers, rejecting
+  booleans, NaN, and infinities. The Windows contract explicitly exposes that
+  shared locks conservatively serialize as exclusive; platform-conditioned tests
+  cover this, failed acquisition no longer attempts unlock, and actual unlock
+  errors propagate.
+- Reindex acknowledgement has explicit success/required-revision results.
+  Marker read, delete, and directory-`fsync` failures propagate; a stale rebuild
+  cannot acknowledge a newer commit. Failpoints now cover journal directory
+  flushes, artifact create/file-`fsync`/directory-`fsync`, prepared and committed
+  record replace/flush, every ordered target replace, cache-marker replace/flush,
+  rollback replace/remove, journal cleanup/delete/flush, and reindex
+  acknowledgement delete/flush.
+- Review-fix verification passed focused `61 passed, 1 warning` and all Wiki
+  tests `196 passed, 1 warning`. Ruff check/format passed on all Wiki
+  source/tests; Pyright passed both all Wiki source and the focused Task 6
+  source/tests with `0 errors`; `git diff --check` passed. The warning remains
+  the existing Loguru Python 3.14 deprecation warning.
+- Review-fix commit: submodule `55bbb9f fix: harden wiki transaction recovery`.
+  Awaiting independent Task 6 re-review before the controller marks this task
+  complete.
