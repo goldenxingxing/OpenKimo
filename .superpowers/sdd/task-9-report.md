@@ -48,3 +48,34 @@ focused runtime, Wiki/tool, and web suites are green.
 
 The implementation remains within Task 9. It does not commit Wiki proposals,
 alter approval policy, or add an end-of-session write/archive hook.
+
+## Review follow-up
+
+- Added stable managed-block markers around the Wiki prompt section. Resumed
+  sessions now atomically replace the current block in persisted context,
+  insert it into pre-upgrade prompts, collapse duplicates, and remove stale
+  blocks when Wiki is unavailable while preserving all unmanaged prompt text.
+- The complete marked Wiki block, including guidance and headings, is capped at
+  8 KiB by UTF-8 bytes.
+- Wiki initialization failure remains fail-open and now emits one deduplicated,
+  localized, path-safe warning through the existing wire/shell notification
+  channel. Detailed errors remain in logs.
+- Made `WikiManager.close` thread-safe and idempotent. Only root runtimes close
+  the shared manager; subagents borrow it. CLI shutdown, Web worker exit,
+  post-runtime startup errors, telemetry failures, and cancellation during
+  partial Wiki initialization all release SQLite/WAL resources.
+- Review RED evidence:
+  - the first review suite failed collection because managed-block APIs did not
+    exist;
+  - worker exit and post-runtime progress tests failed because close was never
+    awaited;
+  - partial-initialization cancellation failed because the manager remained
+    open.
+- Final verification:
+  - related Wiki/tool/runtime/web suite: `734 passed, 2 skipped, 2 warnings`;
+  - Context persistence suite: `20 passed, 1 warning`;
+  - Ruff check/format, Pyright (`0 errors`), and `git diff --check` passed.
+
+## Review-fix commit
+
+- `8c0314c3 fix: harden global wiki session wiring`
