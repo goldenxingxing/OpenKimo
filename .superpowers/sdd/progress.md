@@ -42,7 +42,7 @@ report any change to these failures separately.
 ## Plan status
 
 - [x] Task 1 — Generic Packaged Wiki Skeleton and User-Level Path
-- [ ] Task 2 — Page Schema, Logical Paths, and Safety
+- [x] Task 2 — Page Schema, Logical Paths, and Safety
 - [ ] Task 3 — Idempotent Initialization and Versioned Metadata
 - [ ] Task 4 — Stable Workspace Registry and Portable Provenance
 - [ ] Task 5 — Disposable FTS5 Search Cache and Markdown Fallback
@@ -77,3 +77,23 @@ report any change to these failures separately.
 - The wheel build emitted only the existing uv-build range warning; the wheel
   contains all five template assets. No protected packaging resolution file was
   changed.
+
+### Task 2 — Page Schema, Logical Paths, and Safety
+
+- Added strict Pydantic page, change, candidate, and portable provenance models;
+  frontmatter accepts exactly the specified fields and requires timezone-aware,
+  monotonic timestamps and positive revisions.
+- Added canonical two-segment category paths, UTF-8/Chinese slugs, safe Markdown
+  parsing/rendering, SHA-256 content hashes, WikiLink validation, and canonical
+  filesystem resolution that rejects intermediate or final symlink escapes.
+- Provenance rejects absolute/traversing/sensitive paths, credential-bearing web
+  URLs, unknown source kinds, secret query parameters, and secret/absolute-path
+  content in pages. The authority remains Markdown; no cache or write workflow was
+  introduced ahead of later tasks.
+- TDD red evidence: `cd kimi-cli && uv run pytest tests/wiki/test_schema.py
+  tests/wiki/test_path_safety.py -q` initially failed collection because the
+  models/schema modules did not exist.
+- Green verification: the focused command passed `25 passed, 1 warning`; full
+  Wiki tests passed `31 passed, 1 warning`; Ruff check/format, Pyright (0 errors),
+  and `git diff --check` passed. The warning is the existing Loguru Python 3.14
+  deprecation warning.
