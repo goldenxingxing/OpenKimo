@@ -442,3 +442,24 @@ report any change to these failures separately.
   Python 3.14 deprecation warning.
 - Implementation commit: submodule `b1a1d70f feat: expose controlled wiki tool`.
   Awaiting independent Task 8 review before the controller marks this task complete.
+- Review-fix root cause: the initial managed-root check occurred before Approval,
+  while the final KAOS pathname write remained vulnerable to target replacement.
+  `write_verified_text` is now the final mutation boundary. Local writes open the
+  verified parent and leaf with no-follow file descriptors, reject non-regular or
+  multiply-linked inodes, and write through the final descriptor; remote and
+  Windows paths fail closed while a Wiki manager is active if this proof cannot
+  be made.
+- Review-fix admission contract: `WikiToolContext` carries trusted runtime
+  provenance UUID, turn conversation hashes, allowed workspace UUIDs, and
+  high-value/stability/grounding facts. Candidate fields cannot self-certify any
+  of these. Named sessions use that independent provenance UUID rather than
+  parsing `Session.id`; Task 9 owns its runtime wiring. The unused `instructions`
+  parameter was removed.
+- Review-fix TDD probes cover atomic post-approval symlink and hardlink
+  `os.replace` retargeting for both file tools, missing workspace allowset,
+  self-certified high-value rejection, named-session provenance, safe domain
+  conflict retry output, and no-path leakage. The detailed probes are recorded
+  in `.superpowers/sdd/task-8-review-fix-report.md`.
+- Review-fix verification passed focused `47 passed, 1 warning` and all
+  `tests/wiki` plus `tests/tools` `661 passed, 1 warning`; Ruff check/format,
+  Pyright (0 errors), and `git diff --check` passed. Awaiting Task 8 re-review.
