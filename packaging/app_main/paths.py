@@ -21,6 +21,11 @@ def _slugify(name: str) -> str:
     return s or "openkimo"
 
 
+def default_documents_work_dir(app_name: str) -> Path:
+    """Return a user-visible default instead of an application-state path."""
+    return Path.home() / "Documents" / app_name
+
+
 @dataclass(frozen=True)
 class AppPaths:
     bundle: Path                # OpenKimo.app/
@@ -43,7 +48,7 @@ class AppPaths:
     pip_conf: Path              # ~/Library/Application Support/<AppName>/pip.conf
     userbase: Path              # ~/Library/Application Support/<AppName>/python-userbase
     userbase_bin: Path          # userbase/bin
-    work_dir: Path              # app_support/work
+    work_dir: Path              # ~/Documents/<AppName>
     sessions_dir: Path          # app_support/sessions
     output_dir: Path            # app_support/output
     logs: Path                  # ~/Library/Logs/<AppName>
@@ -140,7 +145,7 @@ def app_paths() -> AppPaths:
         pip_conf=app_support / "pip.conf",
         userbase=userbase,
         userbase_bin=userbase / "bin",
-        work_dir=app_support / "work",
+        work_dir=default_documents_work_dir(app_name),
         sessions_dir=app_support / "sessions",
         output_dir=app_support / "output",
         logs=logs,

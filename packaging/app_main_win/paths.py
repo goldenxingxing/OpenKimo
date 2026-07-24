@@ -50,6 +50,34 @@ def _slugify(name: str) -> str:
     return s or "openkimo"
 
 
+def _windows_documents_dir() -> Path:
+    """Resolve the localized Windows Documents known folder."""
+    if sys.platform == "win32":
+        try:
+            import ctypes
+            from ctypes import wintypes
+            from uuid import UUID
+
+            folder_id = UUID("FDD39AD0-238F-46AF-ADB4-6C85480369C7")
+            guid = (ctypes.c_ubyte * 16).from_buffer_copy(folder_id.bytes_le)
+            raw_path = ctypes.c_wchar_p()
+            result = ctypes.windll.shell32.SHGetKnownFolderPath(  # type: ignore[attr-defined]
+                ctypes.byref(guid), 0, wintypes.HANDLE(), ctypes.byref(raw_path)
+            )
+            if result == 0 and raw_path.value:
+                try:
+                    return Path(raw_path.value)
+                finally:
+                    ctypes.windll.ole32.CoTaskMemFree(raw_path)  # type: ignore[attr-defined]
+        except (AttributeError, OSError, ValueError):
+            pass
+    return Path.home() / "Documents"
+
+
+def default_documents_work_dir(app_name: str) -> Path:
+    return _windows_documents_dir() / app_name
+
+
 @dataclass(frozen=True)
 class AppPaths:
     # ---- install-side (read-only, bundled with the .exe) ---------------
@@ -70,7 +98,7 @@ class AppPaths:
     pip_conf: Path              # app_support / pip.ini      (parity, unused)
     userbase: Path              # app_support / python-userbase (parity, unused)
     userbase_bin: Path          # userbase / Scripts          (parity, unused)
-    work_dir: Path              # app_support / work
+    work_dir: Path              # localized Documents / <AppName>
     sessions_dir: Path          # app_support / sessions
     output_dir: Path            # app_support / output
     logs: Path                  # %LOCALAPPDATA% / <AppName> / Logs
@@ -172,7 +200,7 @@ def app_paths() -> AppPaths:
         pip_conf=app_support / "pip.ini",
         userbase=userbase,
         userbase_bin=userbase / "Scripts",
-        work_dir=app_support / "work",
+        work_dir=default_documents_work_dir(app_name),
         sessions_dir=app_support / "sessions",
         output_dir=app_support / "output",
         logs=logs,

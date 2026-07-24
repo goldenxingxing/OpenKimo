@@ -1147,63 +1147,23 @@ def _build_web_section(
     return section, rows
 
 
-def _build_paths_section(
-    values: dict[str, str],
+def _build_branding_section(
     controller: SettingsController,
 ) -> tuple[NSView, list[_Row]]:
-    section, header = _section_view("Paths")
-    rows: list[_Row] = []
-
-    spec = (
-        ("KIMI_DEFAULT_WORK_DIR", "Default Work Directory"),
-        ("KIMI_SESSION_DATA_DIR", "Session Data Directory"),
-        ("KIMI_OUTPUT_DIR", "Output Directory"),
-        ("CUSTOM_SKILLS_HOST_PATH", "Custom Skills Directory"),
-        ("HF_CACHE_HOST_PATH", "HuggingFace Cache"),
-    )
-
-    fr_views: list[NSView] = []
-    for key, label_text in spec:
-        f = _text(values.get(key, ""), placeholder="(use packaged default)")
-        f.setEditable_(False)  # browse only
-        choose = _button("Choose…", controller, "onChooseDir:")
-        reset = _button("Reset", controller, "onResetDir:")
-        marker = object()
-        choose.setTag_(id(marker))
-        reset.setTag_(id(marker))
-
-        compound = _compound_path_field(f, choose, reset)
-        fr = _form_row(_label(label_text), compound)
-        section.addSubview_(fr)
-        fr_views.append(fr)
-        rows.append(_Row(key, _label(label_text), f, marker))
+    section, header = _section_view("Branding")
 
     reset_brand = _button(
         "Reset Branding to Packaged Defaults", controller, "onResetBranding:")
     section.addSubview_(reset_brand)
 
-    cs: list = []
-    prev = None
-    for fr in fr_views:
-        cs.append(fr.leadingAnchor().constraintEqualToAnchor_(section.leadingAnchor()))
-        cs.append(fr.trailingAnchor().constraintEqualToAnchor_(section.trailingAnchor()))
-        if prev is None:
-            cs.append(fr.topAnchor().constraintEqualToAnchor_constant_(
-                header.bottomAnchor(), 12.0))
-        else:
-            cs.append(fr.topAnchor().constraintEqualToAnchor_constant_(
-                prev.bottomAnchor(), ROW_VGAP))
-        prev = fr
-
-    cs.extend([
+    NSLayoutConstraint.activateConstraints_([
         reset_brand.topAnchor().constraintEqualToAnchor_constant_(
-            prev.bottomAnchor(), 16.0),
+            header.bottomAnchor(), 12.0),
         reset_brand.leadingAnchor().constraintEqualToAnchor_(section.leadingAnchor()),
         reset_brand.bottomAnchor().constraintEqualToAnchor_(section.bottomAnchor()),
     ])
-    NSLayoutConstraint.activateConstraints_(cs)
 
-    return section, rows
+    return section, []
 
 
 def build_controller(
@@ -1241,12 +1201,12 @@ def build_controller(
         _build_llm_section(values, controller)
     )
     web_section, web_rows = _build_web_section(values, controller)
-    paths_section, paths_rows = _build_paths_section(values, controller)
+    branding_section, branding_rows = _build_branding_section(controller)
 
     controller.rows = {
         "LLM": llm_rows,
         "WEB": web_rows,
-        "PATHS": paths_rows,
+        "BRANDING": branding_rows,
     }
     controller.provider_rows = provider_rows
     controller.providers_container = providers_container
@@ -1263,7 +1223,7 @@ def build_controller(
     scroll_content.addSubview_(web_section)
     div2 = _divider()
     scroll_content.addSubview_(div2)
-    scroll_content.addSubview_(paths_section)
+    scroll_content.addSubview_(branding_section)
 
     cs_content: list = [
         # LLM section
@@ -1300,14 +1260,14 @@ def build_controller(
             scroll_content.trailingAnchor(), -OUTER_HMARGIN),
         div2.heightAnchor().constraintEqualToConstant_(1.0),
 
-        # Paths section
-        paths_section.topAnchor().constraintEqualToAnchor_constant_(
+        # Branding section
+        branding_section.topAnchor().constraintEqualToAnchor_constant_(
             div2.bottomAnchor(), SECTION_VGAP),
-        paths_section.leadingAnchor().constraintEqualToAnchor_constant_(
+        branding_section.leadingAnchor().constraintEqualToAnchor_constant_(
             scroll_content.leadingAnchor(), OUTER_HMARGIN),
-        paths_section.trailingAnchor().constraintEqualToAnchor_constant_(
+        branding_section.trailingAnchor().constraintEqualToAnchor_constant_(
             scroll_content.trailingAnchor(), -OUTER_HMARGIN),
-        paths_section.bottomAnchor().constraintEqualToAnchor_constant_(
+        branding_section.bottomAnchor().constraintEqualToAnchor_constant_(
             scroll_content.bottomAnchor(), -OUTER_VMARGIN),
     ]
     NSLayoutConstraint.activateConstraints_(cs_content)
