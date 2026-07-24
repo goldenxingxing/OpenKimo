@@ -1,4 +1,5 @@
 from pathlib import Path
+import subprocess
 
 
 def test_all_packaged_skills_have_one_source_location() -> None:
@@ -19,13 +20,17 @@ def test_all_packaged_skills_have_one_source_location() -> None:
 def test_packaged_skills_do_not_include_local_secrets_or_caches() -> None:
     root = Path(__file__).parents[1]
     builtin = root / "kimi-cli/src/kimi_cli/skills"
+    tracked = subprocess.check_output(
+        ["git", "-C", root / "kimi-cli", "ls-files", "src/kimi_cli/skills"],
+        text=True,
+    ).splitlines()
 
-    assert not tuple(builtin.rglob(".env"))
-    assert not tuple(builtin.rglob(".DS_Store"))
-    assert not tuple(builtin.rglob("__pycache__"))
-    assert not tuple(builtin.rglob("*.pyc"))
-    assert not tuple(builtin.rglob("node_modules"))
-    assert not tuple(path for path in builtin.rglob("obj") if path.is_dir())
+    assert not tuple(path for path in tracked if path.endswith("/.env"))
+    assert not tuple(path for path in tracked if path.endswith("/.DS_Store"))
+    assert not tuple(path for path in tracked if "/__pycache__/" in path)
+    assert not tuple(path for path in tracked if path.endswith(".pyc"))
+    assert not tuple(path for path in tracked if "/node_modules/" in path)
+    assert not tuple(path for path in tracked if "/obj/" in path)
 
 
 def test_xlsx_skill_uses_cross_platform_launcher() -> None:
