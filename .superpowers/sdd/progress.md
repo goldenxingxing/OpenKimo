@@ -41,7 +41,7 @@ report any change to these failures separately.
 
 ## Plan status
 
-- [ ] Task 1 — Generic Packaged Wiki Skeleton and User-Level Path
+- [x] Task 1 — Generic Packaged Wiki Skeleton and User-Level Path
 - [ ] Task 2 — Page Schema, Logical Paths, and Safety
 - [ ] Task 3 — Idempotent Initialization and Versioned Metadata
 - [ ] Task 4 — Stable Workspace Registry and Portable Provenance
@@ -54,3 +54,26 @@ report any change to these failures separately.
 - [ ] Task 11 — Knowledge API Authorization and Global-Scope Migration
 - [ ] Task 12 — Docker/KAOS, Packaging, No-End-Hook, and Full Verification
 - [ ] Final integration review and completion workflow
+
+## Task records
+
+### Task 1 — Generic Packaged Wiki Skeleton and User-Level Path
+
+- Added the shared `users/default/wiki` path resolver, schema version constant,
+  generic Markdown/JSON templates, and platform-specific `AppPaths.wiki_dir`.
+- Desktop servers now export `OPENKIMO_APP_DATA_DIR` and `OPENKIMO_WIKI_ROOT`
+  after loading user configuration, so legacy `.env` values cannot override them.
+- Added explicit `uv_build` package inclusion and PyInstaller collection for
+  `wiki/templates/**`; tests build a wheel and inspect the PyInstaller data set.
+- TDD red evidence: `kimi-cli/.venv/bin/python -m pytest
+  kimi-cli/tests/wiki/test_paths.py kimi-cli/tests/wiki/test_initialization.py
+  tests/test_work_directory_settings.py tests/test_skill_packaging.py -q`
+  initially produced 7 expected failures for the absent Wiki module/assets,
+  desktop fields, and package configuration.
+- Green verification: the same focused test command passed `17 passed, 1 warning`.
+  `cd kimi-cli && uv run ruff check src/kimi_cli/wiki
+  src/kimi_cli/utils/pyinstaller.py tests/wiki` and the matching
+  `ruff format --check` both passed. `git diff --check` passed.
+- The wheel build emitted only the existing uv-build range warning; the wheel
+  contains all five template assets. No protected packaging resolution file was
+  changed.
