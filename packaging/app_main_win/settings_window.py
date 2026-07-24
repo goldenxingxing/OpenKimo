@@ -132,26 +132,6 @@ class Api:
         self.exit_code = EXIT_CANCEL
         self._destroy_window()
 
-    def pick_work_dir(self) -> str | None:
-        """Open a native folder picker; returns the chosen path or None."""
-        import webview  # local import: cheap on Windows, avoid at module load
-
-        if self._window is None:
-            return None
-        try:
-            result = self._window.create_file_dialog(
-                webview.FOLDER_DIALOG,
-                directory=str(self.paths.work_dir) if self.paths.work_dir.exists() else "",
-            )
-        except Exception:
-            log.exception("create_file_dialog failed")
-            return None
-        if not result:
-            return None
-        # pywebview returns a list/tuple of paths even for single-folder mode.
-        first = result[0] if isinstance(result, (list, tuple)) else result
-        return str(first) if first else None
-
     # ---- helpers ------------------------------------------------------
 
     def _destroy_window(self) -> None:

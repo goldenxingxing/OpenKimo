@@ -191,16 +191,6 @@
       </div>
     </div>
 
-    <div class="panel">
-      <h2>Paths</h2>
-      <div class="row">
-        <label>Work directory</label>
-        <div class="control">
-          <input type="text" id="work_dir" placeholder="C:\\Users\\you\\OpenKimo\\work" />
-          <button type="button" id="pick_work_dir">Choose…</button>
-        </div>
-      </div>
-    </div>
   </div>
 
   <div class="footer-wrap">
@@ -233,7 +223,6 @@
         $("temperature").value = data.LLM_TEMPERATURE || "";
         $("thinking").checked = (data.LLM_THINKING || "").toLowerCase() === "true";
         $("web_port").value = data.KIMI_WEB_PORT || "5494";
-        $("work_dir").value = data.KIMI_DEFAULT_WORK_DIR || "";
       } catch (e) {
         setError("Failed to load settings: " + e);
       }
@@ -264,7 +253,6 @@
         LLM_TEMPERATURE: $("temperature").value.trim(),
         LLM_THINKING: $("thinking").checked ? "true" : "false",
         KIMI_WEB_PORT: $("web_port").value.trim(),
-        KIMI_DEFAULT_WORK_DIR: $("work_dir").value.trim(),
       };
       updates[providerToApiKey(provider)] = $("api_key").value;
       updates[providerToBaseUrl(provider)] = $("base_url").value.trim();
@@ -283,15 +271,6 @@
     $("save").addEventListener("click", () => save(false));
     $("save_restart").addEventListener("click", () => save(true));
     $("cancel").addEventListener("click", () => window.pywebview.api.cancel());
-    $("pick_work_dir").addEventListener("click", async () => {
-      try {
-        const chosen = await window.pywebview.api.pick_work_dir();
-        if (chosen) $("work_dir").value = chosen;
-      } catch (e) {
-        setError("Folder picker failed: " + e);
-      }
-    });
-
     window.addEventListener("pywebviewready", load);
   </script>
 </body>

@@ -38,12 +38,6 @@ EDITABLE_KEYS: tuple[str, ...] = (
     "KIMI_WEB_PORT",
     "KIMI_WEB_SESSION_TOKEN",
     "KIMI_WEB_LAN_ONLY",
-    # Paths
-    "KIMI_DEFAULT_WORK_DIR",
-    "KIMI_SESSION_DATA_DIR",
-    "KIMI_OUTPUT_DIR",
-    "CUSTOM_SKILLS_HOST_PATH",
-    "HF_CACHE_HOST_PATH",
 )
 
 SECRET_KEYS: frozenset[str] = frozenset({
