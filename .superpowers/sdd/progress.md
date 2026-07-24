@@ -418,3 +418,27 @@ report any change to these failures separately.
 - Review-fix verification passed focused `56 passed`, all Wiki `301 passed`, and
   approval regressions `29 passed`; Ruff check/format, Pyright (0 errors), and
   `git diff --check` passed. Awaiting independent Task 7 re-review.
+
+### Task 8 — Dedicated Wiki Tool and Managed-Root File Guard
+
+- Added the default-agent `Wiki` tool with controlled `search`, `read`, `lint`,
+  `remember`, and `ingest` operations. Read-only operations return only logical
+  paths and validated page/report data. Remember and ingest prepare structured,
+  high-value candidates without committing; Task 10 supplies the approval and
+  commit boundary.
+- Ingest accepts only `CurrentSource` inline content or a registered
+  workspace-relative file. Raw paths and URLs are absent from the tool schema;
+  archive suffixes, sensitive inline content, ungrounded sources, and unavailable
+  Wiki sessions fail closed. Tool errors do not echo underlying machine paths.
+- Added one shared pre-approval guard to WriteFile and StrReplaceFile. It rejects
+  every local descendant and resolved symlink alias of `Runtime.wiki`'s managed
+  root, directing mutation through the Wiki tool instead.
+- TDD RED evidence: the new focused suite initially failed collection because
+  `kimi_cli.tools.wiki` did not exist. The later no-machine-path test failed as
+  expected before generic error handling was added.
+- Verification passed focused `39 passed, 1 warning` and all `tests/wiki`
+  plus `tests/tools` `653 passed, 1 warning`; Ruff check/format, Pyright (0
+  errors), and `git diff --check` passed. The warning is the existing Loguru
+  Python 3.14 deprecation warning.
+- Implementation commit: submodule `b1a1d70f feat: expose controlled wiki tool`.
+  Awaiting independent Task 8 review before the controller marks this task complete.
