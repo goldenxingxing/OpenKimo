@@ -151,3 +151,13 @@ report any change to these failures separately.
   after implementation, focused tests passed `90 passed, 1 warning` and all Wiki
   tests passed `96 passed, 1 warning`. Ruff check/format, Pyright (0 errors), and
   `git diff --check` passed.
+- Final credential follow-up: the shared URL credential helper now includes URL
+  userinfo as well as sensitive query/fragment parameters, and is used for both
+  source provenance and raw/Markdown body URLs. Body secret assignment/header
+  matching now recognizes standard bulleted and inline forms while excluding
+  URL-query syntax, so ordinary discussion and `topic=api_key` values remain
+  allowed.
+- Final credential verification: the new cases first produced 5 focused failures;
+  focused tests then passed `96 passed, 1 warning` and all Wiki tests passed `102
+  passed, 1 warning`. Ruff check/format, Pyright (0 errors), and
+  `git diff --check` passed.
