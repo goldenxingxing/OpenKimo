@@ -228,3 +228,31 @@ report any change to these failures separately.
   (`2 failed, 3 passed`). Re-verification passed focused `20 passed, 1 warning`
   and all Wiki tests `125 passed, 1 warning`, plus Ruff check/format, Pyright
   (0 errors), and `git diff --check`.
+
+### Task 5 — Disposable FTS5 Search Cache and Markdown Fallback
+
+- Added `WikiSearchIndex` and `SearchResult` with an authoritative-page input
+  boundary: the SQLite database contains only derived logical path, content hash,
+  revision, title, tags, summary, and body rows; Markdown is never modified.
+- The cache detects FTS5 trigram availability for Chinese/mixed-language substring
+  search. Short queries and installations without trigram first use deterministic
+  title/tag matching, then bounded escaped `LIKE`; no FTS5 installation uses the
+  same bounded fallback. Results include deterministic logical-path tie breaks,
+  snippets, hashes, and revisions, with limits clamped to 1–20.
+- `sync()` atomically removes deleted/changed rows and writes only changed hashes;
+  `rebuild()` replaces the disposable cache from validated pages. A query error
+  falls back to the current bounded Markdown page set.
+- Cache opening honors explicit WAL configuration. Invalid SQLite bytes or an
+  incompatible stale cache schema is quarantined to a temporary diagnostic name,
+  replaced with a clean cache, and the diagnostic is removed after successful
+  initialization; unrelated SQLite failures are not deleted.
+- TDD red evidence: `cd kimi-cli && uv run pytest tests/wiki/test_search.py
+  tests/wiki/test_search_recovery.py -q` first failed with seven errors/failures
+  because `kimi_cli.wiki.search` did not exist.
+- Green verification: focused search tests passed `10 passed, 1 warning`; all
+  Wiki tests passed `135 passed, 1 warning`; Ruff check/format passed; Pyright on
+  `src/kimi_cli/wiki/search.py` reported `0 errors`; and `git diff --check`
+  passed. The warning is the existing Loguru Python 3.14 deprecation warning.
+- Implementation commit: submodule `45d76eb feat: index global wiki with fts5`.
+  Awaiting independent Task 5 review before the controller marks this task
+  complete.
