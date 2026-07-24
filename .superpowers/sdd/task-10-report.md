@@ -60,3 +60,29 @@ Approval is requested only after immutable preparation and never while holding
 the writer lock. Approval metadata is bounded to 20 logical page paths, omits
 raw transcripts and absolute paths, and uses the existing transport rather than
 creating a parallel permission mechanism.
+
+## Independent review follow-up
+
+- Added the `session_only` Approval request policy. Wiki normal and AFK writes
+  now always create a real `ApprovalRequest` unless `wiki.write` was explicitly
+  approved for this session. AFK no longer inherits mode-wide auto-approval for
+  Wiki; YOLO still bypasses the popup before calling Approval.
+- Trusted current-turn text now contributes only hash provenance by default.
+  It never elevates `candidate_high_value` or `stable`. A conservative,
+  negation-aware explicit remember intent is tracked separately; verified
+  workspace/reliable sources can also supply deterministic admission evidence.
+  A plain `hi` plus a model-supplied `value="high"` is discarded in both Normal
+  and YOLO modes.
+- Replaced unbounded joined metadata with unique structured lists for pages,
+  sources, duplicate pages, and conflict pages. Every category has a 20-item
+  cap, every string has character and UTF-8 byte caps, the complete serialized
+  block is capped at 8 KiB, and category-specific omitted counts remain visible
+  in the collapsed Web details view.
+- Review RED evidence reproduced AFK completing without a pending request,
+  trusted `hi` being elevated to high/stable, a 9.5 MB approval block from 5000
+  sources, and missing Web category rendering. Negated English and Chinese
+  remember phrases were also reproduced and made fail-closed.
+- Review-fix verification passed the related suite with `795 passed, 2 skipped,
+  2 warnings`, the superproject suite with `75 passed, 2 warnings`, Web
+  typecheck/lint/unit (`3 passed`)/production build, Ruff check/format, Pyright
+  (`0 errors`), and both diff checks.
