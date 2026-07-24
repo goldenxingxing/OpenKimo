@@ -211,3 +211,20 @@ report any change to these failures separately.
   the Task 4 source/models/test (0 errors), and `git diff --check` passed. The
   warning is the existing Loguru Python 3.14 deprecation warning.
 - Awaiting independent task review before the controller marks Task 4 complete.
+- Review follow-up: each workspace now receives a tiny `.openkimo-workspace.json`
+  identity marker containing only schema version and UUID. It is created with
+  exclusive creation plus `fsync`, rejects symlinks/non-regular files, malformed
+  or future-version payloads, and refuses a copied marker that would hijack a
+  still-live workspace identity. A fresh registry instance recovers the UUID
+  after a directory move from this marker, while the absolute path remains only
+  in the central registry.
+- Review follow-up: `workspaces.json` now writes strict
+  `{"schema_version":1,"workspaces":...}` data. The previous unversioned
+  shape has one explicit atomic migration; unsupported versions fail closed and
+  are not rewritten.
+- Review-fix TDD: the new fresh-instance move and symlink-marker tests first
+  failed (`2 failed, 9 passed`); registry-version tests then first failed (`3
+  failed, 11 passed`); strict boolean/float marker-version tests first failed
+  (`2 failed, 3 passed`). Re-verification passed focused `20 passed, 1 warning`
+  and all Wiki tests `125 passed, 1 warning`, plus Ruff check/format, Pyright
+  (0 errors), and `git diff --check`.
