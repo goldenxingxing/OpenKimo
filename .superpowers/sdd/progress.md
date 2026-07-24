@@ -475,3 +475,24 @@ report any change to these failures separately.
   focused `51 passed, 1 warning` and all `tests/wiki` plus `tests/tools` `665
   passed, 1 warning`; Ruff check/format, Pyright (0 errors), and `git diff --check`
   passed. Awaiting Task 8 re-review.
+
+### Task 9 — Bounded Session Awareness and Shared Runtime Wiring
+
+- Added a UTF-8-safe compact index renderer with strict 8 KiB/80-entry defaults,
+  whole-entry truncation, reserved marker space, and hinted-entry ranking.
+- `Runtime.create` now initializes the configured shared Wiki without blocking
+  session creation on failure. Local workspaces receive stable registry UUIDs;
+  remote KAOS sessions retain shared Wiki search/read while leaving local
+  workspace provenance unset.
+- Runtime creates stable trusted session provenance and a fail-closed
+  `WikiToolContext`; per-turn high-value, source, user-confirmation, and approval
+  policy remain explicitly deferred to Task 10.
+- Root and subagent runtimes share the same Wiki manager, workspace UUID, and
+  trusted context references. The default prompt conditionally includes three
+  concise guidance sentences and the bounded index.
+- TDD RED failed during collection because `kimi_cli.wiki.context` did not
+  exist. Final focused verification passed `703 passed, 2 skipped, 2 warnings`
+  across Wiki, tools, Task 9/runtime-role tests, and web tests. Ruff
+  check/format, Pyright (0 errors), and `git diff --check` passed.
+- Implementation commit: submodule `d9db5cf8 feat: add global wiki session
+  awareness`. Awaiting independent Task 9 review.
