@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import importlib
 from pathlib import Path
+from types import SimpleNamespace
 
 
 def test_macos_default_work_directory_is_documents_openkimo(monkeypatch, tmp_path: Path) -> None:
@@ -33,3 +34,36 @@ def test_settings_do_not_expose_path_controls() -> None:
     assert 'id="work_dir"' not in windows_html
     assert '"KIMI_DEFAULT_WORK_DIR",' not in editable_source
     assert '"CUSTOM_SKILLS_HOST_PATH",' not in editable_source
+
+
+def test_legacy_env_cannot_override_managed_desktop_paths(
+    monkeypatch, tmp_path: Path
+) -> None:
+    server = importlib.import_module("packaging.app_main.server")
+    paths = SimpleNamespace(
+        static_dir=tmp_path / "static",
+        work_dir=tmp_path / "Documents" / "OpenKimo",
+        sessions_dir=tmp_path / "state",
+        output_dir=tmp_path / "legacy-output",
+        skill_dir=tmp_path / "skill",
+        kimi_cli=tmp_path / "runtime" / "kimi_cli",
+        env_file=tmp_path / ".env",
+    )
+    monkeypatch.setattr(server.userenv, "env_overlay", lambda _paths: {})
+    monkeypatch.setattr(
+        server.dotenv_io,
+        "read_env",
+        lambda _path: {
+            "KIMI_DEFAULT_WORK_DIR": "/old/work",
+            "KIMI_SHARE_DIR": "/old/sessions",
+            "KIMI_OUTPUT_DIR": "/old/output",
+            "OPENKIMO_SKILL_DIR": "/old/skills",
+        },
+    )
+
+    env = server._build_env(paths)
+
+    assert env["KIMI_DEFAULT_WORK_DIR"] == str(paths.work_dir)
+    assert env["KIMI_SHARE_DIR"] == str(paths.sessions_dir)
+    assert env["KIMI_OUTPUT_DIR"] == str(paths.output_dir)
+    assert env["OPENKIMO_SKILL_DIR"] == str(paths.skill_dir)
