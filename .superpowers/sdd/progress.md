@@ -189,3 +189,25 @@ report any change to these failures separately.
   `test_schema.py` string `HttpUrl` values). Task 3's source and its own test
   file type-check cleanly; no production behavior was weakened to mask those
   fixture-only errors.
+
+### Task 4 — Stable Workspace Registry and Portable Provenance
+
+- Added `WorkspaceRegistry` backed by `.openkimo/workspaces.json`, with an
+  independent cross-process sidecar lock and atomic JSON replacement. It stores
+  canonical absolute workspace roots only in the registry, updates a supplied
+  UUID when a workspace moves, and keeps user-authored Wiki Markdown untouched.
+- `relative_source` emits only workspace UUID, POSIX-relative source path, and
+  content hash. Resolution rejects unknown, missing, absolute, traversing,
+  Windows-style, and symlink-escaping sources; it only returns an existing
+  regular file under the currently registered root.
+- Shared relative-path validation now lives in `wiki.models`, so `SourceRef`,
+  `CurrentSource`, and registry defense-in-depth use the same portable-path
+  rule.
+- TDD red evidence: `cd kimi-cli && uv run pytest tests/wiki/test_workspaces.py
+  -q` failed collection as expected because `kimi_cli.wiki.workspaces` did not
+  exist.
+- Green verification: focused registry tests passed `10 passed, 1 warning`;
+  all Wiki tests passed `115 passed, 1 warning`; Ruff check/format, Pyright on
+  the Task 4 source/models/test (0 errors), and `git diff --check` passed. The
+  warning is the existing Loguru Python 3.14 deprecation warning.
+- Awaiting independent task review before the controller marks Task 4 complete.
