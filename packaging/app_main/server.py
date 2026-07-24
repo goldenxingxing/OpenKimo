@@ -40,12 +40,19 @@ EXIT_CODE_RESTART = 3
 # the equivalent is the CREATE_NEW_PROCESS_GROUP creation flag, which lets
 # us send CTRL_BREAK_EVENT to the child (and only the child) at shutdown.
 _IS_WINDOWS = sys.platform == "win32"
-if _IS_WINDOWS:
-    _POPEN_NEW_GROUP_KWARGS: dict = {
-        "creationflags": subprocess.CREATE_NEW_PROCESS_GROUP,
-    }
-else:
-    _POPEN_NEW_GROUP_KWARGS = {"start_new_session": True}
+
+
+def _popen_new_group_kwargs(platform: str) -> dict:
+    if platform == "win32":
+        new_group = getattr(
+            subprocess, "CREATE_NEW_PROCESS_GROUP", 0x00000200
+        )
+        no_window = getattr(subprocess, "CREATE_NO_WINDOW", 0x08000000)
+        return {"creationflags": new_group | no_window}
+    return {"start_new_session": True}
+
+
+_POPEN_NEW_GROUP_KWARGS = _popen_new_group_kwargs(sys.platform)
 
 # Uvicorn ships a default LOGGING_CONFIG without timestamps. Inject one with
 # ISO-style timestamps in both default and access formatters; written to a

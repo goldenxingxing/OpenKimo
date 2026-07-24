@@ -31,6 +31,12 @@ SEED_SPEC = importlib.util.spec_from_file_location(
 seed_branding = importlib.util.module_from_spec(SEED_SPEC)
 sys.modules[SEED_SPEC.name] = seed_branding
 SEED_SPEC.loader.exec_module(seed_branding)
+SERVER_SPEC = importlib.util.spec_from_file_location(
+    "openkimo_app_main.server", APP_MAIN_DIR / "server.py"
+)
+server = importlib.util.module_from_spec(SERVER_SPEC)
+sys.modules[SERVER_SPEC.name] = server
+SERVER_SPEC.loader.exec_module(server)
 
 
 def _build_config(tmp_path: Path) -> build_windows.BuildConfig:
@@ -142,3 +148,16 @@ def test_branding_seed_preserves_custom_asset(tmp_path: Path) -> None:
     seed_branding.seed_if_needed(paths)
 
     assert _read_branding(paths)["favicon"] == custom
+
+
+def test_windows_server_process_uses_no_window_and_new_group() -> None:
+    options = server._popen_new_group_kwargs("win32")
+
+    assert options["creationflags"] & 0x00000200
+    assert options["creationflags"] & 0x08000000
+
+
+def test_posix_server_process_starts_a_new_session() -> None:
+    assert server._popen_new_group_kwargs("darwin") == {
+        "start_new_session": True
+    }
