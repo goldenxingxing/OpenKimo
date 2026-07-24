@@ -137,3 +137,17 @@ report any change to these failures separately.
   the defined secret aliases. Focused verification passed `69 passed, 1 warning`;
   all Wiki tests passed `77 passed, 1 warning`; Ruff check/format, Pyright (0
   errors), and `git diff --check` passed.
+- Final review follow-up: centralized decoded query/fragment alias and cloud-name
+  normalization in `kimi_cli.wiki.models`, so source provenance and body URLs use
+  the same checks. Added exact aliases for `session_token`, `secret_key`,
+  `private_key`, `user_token`, and X-Amz/X-Goog signing names while preserving
+  harmless prefix words.
+- Final review follow-up: `/api` masking now validates decoded path segments before
+  masking, so literal or percent-encoded `.` / `..` segments are rejected. Body
+  validation also rejects credential-bearing HTTP/Markdown-link query or fragment
+  parameters plus exact secret assignments and Cookie/Authorization-style headers;
+  ordinary discussion text and a harmless `topic=api_key` value remain valid.
+- Final review verification: the new TDD cases first produced 18 focused failures;
+  after implementation, focused tests passed `90 passed, 1 warning` and all Wiki
+  tests passed `96 passed, 1 warning`. Ruff check/format, Pyright (0 errors), and
+  `git diff --check` passed.
