@@ -43,7 +43,7 @@ report any change to these failures separately.
 
 - [x] Task 1 — Generic Packaged Wiki Skeleton and User-Level Path
 - [x] Task 2 — Page Schema, Logical Paths, and Safety
-- [ ] Task 3 — Idempotent Initialization and Versioned Metadata
+- [x] Task 3 — Idempotent Initialization and Versioned Metadata
 - [ ] Task 4 — Stable Workspace Registry and Portable Provenance
 - [ ] Task 5 — Disposable FTS5 Search Cache and Markdown Fallback
 - [ ] Task 6 — Cross-Process Lock, Durable Transaction, and Recovery
@@ -161,3 +161,31 @@ report any change to these failures separately.
   focused tests then passed `96 passed, 1 warning` and all Wiki tests passed `102
   passed, 1 warning`. Ruff check/format, Pyright (0 errors), and
   `git diff --check` passed.
+
+### Task 3 — Idempotent Initialization and Versioned Metadata
+
+- Added `WikiLayout`, `layout_for`, `ensure_wiki`, and `UnsupportedWikiSchema`.
+  Initialization creates the six empty category directories, four user-owned
+  Markdown special files, `.openkimo/journal`, `.openkimo/locks`, a manifest,
+  and the global revision file without replacing existing Markdown.
+- The managed root is canonicalized; managed children must be regular files or
+  real directories contained beneath that root. Existing symlinks and path-type
+  collisions are rejected before they can redirect writes outside the Wiki.
+- The manifest has an exact validated shape and default namespace. Future schema
+  versions fail closed before special Markdown is created; lower versions can
+  advance only through an explicit one-version migration. A migration atomically
+  replaces only the software-owned manifest, never user Markdown.
+- TDD red evidence: `cd kimi-cli && uv run pytest
+  tests/wiki/test_initialization.py -q` initially failed collection because
+  `kimi_cli.wiki.initialize` did not exist. The explicit migration persistence
+  test then failed until manifest replacement was implemented.
+- Green verification: focused initialization tests passed `6 passed, 1 warning`;
+  all Wiki tests passed `105 passed, 1 warning`; Ruff check and format checks
+  passed; Pyright on `src/kimi_cli/wiki` passed with `0 errors`; and
+  `git diff --check` passed. The warning is the existing Loguru Python 3.14
+  deprecation warning.
+- `pyright src/kimi_cli/wiki tests/wiki` still reports six pre-existing type
+  errors in Task 2 test fixtures (`test_path_safety.py` string UUID values and
+  `test_schema.py` string `HttpUrl` values). Task 3's source and its own test
+  file type-check cleanly; no production behavior was weakened to mask those
+  fixture-only errors.
