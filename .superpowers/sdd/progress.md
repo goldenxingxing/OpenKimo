@@ -109,3 +109,14 @@ report any change to these failures separately.
 - Re-verification after the review fix: focused schema/path tests passed `43
   passed, 1 warning`; all Wiki tests passed `49 passed, 1 warning`; Ruff
   check/format, Pyright (0 errors), and `git diff --check` passed.
+- Second review follow-up: provenance now inspects both URL query and fragment
+  parameter components after percent decoding and separator/case normalization.
+  It rejects OAuth, cookie/session, user-password, API-key, signature, and cloud
+  signing families (including `client_secret`, `refresh_token`, `id_token`,
+  `auth_token`, `x-goog-signature`, and `sig`) while retaining ordinary parameters.
+- Second review follow-up: page-body guarding now rejects `file:` URIs, known
+  machine-specific POSIX roots, Windows drive paths, and UNC paths, but explicitly
+  permits `./docs/intro`, Markdown `/docs/intro`, `/api/v1/items`, and HTTPS URLs.
+  Re-verification passed focused `56 passed, 1 warning` and all Wiki tests `62
+  passed, 1 warning`, with Ruff check/format, Pyright (0 errors), and
+  `git diff --check` passing.
