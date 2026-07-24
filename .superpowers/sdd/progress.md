@@ -463,3 +463,15 @@ report any change to these failures separately.
 - Review-fix verification passed focused `47 passed, 1 warning` and all
   `tests/wiki` plus `tests/tools` `661 passed, 1 warning`; Ruff check/format,
   Pyright (0 errors), and `git diff --check` passed. Awaiting Task 8 re-review.
+- Cross-platform re-review follow-up: Windows uses final target/parent resolution,
+  symlink and link-count rejection, lstat/opened-handle identity comparison, and
+  descriptor writes, so ordinary one-link workspace files remain writable while
+  managed paths, aliases, and hardlinks are rejected. Non-local KAOS no longer
+  applies local filesystem resolution or blocks every normal write; it blocks only
+  an explicitly expressible managed-root path (the local root or trusted future
+  `wiki_remote_roots` mapping), without exposing a local path in output.
+- Cross-platform probes cover simulated Windows and non-local KAOS WriteFile and
+  StrReplaceFile ordinary writes plus managed-root rejection. Verification passed
+  focused `51 passed, 1 warning` and all `tests/wiki` plus `tests/tools` `665
+  passed, 1 warning`; Ruff check/format, Pyright (0 errors), and `git diff --check`
+  passed. Awaiting Task 8 re-review.

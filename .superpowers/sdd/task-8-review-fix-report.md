@@ -46,3 +46,22 @@ candidate data and assumed that every session ID was a UUID.
 - Focused tool tests: `47 passed, 1 warning`.
 - Wiki and tool suite: `661 passed, 1 warning`.
 - Ruff check/format, Pyright, and `git diff --check`: passed.
+
+## Cross-platform re-review probes
+
+9. Simulated Windows final verification allows a normal one-link workspace file
+   for both WriteFile and StrReplaceFile, while direct Wiki paths, symlink aliases,
+   and hardlinks are rejected.
+10. Simulated non-local KAOS allows ordinary remote file operations. It rejects a
+    path that explicitly equals the managed local root (or any future
+    `wiki_remote_roots` mapping) without returning the local root in tool output.
+
+Windows now resolves the final leaf and parent, rejects a symlink or link count
+other than one, compares the lstat and opened-handle identities, then writes via
+the opened descriptor. Non-local KAOS never performs a local `Path.resolve` on a
+remote target: only explicitly configured textual root mappings are blocked, and
+ordinary remote writes continue through KAOS.
+
+- Cross-platform verification: focused `51 passed, 1 warning`; all `tests/wiki`
+  plus `tests/tools` `665 passed, 1 warning`; Ruff check/format, Pyright (0
+  errors), and `git diff --check` passed.
