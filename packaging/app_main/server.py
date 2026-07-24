@@ -120,6 +120,7 @@ def _build_env(p: AppPaths) -> dict[str, str]:
     env["KIMI_SESSIONS_DIR"] = str(p.sessions_dir)
     env["KIMI_SHARE_DIR"] = str(p.sessions_dir)
     env["KIMI_OUTPUT_DIR"] = str(p.output_dir)
+    env["OPENKIMO_SKILL_DIR"] = str(p.skill_dir)
 
     # 4. User-overlay Python (so kimi-cli's shell tool can pip install).
     env.update(userenv.env_overlay(p))
@@ -137,6 +138,7 @@ def _build_env(p: AppPaths) -> dict[str, str]:
     env["KIMI_USE_CONTAINERS"] = "false"
     env["ENABLE_BROWSER"] = "false"
     env["ENABLE_JUPYTER"] = "false"
+    env["OPENKIMO_SKILL_DIR"] = str(p.skill_dir)
 
     # 7. HF_HOME from the optional Paths setting.
     hf = user_env.get("HF_CACHE_HOST_PATH") or env.get("HF_CACHE_HOST_PATH", "")
