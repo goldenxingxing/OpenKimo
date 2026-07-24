@@ -496,3 +496,14 @@ report any change to these failures separately.
   check/format, Pyright (0 errors), and `git diff --check` passed.
 - Implementation commit: submodule `d9db5cf8 feat: add global wiki session
   awareness`. Awaiting independent Task 9 review.
+- Independent review follow-up added stable bounded prompt-block replacement for
+  resumed and pre-upgrade sessions, atomic context persistence, one deduplicated
+  localized fail-open Wiki warning, and thread-safe/idempotent root-owned Wiki
+  lifecycle cleanup across CLI shutdown, Web worker exit, startup failures, and
+  cancellation. Subagents never close the shared manager.
+- Review RED probes reproduced missing prompt APIs, unclosed worker/runtime paths,
+  and leaked partial initialization on cancellation. Final verification passed
+  related `734 passed, 2 skipped, 2 warnings` plus Context `20 passed, 1 warning`;
+  Ruff check/format, Pyright (0 errors), and `git diff --check` passed.
+- Review-fix commit: submodule `8c0314c3 fix: harden global wiki session wiring`.
+  Awaiting independent Task 9 re-review.
