@@ -376,3 +376,33 @@ report any change to these failures separately.
   source and the changed Task 6 source/tests, and `git diff --check` passed.
 - Second review-fix commit: submodule `08598b5 fix: gate writes on pending wiki
   cleanup`. Awaiting independent Task 6 re-review.
+
+### Task 7 — WikiManager, Value Gate, Merge, Audit, and Lint
+
+- Added the application-level `WikiManager` boundary for shared initialization,
+  search/read, high-value candidate preparation, explicit commit, current-source
+  ingest, and read-only lint.
+- The permission interval is lock-free: preparation returns a complete
+  revision-checked transaction, and commit delegates directly to Task 6 without
+  wrapping a second exclusive lock.
+- Cache refresh captures a complete authoritative Markdown snapshot at revision R
+  under one read lock, releases that lock before SQLite callbacks, syncs the full
+  snapshot, and acknowledges exactly R; stale acknowledgements remain safe.
+- The deterministic gate rejects low/medium, one-turn, unstable, ungrounded,
+  sensitive, and duplicate proposals in memory. Mixed candidates discard duplicate
+  pages while retaining novel pages; same-page provenance improvements merge.
+- Conflict updates preserve the existing sourced position plus an explicit
+  additional sourced position, increment page revision, rebuild the categorized
+  index, and append a delimiter-safe audit record.
+- Lint reports malformed/non-UTF-8 pages, dead links, orphans, duplicate
+  hashes/claims, conflict markers, and missing provenance without modifying
+  content.
+- TDD RED evidence and the complete implementation report are recorded in
+  `.superpowers/sdd/task-7-report.md`.
+- Fresh verification passed focused `30 passed`, all Wiki `281 passed`, and
+  approval regressions `29 passed`; Ruff check/format, Pyright (0 errors), and
+  `git diff --check` passed. The sole warning is the existing Loguru Python 3.14
+  deprecation warning.
+- Implementation commit: submodule `e547b315 feat: add global wiki manager`.
+  Awaiting independent Task 7 review before the controller marks this task
+  complete.
