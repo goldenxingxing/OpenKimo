@@ -134,10 +134,16 @@ def _build_env(p: AppPaths) -> dict[str, str]:
     # 6. Layer the user's .env on top (Settings-managed values).
     user_env = dotenv_io.read_env(p.env_file)
     env.update(user_env)  # user's choices win over our defaults
-    # …except for the local-mode toggles, which must always win:
+    # …except for desktop-owned mode and storage paths, which must always win.
+    # Legacy .env files may still contain the removed Paths settings.
     env["KIMI_USE_CONTAINERS"] = "false"
     env["ENABLE_BROWSER"] = "false"
     env["ENABLE_JUPYTER"] = "false"
+    env["KIMI_DEFAULT_WORK_DIR"] = str(p.work_dir)
+    env["KIMI_SESSIONS_DIR"] = str(p.sessions_dir)
+    env["KIMI_SHARE_DIR"] = str(p.sessions_dir)
+    env["KIMI_SESSION_DATA_DIR"] = str(p.sessions_dir)
+    env["KIMI_OUTPUT_DIR"] = str(p.output_dir)
     env["OPENKIMO_SKILL_DIR"] = str(p.skill_dir)
 
     # 7. HF_HOME from the optional Paths setting.
