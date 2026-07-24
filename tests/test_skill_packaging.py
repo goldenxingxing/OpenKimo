@@ -24,6 +24,19 @@ def test_packaged_skills_do_not_include_local_secrets_or_caches() -> None:
     assert not tuple(builtin.rglob(".DS_Store"))
     assert not tuple(builtin.rglob("__pycache__"))
     assert not tuple(builtin.rglob("*.pyc"))
+    assert not tuple(builtin.rglob("node_modules"))
+    assert not tuple(path for path in builtin.rglob("obj") if path.is_dir())
+
+
+def test_xlsx_skill_uses_cross_platform_launcher() -> None:
+    root = Path(__file__).parents[1]
+    xlsx = root / "kimi-cli/src/kimi_cli/skills/xlsx"
+    instructions = (xlsx / "SKILL.md").read_text(encoding="utf-8")
+
+    assert "python scripts/xlsx_cli.py" in instructions
+    assert "./scripts/Xlsx " not in instructions
+    assert (xlsx / "scripts/xlsx_cli.py").is_file()
+    assert (xlsx / "scripts/Xlsx-linux-x86_64").is_file()
 
 
 def test_pyinstaller_collects_builtin_skills() -> None:
