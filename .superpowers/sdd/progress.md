@@ -352,3 +352,27 @@ report any change to these failures separately.
 - Review-fix commit: submodule `55bbb9f fix: harden wiki transaction recovery`.
   Awaiting independent Task 6 re-review before the controller marks this task
   complete.
+- Task 6 re-review retained one Critical/Important cleanup gate and one Important
+  fault-injection coverage gap. A committed journal whose cleanup fails before
+  deletion now reports `post_commit_cleanup_pending` to readers but rejects both
+  `prepare` and `commit` with `WikiRecoveryRequired(retryable=True)` and an
+  actionable recovery instruction. Once a later recovery durably removes the
+  journal, writes resume without setting quarantine.
+- The second review RED suite reproduced the missing behavior with 27 failures
+  across the pending-cleanup gate and previously absent sibling-temp failpoints.
+  `_durable_replace` now exposes actual post-create, post-write, post-file-`fsync`,
+  pre-`os.replace`, post-replace, and post-directory-`fsync` seams. Journal
+  cleanup exposes a pre-delete seam in addition to post-delete and
+  post-directory-`fsync`.
+- Real injected-failure recovery tests now exercise every page/index/log/revision
+  target boundary, prepared/committed record boundary, cache-marker and journal
+  cleanup boundary, rollback replace/remove boundary, plus the existing
+  artifact, acknowledgement, and directory-flush boundaries. Tests assert a
+  complete before/after authority state, retryability, cache invalidation
+  revision, and absence of false quarantine rather than merely checking
+  failpoint names.
+- Second review-fix verification passed focused `116 passed, 1 warning` and all
+  Wiki tests `251 passed, 1 warning`. Ruff check/format, Pyright on all Wiki
+  source and the changed Task 6 source/tests, and `git diff --check` passed.
+- Second review-fix commit: submodule `08598b5 fix: gate writes on pending wiki
+  cleanup`. Awaiting independent Task 6 re-review.
