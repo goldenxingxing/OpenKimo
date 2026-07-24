@@ -56,6 +56,7 @@ Usage examples are in ``packaging/README.md``.
 from __future__ import annotations
 
 import argparse
+import base64
 import datetime as dt
 import hashlib
 import json
@@ -89,6 +90,11 @@ PY_STANDALONE_URL = (
     f"{PY_STANDALONE_TAG}/cpython-{PY_STANDALONE_VERSION}+{PY_STANDALONE_TAG}"
     f"-{PY_STANDALONE_TARGET}.tar.gz"
 )
+LOGO_MAX_BYTES = 512 * 1024
+FAVICON_MAX_BYTES = 256 * 1024
+LEGACY_BUILTIN_ASSET_SHA256 = [
+    "dbd00e2ad61ea8832ef0b024662a4a8a5d1b66f0599d5d42e1c9688b9d4cfdf6"
+]
 
 
 # ---- config ---------------------------------------------------------------
@@ -102,6 +108,8 @@ class BuildConfig:
     copyright: str
     py_version: str
     icon: Path
+    logo: Path
+    favicon: Path
     brand_name: str
     page_title: str
     output_dir: Path
@@ -146,6 +154,10 @@ def parse_args(argv: list[str]) -> BuildConfig:
                         default=bapp.get("copyright",
                                          "© 2026 OpenKimo Contributors. Apache License 2.0."))
     parser.add_argument("--icon", default=bapp.get("icon", "icon.png"))
+    parser.add_argument("--logo", default=bapp.get("logo", bapp.get("icon", "icon.png")))
+    parser.add_argument(
+        "--favicon", default=bapp.get("favicon", bapp.get("icon", "icon.png"))
+    )
     parser.add_argument("--brand-name", default=bbrand.get("brand_name"))
     parser.add_argument("--page-title", default=bbrand.get("page_title"))
     parser.add_argument("--py-version", default=bpy.get("version", "3.12"))
@@ -171,6 +183,8 @@ def parse_args(argv: list[str]) -> BuildConfig:
         build_number = f"{today}.1"
 
     icon = (ROOT / args.icon).resolve()
+    logo = (ROOT / args.logo).resolve()
+    favicon = (ROOT / args.favicon).resolve()
 
     return BuildConfig(
         app_name=app_name,
@@ -180,6 +194,8 @@ def parse_args(argv: list[str]) -> BuildConfig:
         copyright=args.copyright,
         py_version=args.py_version,
         icon=icon,
+        logo=logo,
+        favicon=favicon,
         brand_name=args.brand_name or app_name,
         page_title=args.page_title or app_name,
         output_dir=(ROOT / args.output_dir).resolve(),
@@ -575,6 +591,13 @@ def overlay_fresh_frontend(runtime: Path) -> None:
 
 # ---- 8. brand.json -------------------------------------------------------
 
+def _data_url(path: Path, max_bytes: int) -> str:
+    raw = path.read_bytes()
+    if len(raw) > max_bytes:
+        raise ValueError(f"{path} exceeds {max_bytes} bytes")
+    return "data:image/png;base64," + base64.b64encode(raw).decode("ascii")
+
+
 def write_brand_json(cfg: BuildConfig, dest: Path) -> None:
     """Drop the brand.json at install_root (read by paths.py at runtime)."""
     data = {
@@ -588,7 +611,10 @@ def write_brand_json(cfg: BuildConfig, dest: Path) -> None:
             "brand_name": cfg.brand_name,
             "page_title": cfg.page_title,
             "version": cfg.version,
+            "logo": _data_url(cfg.logo, LOGO_MAX_BYTES),
+            "favicon": _data_url(cfg.favicon, FAVICON_MAX_BYTES),
         },
+        "branding_legacy_asset_sha256": LEGACY_BUILTIN_ASSET_SHA256,
     }
     dest.parent.mkdir(parents=True, exist_ok=True)
     dest.write_text(json.dumps(data, indent=2), encoding="utf-8")
