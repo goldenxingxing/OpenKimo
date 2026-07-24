@@ -102,6 +102,7 @@ class AppPaths:
     sessions_dir: Path          # app_support / sessions
     output_dir: Path            # app_support / output
     skill_dir: Path             # app_support / skill (writable overlay)
+    wiki_dir: Path              # app_support / users / default / wiki
     logs: Path                  # %LOCALAPPDATA% / <AppName> / Logs
     server_log: Path            # logs / server.log
     pip_log: Path               # logs / pip.log
@@ -205,6 +206,7 @@ def app_paths() -> AppPaths:
         sessions_dir=app_support / "sessions",
         output_dir=app_support / "output",
         skill_dir=app_support / "skill",
+        wiki_dir=app_support / "users" / "default" / "wiki",
         logs=logs,
         server_log=logs / "server.log",
         pip_log=logs / "pip.log",
@@ -215,7 +217,7 @@ def app_paths() -> AppPaths:
 
 def ensure_dirs() -> AppPaths:
     p = app_paths()
-    for d in (p.app_support, p.work_dir, p.sessions_dir, p.output_dir, p.logs):
+    for d in (p.app_support, p.work_dir, p.sessions_dir, p.output_dir, p.wiki_dir, p.logs):
         d.mkdir(parents=True, exist_ok=True)
     return p
 
