@@ -12,6 +12,7 @@ requirements = []
 [[frameworks]]
 name = "framework-kimi"
 runtime = "cpython-3.12"
+dynlib_exclude = ["**/skills/docx/**"]
 requirements = [
     # kimi-cli wheel + workspace member wheels are appended here at build
     # time by _create_resolved_toml(). The rest is pulled in transitively.
