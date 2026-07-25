@@ -27,9 +27,13 @@ jobs:
       - name: Mirror Git repository
         env:
           GITEE_ACCESS_TOKEN: ${{ secrets.GITEE_ACCESS_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GIT_TERMINAL_PROMPT: '0'
         run: |
-          git clone --mirror https://github.com/goldenxingxing/OpenKimo.git mirror.git
+          # The code repo is private; clone with the workflow token.
+          git clone --mirror \
+            "https://x-access-token:${GITHUB_TOKEN}@github.com/goldenxingxing/OpenKimo.git" \
+            mirror.git
           cd mirror.git
           git remote set-url --push origin https://gitee.com/qunwei/OpenKimo.git
           git config credential.helper \
