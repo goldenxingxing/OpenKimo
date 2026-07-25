@@ -301,7 +301,7 @@ def main() -> None:
         parser.error("--tag must start with 'v'")
 
     github_owner, github_repository = parse_repository(
-        require_environment("GITHUB_REPOSITORY"), "GITHUB_REPOSITORY"
+        require_environment("RELEASE_SOURCE_REPOSITORY"), "RELEASE_SOURCE_REPOSITORY"
     )
     gitee_owner, gitee_repository = parse_repository(
         require_environment("GITEE_REPOSITORY"), "GITEE_REPOSITORY"
