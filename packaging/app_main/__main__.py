@@ -24,7 +24,7 @@ from pathlib import Path
 
 import rumps
 
-from . import dotenv_io, paths as paths_mod, seed_branding, userenv
+from . import dotenv_io, paths as paths_mod, runtime_repair, seed_branding, userenv
 from .server import ServerState, UvicornSupervisor
 
 log = logging.getLogger(__name__)
@@ -456,6 +456,10 @@ def main() -> int:
         force=True,
     )
     log.info("app=%s slug=%s bundle=%s", p.app_name, p.slug, p.bundle)
+
+    # Heal venvstacks configs baked with the build machine's paths, before the
+    # uvicorn server (and its worker subprocesses) start the bundled Python.
+    runtime_repair.repair_layer_configs(p.bundled_python_root.parent)
 
     # Make our packaged kimi_cli importable inside the menu-bar process too,
     # so seed_branding can import the SQLite CRUD helpers.
