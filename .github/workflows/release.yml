@@ -58,11 +58,14 @@ jobs:
           cache-from: type=gha,scope=sandbox
           cache-to: type=gha,mode=max,scope=sandbox
 
-      # ---- GitHub Release ----
+      # ---- GitHub Release (published to the public downloads repo; this
+      # code repo is private, so its releases would not be downloadable) ----
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          generate_release_notes: true
+          repository: goldenxingxing/OpenKimo-releases
+          token: ${{ secrets.RELEASES_TOKEN }}
+          tag_name: ${{ github.ref_name }}
           body: |
             ## Docker Images
 
@@ -77,8 +80,8 @@ jobs:
 
             ```bash
             # 1. Download config files
-            curl -O https://raw.githubusercontent.com/goldenxingxing/OpenKimo/${{ github.ref_name }}/docker-compose.yml
-            curl -O https://raw.githubusercontent.com/goldenxingxing/OpenKimo/${{ github.ref_name }}/.env.example
+            curl -O https://raw.githubusercontent.com/goldenxingxing/OpenKimo-releases/main/docker-compose.yml
+            curl -O https://raw.githubusercontent.com/goldenxingxing/OpenKimo-releases/main/.env.example
             cp .env.example .env
 
             # 2. Set your API key in .env
@@ -130,6 +133,9 @@ jobs:
       - name: Upload DMG to Release
         uses: softprops/action-gh-release@v2
         with:
+          repository: goldenxingxing/OpenKimo-releases
+          token: ${{ secrets.RELEASES_TOKEN }}
+          tag_name: ${{ github.ref_name }}
           files: dist/*.dmg
           fail_on_unmatched_files: true
 
@@ -177,6 +183,9 @@ jobs:
       - name: Upload DMG to Release
         uses: softprops/action-gh-release@v2
         with:
+          repository: goldenxingxing/OpenKimo-releases
+          token: ${{ secrets.RELEASES_TOKEN }}
+          tag_name: ${{ github.ref_name }}
           files: dist/*.dmg
           fail_on_unmatched_files: true
 
@@ -252,5 +261,8 @@ jobs:
       - name: Upload installer to Release
         uses: softprops/action-gh-release@v2
         with:
+          repository: goldenxingxing/OpenKimo-releases
+          token: ${{ secrets.RELEASES_TOKEN }}
+          tag_name: ${{ github.ref_name }}
           files: dist-win/*.exe
           fail_on_unmatched_files: true

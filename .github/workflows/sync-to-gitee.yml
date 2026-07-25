@@ -59,7 +59,9 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GITEE_ACCESS_TOKEN: ${{ secrets.GITEE_ACCESS_TOKEN }}
-          GITHUB_REPOSITORY: ${{ github.repository }}
-          GITEE_REPOSITORY: qunwei/OpenKimo
+          # Releases live in the public downloads repo; the code repos
+          # (goldenxingxing/OpenKimo, gitee qunwei/OpenKimo) are private.
+          GITHUB_REPOSITORY: goldenxingxing/OpenKimo-releases
+          GITEE_REPOSITORY: qunwei/OpenKimo-releases
           RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.event.workflow_run.head_branch }}
         run: python3 .github/scripts/sync_gitee_release.py --tag "$RELEASE_TAG"
