@@ -6,6 +6,20 @@ this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [v0.1.24] — 2026-07-25
+
+### Fixed
+
+- **Windows worker 启动即崩（InvalidToolError: InstallSkill）**：`skill_install.py` 的 `from __future__ import annotations` 让 `Runtime` 注解变成字符串，依赖注入查找失败，一个工具加载失败杀死整个 worker。kimi-cli 端改用 `inspect.signature(eval_str=True)` 解析注解，且缺依赖的工具降级为"跳过 + 警告"而不再让 worker 崩溃。
+- **mac 端 `Could not find platform dependent libraries <exec_prefix>` 警告**：CI 构建把 runner 的绝对路径烤进各 venvstacks 层的 `pyvenv.cfg` / `sitecustomize.py`，装到用户机器上路径失效，每次启动捆绑 Python 都向 server.log 打警告。app_main 启动时检测失效的 `home` 并原地重跑该层的 postinstall 生成逻辑（跳过字节码预编译）自愈。
+- **Windows 右键 Settings 弹出 python.exe 控制台窗口**：Settings 子进程改用 `pythonw.exe` + `CREATE_NO_WINDOW` 启动。
+- **Windows 卸载报 "cannot call WizardIsTaskSelected"**：该函数在卸载阶段不可用（"同时清除用户数据"选项因此从未生效）。安装完成时把勾选结果落成 marker 文件，卸载时读回执行。
+
+### Changed
+
+- **会话中的身份跟随品牌**：agent 自我介绍从写死的 "Kimi Code CLI" 改为渲染 `KIMI_AGENT_NAME` 模板变量；桌面端把品牌名（OpenKimo 或白标 `--app-name`）通过环境变量注入。
+- **Windows Settings 页面与 mac 版对齐**：多 Provider 编辑（名称/类型/API Key/Base URL/模型/最大上下文/capabilities/默认项）、Thinking 与 Temperature、Session Token 生成、LAN Only、品牌重置，保存语义（`LLM_PROVIDERS` 写入、legacy 键清理、`config.toml` 同步、LLM 变更自动升级为重启)与 mac 一致，并新增从 mac 源码直接取常量做对比的 parity 测试。
+
 ## [v0.1.4] — 2026-05-16
 
 本版本以"会话定制 + 配置闭环 + HEIC 兼容性收尾"为主线：新增自定义 Agent 启动会话功能，把 macOS Settings 写入 `.env` 后真正同步到 `config.toml`（之前 base_url/api_key 改了没生效），并补齐 HEIC 上传链路上的两处兜底。
