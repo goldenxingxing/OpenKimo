@@ -74,7 +74,13 @@ class GiteeReleaseTargetTests(unittest.TestCase):
         self.assertIn("245.5 MiB", body)
 
     def test_creates_release_when_tag_is_absent(self):
-        api = FakeApi([sync.ApiError(404, "request failed with HTTP 404"), {"id": 7}])
+        api = FakeApi(
+            [
+                sync.ApiError(404, "request failed with HTTP 404"),
+                {"default_branch": "master"},
+                {"id": 7},
+            ]
+        )
         target = sync.GiteeReleaseTarget(api, "qunwei", "OpenKimo")
 
         release_id = target.sync_metadata(
@@ -85,7 +91,23 @@ class GiteeReleaseTargetTests(unittest.TestCase):
         self.assertEqual(api.calls[-1].method, "POST")
         self.assertEqual(api.calls[-1].path, "/repos/qunwei/OpenKimo/releases")
         self.assertEqual(api.calls[-1].fields["tag_name"], "v0.1.19")
-        self.assertEqual(api.calls[-1].fields["target_commitish"], "main")
+        # Anchored to the Gitee repo's own default branch, not GitHub's.
+        self.assertEqual(api.calls[-1].fields["target_commitish"], "master")
+
+    def test_create_fails_clearly_when_gitee_repo_is_empty(self):
+        api = FakeApi(
+            [
+                sync.ApiError(404, "request failed with HTTP 404"),
+                {"default_branch": None},
+            ]
+        )
+        target = sync.GiteeReleaseTarget(api, "qunwei", "OpenKimo")
+
+        with self.assertRaises(sync.ApiError) as ctx:
+            target.sync_metadata(
+                sync.Release(tag="v0.1.19", name="v0.1.19", body="notes", assets=[])
+            )
+        self.assertIn("no default branch", str(ctx.exception))
 
     def test_updates_release_when_tag_exists(self):
         api = FakeApi([{"id": 7}, {"id": 7}])

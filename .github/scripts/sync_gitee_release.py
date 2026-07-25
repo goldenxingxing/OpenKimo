@@ -31,7 +31,6 @@ class Release:
     name: str
     body: str
     assets: list[Asset]
-    target_commitish: str = "main"
 
     def body_with_downloads(self) -> str:
         if not self.assets:
@@ -204,7 +203,6 @@ class GitHubReleaseSource:
                 )
                 for asset in payload.get("assets", [])
             ],
-            target_commitish=payload.get("target_commitish") or "main",
         )
 
     def download_asset(self, asset: Asset, destination: Path) -> None:
@@ -220,6 +218,20 @@ class GiteeReleaseTarget:
     @property
     def releases_path(self) -> str:
         return f"/repos/{self.owner}/{self.repository}/releases"
+
+    def default_branch(self) -> str:
+        # The GitHub release's target_commitish is meaningless on Gitee (the
+        # release repo has its own, unrelated history), so releases are
+        # anchored to whatever branch the Gitee repo considers default.
+        repo = self.api.request_json("GET", f"/repos/{self.owner}/{self.repository}")
+        branch = repo.get("default_branch")
+        if not branch:
+            raise ApiError(
+                400,
+                f"Gitee repo {self.owner}/{self.repository} has no default "
+                "branch (empty repository?) — push an initial commit first",
+            )
+        return str(branch)
 
     def sync_metadata(self, release: Release) -> int:
         encoded_tag = urllib.parse.quote(release.tag, safe="")
@@ -239,7 +251,7 @@ class GiteeReleaseTarget:
             "prerelease": "false",
         }
         if existing is None:
-            fields["target_commitish"] = release.target_commitish
+            fields["target_commitish"] = self.default_branch()
             synchronized = self.api.request_json(
                 "POST", self.releases_path, fields=fields
             )

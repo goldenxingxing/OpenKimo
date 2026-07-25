@@ -54,13 +54,15 @@ class SyncToGiteeWorkflowTests(unittest.TestCase):
         self.assertIn("${{ secrets.GITEE_ACCESS_TOKEN }}", text)
         self.assertNotRegex(text, r"\b(?:ghp_|gitee_)[A-Za-z0-9_-]{20,}")
 
-    def test_public_github_source_does_not_require_the_gitee_ssh_key(self):
+    def test_private_github_source_clones_with_workflow_token(self):
         text = WORKFLOW.read_text()
 
         self.assertIn(
-            "git clone --mirror https://github.com/goldenxingxing/OpenKimo.git",
+            "https://x-access-token:${GITHUB_TOKEN}@github.com/goldenxingxing/OpenKimo.git",
             text,
         )
+        # No SSH key needed: both GitHub and Gitee sides authenticate over HTTPS.
+        self.assertNotIn("GITEE_RSA_PRIVATE_KEY", text)
 
     def test_git_mirror_uses_gitee_token_over_https(self):
         text = WORKFLOW.read_text()
