@@ -69,6 +69,7 @@ def test_legacy_env_cannot_override_managed_desktop_paths(
 ) -> None:
     server = importlib.import_module("packaging.app_main.server")
     paths = SimpleNamespace(
+        app_name="OpenKimo",
         static_dir=tmp_path / "static",
         app_support=tmp_path / "state",
         work_dir=tmp_path / "Documents" / "OpenKimo",
@@ -101,3 +102,27 @@ def test_legacy_env_cannot_override_managed_desktop_paths(
     assert env["OPENKIMO_SKILL_DIR"] == str(paths.skill_dir)
     assert env["OPENKIMO_APP_DATA_DIR"] == str(paths.app_support)
     assert env["OPENKIMO_WIKI_ROOT"] == str(paths.wiki_dir)
+    assert env["KIMI_AGENT_NAME"] == "OpenKimo"
+
+
+def test_agent_identity_follows_app_brand(monkeypatch, tmp_path: Path) -> None:
+    """The in-conversation identity must follow the branded app name."""
+    server = importlib.import_module("packaging.app_main.server")
+    paths = SimpleNamespace(
+        app_name="ACME Agent",
+        static_dir=tmp_path / "static",
+        app_support=tmp_path / "state",
+        work_dir=tmp_path / "Documents" / "ACME Agent",
+        sessions_dir=tmp_path / "state" / "sessions",
+        output_dir=tmp_path / "output",
+        skill_dir=tmp_path / "skill",
+        wiki_dir=tmp_path / "users" / "default" / "wiki",
+        kimi_cli=tmp_path / "runtime" / "kimi_cli",
+        env_file=tmp_path / ".env",
+    )
+    monkeypatch.setattr(server.userenv, "env_overlay", lambda _paths: {})
+    monkeypatch.setattr(server.dotenv_io, "read_env", lambda _path: {})
+
+    env = server._build_env(paths)
+
+    assert env["KIMI_AGENT_NAME"] == "ACME Agent"

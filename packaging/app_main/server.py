@@ -116,6 +116,9 @@ def _build_env(p: AppPaths) -> dict[str, str]:
         env["KIMI_WEB_STATIC_DIR"] = str(p.static_dir)
 
     # 3. User-mutable storage paths.
+    # The identity the agent presents in conversations follows the app brand
+    # (a user .env may still override it below).
+    env["KIMI_AGENT_NAME"] = p.app_name
     env["KIMI_DEFAULT_WORK_DIR"] = str(p.work_dir)
     env["KIMI_SESSIONS_DIR"] = str(p.sessions_dir)
     env["KIMI_SHARE_DIR"] = str(p.sessions_dir)
