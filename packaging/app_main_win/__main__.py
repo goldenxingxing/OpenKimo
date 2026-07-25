@@ -263,7 +263,11 @@ class OpenKimoApp:
         if self._settings_proc and self._settings_proc.poll() is None:
             return
 
-        python = self.paths.bundled_python
+        # pythonw.exe keeps the subprocess windowless; python.exe would flash
+        # a console window behind the Settings UI.
+        python = self.paths.bundled_python.with_name("pythonw.exe")
+        if not python.exists():
+            python = self.paths.bundled_python
         if not python.exists():
             # Dev fallback: use whatever interpreter is running us.
             python = Path(sys.executable)
@@ -283,6 +287,7 @@ class OpenKimoApp:
                 [str(python), "-m", "packaging.app_main_win.settings_window"],
                 env=env,
                 cwd=str(self.paths.app_support),
+                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
             )
         except Exception:
             log.exception("failed to launch Settings window")

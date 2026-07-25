@@ -71,7 +71,8 @@
     }
     input[type="text"],
     input[type="password"],
-    input[type="number"] {
+    input[type="number"],
+    select {
       flex: 1;
       padding: 6px 8px;
       border: 1px solid var(--border);
@@ -81,12 +82,17 @@
       color: var(--fg);
       font-family: inherit;
     }
-    input[type="number"] { max-width: 120px; }
-    input:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
-    .radio-group { display: flex; gap: 12px; }
-    .radio-group label { flex: initial; color: var(--fg); }
-    .radio-group input { margin-right: 4px; }
-    .checkbox-row > label { flex: 1; }
+    input[type="number"] { max-width: 140px; }
+    select { flex: 0 1 200px; }
+    input[type="range"] { flex: 1; max-width: 260px; }
+    input:focus, select:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
+    .slider-value {
+      color: var(--muted);
+      min-width: 36px;
+      text-align: right;
+      font-variant-numeric: tabular-nums;
+    }
+    .checkbox-row > label { flex: 0 0 130px; }
     button {
       padding: 6px 14px;
       border-radius: 4px;
@@ -97,22 +103,66 @@
       font-family: inherit;
       color: var(--fg);
     }
+    button:hover { background: #f0f0f0; }
     button.primary {
       background: var(--accent);
       color: #fff;
       border-color: var(--accent);
     }
-    button.primary:hover { filter: brightness(1.08); }
-    button:hover { background: #f0f0f0; }
-    button.primary:hover { background: var(--accent); }
+    button.primary:hover { background: var(--accent); filter: brightness(1.08); }
+    button.flat {
+      border: none;
+      background: transparent;
+      color: var(--accent);
+      padding-left: 0;
+    }
+    button.flat:hover { background: transparent; text-decoration: underline; }
+    /* Provider card — mirrors the macOS accent-bar row */
+    .provider {
+      border-left: 3px solid var(--accent);
+      padding: 8px 12px 12px 9px;
+      margin: 12px 0;
+      background: #fafafa;
+      border-radius: 0 6px 6px 0;
+    }
+    .provider .ptitle {
+      font-size: 11px;
+      color: var(--muted);
+      margin-bottom: 8px;
+    }
+    .provider .row > label { flex: 0 0 118px; }
+    .provider .pfooter {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      margin-top: 10px;
+    }
+    .provider .pfooter .left { display: flex; flex-direction: column; gap: 6px; }
+    .provider .default-label { color: var(--fg); }
+    .provider .default-label input { margin-right: 6px; }
+    .advanced-toggle {
+      border: none;
+      background: transparent;
+      color: var(--fg);
+      padding: 0;
+      cursor: pointer;
+      text-align: left;
+      font-size: 12px;
+    }
+    .advanced-toggle:hover { background: transparent; text-decoration: underline; }
+    .caps { display: none; flex-direction: column; gap: 4px; margin-top: 4px; }
+    .caps.open { display: flex; }
+    .caps label { color: var(--fg); font-size: 12px; }
+    .caps input { margin-right: 6px; }
     .actions {
       display: flex;
-      justify-content: flex-end;
+      justify-content: space-between;
       gap: 8px;
       padding: 12px 28px 20px;
       border-top: 1px solid var(--border);
       background: var(--bg);
     }
+    .actions .right { display: flex; gap: 8px; }
     .footer-wrap {
       position: sticky;
       bottom: 0;
@@ -124,13 +174,6 @@
       font-size: 12px;
       min-height: 1em;
     }
-    .help {
-      color: var(--muted);
-      font-size: 12px;
-      margin-left: 142px;
-      margin-top: -4px;
-      margin-bottom: 10px;
-    }
   </style>
 </head>
 <body>
@@ -139,46 +182,23 @@
     <p class="sub">Edits to your local <code>.env</code>. Save &amp; Restart applies changes immediately.</p>
 
     <div class="panel">
-      <h2>LLM Provider</h2>
-      <div class="row">
-        <label>Provider</label>
-        <div class="control radio-group">
-          <label><input type="radio" name="provider" value="kimi" /> Kimi</label>
-          <label><input type="radio" name="provider" value="openai" /> OpenAI</label>
-          <label><input type="radio" name="provider" value="anthropic" /> Anthropic</label>
-        </div>
-      </div>
-      <div class="row">
-        <label>API Key</label>
-        <div class="control">
-          <input type="password" id="api_key" placeholder="sk-..." autocomplete="off" />
-        </div>
-      </div>
-      <div class="row">
-        <label>Base URL</label>
-        <div class="control">
-          <input type="text" id="base_url" placeholder="https://api.moonshot.cn/v1" />
-        </div>
-      </div>
-      <div class="row">
-        <label>Model</label>
-        <div class="control">
-          <input type="text" id="model_name" placeholder="kimi-k2" />
-        </div>
-      </div>
-      <div class="row">
-        <label>Temperature</label>
-        <div class="control">
-          <input type="number" id="temperature" step="0.1" min="0" max="2" placeholder="0.6" />
-        </div>
-      </div>
+      <h2>LLM</h2>
       <div class="row checkbox-row">
-        <label for="thinking">Thinking mode</label>
+        <label for="thinking">Thinking</label>
         <div class="control">
           <input type="checkbox" id="thinking" />
-          <span class="sub" style="margin:0">Stream model reasoning in the chat.</span>
         </div>
       </div>
+      <div class="row">
+        <label for="temperature">Temperature</label>
+        <div class="control">
+          <input type="range" id="temperature" min="0" max="2" step="0.05" value="0" />
+          <span class="slider-value" id="temperature_value">0.00</span>
+        </div>
+      </div>
+
+      <div id="providers"></div>
+      <button class="flat" id="add_provider">+ Add Provider</button>
     </div>
 
     <div class="panel">
@@ -189,6 +209,24 @@
           <input type="number" id="web_port" min="1024" max="65535" placeholder="5494" />
         </div>
       </div>
+      <div class="row">
+        <label>Session Token</label>
+        <div class="control">
+          <input type="password" id="session_token" placeholder="leave empty to disable auth" autocomplete="off" />
+          <button id="generate_token">Generate</button>
+        </div>
+      </div>
+      <div class="row checkbox-row">
+        <label for="lan_only">LAN Only</label>
+        <div class="control">
+          <input type="checkbox" id="lan_only" />
+        </div>
+      </div>
+    </div>
+
+    <div class="panel">
+      <h2>Branding</h2>
+      <button id="reset_branding">Reset Branding to Packaged Defaults</button>
     </div>
 
   </div>
@@ -197,76 +235,276 @@
     <p id="error" class="error"></p>
     <div class="actions">
       <button id="cancel">Cancel</button>
-      <button id="save">Save</button>
-      <button id="save_restart" class="primary">Save &amp; Restart</button>
+      <div class="right">
+        <button id="save">Save</button>
+        <button id="save_restart" class="primary">Save &amp; Restart Server</button>
+      </div>
     </div>
   </div>
 
   <script>
     const $ = (id) => document.getElementById(id);
 
+    // Mirrors packaging/app_main/settings_window.py constants.
+    const PROVIDER_TYPES = ["kimi", "openai_legacy", "anthropic"];
+    const CAPABILITIES = ["image_in", "video_in", "thinking", "always_thinking"];
+    const DEFAULT_MAX_CONTEXT = 1000000;
+    const LEGACY_LLM_KEYS = [
+      "LLM_PROVIDER",
+      "KIMI_API_KEY", "KIMI_BASE_URL", "KIMI_MODEL_NAME", "KIMI_MODEL_MAX_CONTEXT_SIZE",
+      "OPENAI_API_KEY", "OPENAI_BASE_URL",
+      "ANTHROPIC_API_KEY", "ANTHROPIC_BASE_URL",
+    ];
+
     function setError(msg) {
       $("error").textContent = msg || "";
+    }
+
+    // ---- provider cards -------------------------------------------------
+
+    let providerSeq = 0;
+
+    function providerCard(entry) {
+      entry = entry || {};
+      const card = document.createElement("div");
+      card.className = "provider";
+      card.dataset.pid = String(++providerSeq);
+
+      const caps = Array.isArray(entry.capabilities) && entry.capabilities.length
+        ? new Set(entry.capabilities.map(String))
+        : new Set(CAPABILITIES);
+
+      const typeOptions = PROVIDER_TYPES.map((t) => {
+        const sel = (entry.type || PROVIDER_TYPES[0]) === t ? " selected" : "";
+        return `<option value="${t}"${sel}>${t}</option>`;
+      }).join("");
+
+      const capBoxes = CAPABILITIES.map((c) => {
+        const checked = caps.has(c) ? " checked" : "";
+        return `<label><input type="checkbox" class="cap" value="${c}"${checked} />${c}</label>`;
+      }).join("");
+
+      card.innerHTML = `
+        <div class="ptitle">Provider</div>
+        <div class="row"><label>Name</label><div class="control">
+          <input type="text" class="p-name" placeholder="provider name" /></div></div>
+        <div class="row"><label>Type</label><div class="control">
+          <select class="p-type">${typeOptions}</select></div></div>
+        <div class="row"><label>API Key</label><div class="control">
+          <input type="password" class="p-apikey" placeholder="API key" autocomplete="off" /></div></div>
+        <div class="row"><label>Base URL</label><div class="control">
+          <input type="text" class="p-baseurl" placeholder="https://..." /></div></div>
+        <div class="row"><label>Model</label><div class="control">
+          <input type="text" class="p-model" placeholder="model id" /></div></div>
+        <div class="row"><label>Max Context</label><div class="control">
+          <input type="number" class="p-maxctx" placeholder="1000000" /></div></div>
+        <div class="pfooter">
+          <div class="left">
+            <label class="default-label"><input type="radio" name="default_provider" class="p-default" />Set as default</label>
+            <button type="button" class="advanced-toggle">&#9654; Advanced (capabilities)</button>
+            <div class="caps">${capBoxes}</div>
+          </div>
+          <button type="button" class="p-remove">Remove</button>
+        </div>`;
+
+      card.querySelector(".p-name").value = entry.name || "";
+      card.querySelector(".p-apikey").value = entry.api_key || "";
+      card.querySelector(".p-baseurl").value = entry.base_url || "";
+      card.querySelector(".p-model").value = entry.model || "";
+      card.querySelector(".p-maxctx").value = entry.max_context_size || "";
+
+      card.querySelector(".advanced-toggle").addEventListener("click", (ev) => {
+        const capsEl = card.querySelector(".caps");
+        const open = capsEl.classList.toggle("open");
+        ev.target.innerHTML = (open ? "&#9660;" : "&#9654;") + " Advanced (capabilities)";
+      });
+      card.querySelector(".p-remove").addEventListener("click", () => {
+        const name = card.querySelector(".p-name").value.trim() || "this provider";
+        if (!window.confirm(`Remove “${name}” from the list?`)) return;
+        const wasDefault = card.querySelector(".p-default").checked;
+        card.remove();
+        const first = document.querySelector("#providers .provider .p-default");
+        if (wasDefault && first) first.checked = true;
+        renumber();
+      });
+      return card;
+    }
+
+    function renumber() {
+      document.querySelectorAll("#providers .provider").forEach((card, i) => {
+        card.querySelector(".ptitle").textContent = `Provider ${i + 1}`;
+      });
+    }
+
+    function addProvider(entry, makeDefault) {
+      const card = providerCard(entry);
+      $("providers").appendChild(card);
+      if (makeDefault || !document.querySelector("#providers .p-default:checked")) {
+        card.querySelector(".p-default").checked = true;
+      }
+      renumber();
+      return card;
+    }
+
+    // ---- load -----------------------------------------------------------
+
+    function legacyEntries(data) {
+      // Mirrors _legacy_entries in the macOS settings window.
+      const out = [];
+      if (data.KIMI_API_KEY) {
+        out.push({
+          name: "kimi", type: "kimi",
+          api_key: data.KIMI_API_KEY,
+          base_url: data.KIMI_BASE_URL || "https://api.moonshot.cn/v1",
+          model: data.KIMI_MODEL_NAME || "kimi-k2",
+          max_context_size: parseInt(data.KIMI_MODEL_MAX_CONTEXT_SIZE, 10) || DEFAULT_MAX_CONTEXT,
+        });
+      }
+      if (data.OPENAI_API_KEY) {
+        out.push({
+          name: "openai", type: "openai_legacy",
+          api_key: data.OPENAI_API_KEY,
+          base_url: data.OPENAI_BASE_URL || "https://api.openai.com/v1",
+          model: "gpt-4o", max_context_size: 128000,
+        });
+      }
+      if (data.ANTHROPIC_API_KEY) {
+        out.push({
+          name: "anthropic", type: "anthropic",
+          api_key: data.ANTHROPIC_API_KEY,
+          base_url: data.ANTHROPIC_BASE_URL || "https://api.anthropic.com",
+          model: "claude-3-5-sonnet-20241022", max_context_size: 200000,
+        });
+      }
+      return out;
     }
 
     async function load() {
       try {
         const data = await window.pywebview.api.load_env();
-        const provider = (data.LLM_PROVIDER || "kimi").toLowerCase();
-        const radio = document.querySelector(`input[name="provider"][value="${provider}"]`);
-        if (radio) radio.checked = true;
-        else document.querySelector('input[name="provider"][value="kimi"]').checked = true;
 
-        $("api_key").value = data[providerToApiKey(provider)] || "";
-        $("base_url").value = data[providerToBaseUrl(provider)] || "";
-        $("model_name").value = data.KIMI_MODEL_NAME || "";
-        $("temperature").value = data.LLM_TEMPERATURE || "";
+        let entries = [];
+        try {
+          const parsed = JSON.parse(data.LLM_PROVIDERS || "[]");
+          if (Array.isArray(parsed)) {
+            entries = parsed.filter((p) => p && typeof p === "object" && p.name);
+          }
+        } catch (e) { /* fall through to legacy */ }
+        if (!entries.length) entries = legacyEntries(data);
+
+        const defaultName = (data.LLM_DEFAULT_PROVIDER || data.LLM_PROVIDER ||
+          (entries[0] && entries[0].name) || "").trim().toLowerCase();
+
+        $("providers").innerHTML = "";
+        entries.forEach((entry) => {
+          addProvider(entry,
+            String(entry.name || "").trim().toLowerCase() === defaultName);
+        });
+
         $("thinking").checked = (data.LLM_THINKING || "").toLowerCase() === "true";
+        const temp = parseFloat(data.LLM_TEMPERATURE || "0");
+        $("temperature").value = isNaN(temp) ? 0 : temp;
+        syncTemperatureLabel();
         $("web_port").value = data.KIMI_WEB_PORT || "5494";
+        $("session_token").value = data.KIMI_WEB_SESSION_TOKEN || "";
+        $("lan_only").checked = (data.KIMI_WEB_LAN_ONLY || "").toLowerCase() === "true";
       } catch (e) {
         setError("Failed to load settings: " + e);
       }
     }
 
-    function providerToApiKey(p) {
-      return p === "openai" ? "OPENAI_API_KEY"
-        : p === "anthropic" ? "ANTHROPIC_API_KEY"
-        : "KIMI_API_KEY";
-    }
-    function providerToBaseUrl(p) {
-      return p === "openai" ? "OPENAI_BASE_URL"
-        : p === "anthropic" ? "ANTHROPIC_BASE_URL"
-        : "KIMI_BASE_URL";
-    }
+    // ---- save -----------------------------------------------------------
 
-    // Re-load API key + base URL when the user switches provider so the
-    // displayed values match the selected provider's stored credentials.
-    document.querySelectorAll('input[name="provider"]').forEach((el) => {
-      el.addEventListener("change", load);
-    });
+    function collectProviders() {
+      const list = [];
+      const seen = new Set();
+      let defaultName = "";
+      document.querySelectorAll("#providers .provider").forEach((card) => {
+        const name = card.querySelector(".p-name").value.trim();
+        const apiKey = card.querySelector(".p-apikey").value.trim();
+        if (!name || !apiKey) return;  // mirrors macOS: skip incomplete rows
+        if (seen.has(name.toLowerCase())) {
+          throw new Error(`Duplicate provider name: "${name}". Names must be unique.`);
+        }
+        seen.add(name.toLowerCase());
+        let ctx = parseInt(card.querySelector(".p-maxctx").value.trim(), 10);
+        if (!ctx || ctx <= 0) ctx = DEFAULT_MAX_CONTEXT;
+        const entry = {
+          name,
+          type: card.querySelector(".p-type").value,
+          api_key: apiKey,
+          base_url: card.querySelector(".p-baseurl").value.trim(),
+          model: card.querySelector(".p-model").value.trim(),
+          max_context_size: ctx,
+        };
+        const caps = Array.from(card.querySelectorAll(".cap:checked")).map((c) => c.value);
+        if (caps.length) entry.capabilities = caps;
+        list.push(entry);
+        if (card.querySelector(".p-default").checked) defaultName = name;
+      });
+      return { list, defaultName };
+    }
 
     function gather() {
-      const provider = document.querySelector('input[name="provider"]:checked').value;
+      const { list, defaultName } = collectProviders();
       const updates = {
-        LLM_PROVIDER: provider,
-        KIMI_MODEL_NAME: $("model_name").value.trim(),
-        LLM_TEMPERATURE: $("temperature").value.trim(),
         LLM_THINKING: $("thinking").checked ? "true" : "false",
+        LLM_TEMPERATURE: parseFloat($("temperature").value || "0").toFixed(2),
         KIMI_WEB_PORT: $("web_port").value.trim(),
+        KIMI_WEB_SESSION_TOKEN: $("session_token").value,
+        KIMI_WEB_LAN_ONLY: $("lan_only").checked ? "true" : "false",
       };
-      updates[providerToApiKey(provider)] = $("api_key").value;
-      updates[providerToBaseUrl(provider)] = $("base_url").value.trim();
+      if (list.length) {
+        updates.LLM_PROVIDERS = JSON.stringify(list);
+        updates.LLM_DEFAULT_PROVIDER = defaultName || list[0].name;
+        LEGACY_LLM_KEYS.forEach((k) => { updates[k] = ""; });
+      } else {
+        updates.LLM_PROVIDERS = "";
+        updates.LLM_DEFAULT_PROVIDER = "";
+      }
       return updates;
     }
 
     async function save(restart) {
       setError("");
+      let updates;
       try {
-        await window.pywebview.api.save_env(gather(), !!restart);
+        updates = gather();
+      } catch (e) {
+        setError(e.message || String(e));
+        return;
+      }
+      try {
+        await window.pywebview.api.save_env(updates, !!restart);
       } catch (e) {
         setError("Failed to save: " + e);
       }
     }
+
+    // ---- misc actions ---------------------------------------------------
+
+    function syncTemperatureLabel() {
+      $("temperature_value").textContent =
+        parseFloat($("temperature").value || "0").toFixed(2);
+    }
+
+    $("temperature").addEventListener("input", syncTemperatureLabel);
+    $("add_provider").addEventListener("click", () => addProvider(null, false));
+    $("generate_token").addEventListener("click", () => {
+      const bytes = new Uint8Array(32);
+      crypto.getRandomValues(bytes);
+      $("session_token").value =
+        Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("");
+    });
+    $("reset_branding").addEventListener("click", async () => {
+      setError("");
+      try {
+        await window.pywebview.api.reset_branding();
+        window.alert("Branding reset. Refresh your browser to see the packaged defaults.");
+      } catch (e) {
+        setError("Reset failed: " + e);
+      }
+    });
 
     $("save").addEventListener("click", () => save(false));
     $("save_restart").addEventListener("click", () => save(true));

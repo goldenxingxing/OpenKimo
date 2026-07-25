@@ -1,9 +1,11 @@
 """pywebview-backed Settings window for the Windows tray app.
 
-A V1 port of ``packaging.app_main.settings_window`` (which is a 1370-line
-AppKit/PyObjC window). We deliberately ship a much smaller surface area:
-just the single-provider fields most users actually need. The multi-provider
-JSON editor on macOS is omitted here and will land in a later iteration.
+A port of ``packaging.app_main.settings_window`` (AppKit/PyObjC on macOS)
+with the same surface area: multi-provider LLM editor (name / type / API key /
+base URL / model / max context / capabilities / default), thinking +
+temperature, web server port / session token / LAN-only, and branding reset.
+The form lives in ``settings.html``; saves write ``LLM_PROVIDERS`` and sync
+``config.toml`` exactly like macOS.
 
 This module is meant to be run as a standalone subprocess:
 
@@ -102,10 +104,9 @@ class Api:
             log.exception("write_env failed")
             raise RuntimeError(f"Failed to write .env: {e}") from e
 
-        # Mirror macOS: keep config.toml in sync if the user is editing the
-        # multi-provider blob. V1 UI only edits legacy single-provider keys
-        # so this is a no-op unless the user manually populated LLM_PROVIDERS
-        # elsewhere — but we leave the hook in for forward-compatibility.
+        # Mirror macOS: keep config.toml in sync with the multi-provider blob
+        # so edits to base_url / api_key / type / capabilities / default
+        # actually take effect in new sessions.
         providers_json = clean.get("LLM_PROVIDERS", "")
         if providers_json:
             try:
@@ -127,6 +128,12 @@ class Api:
 
         self.exit_code = EXIT_SAVE_RESTART if restart else EXIT_SAVE
         self._destroy_window()
+
+    def reset_branding(self) -> None:
+        """Reset Web UI branding to the packaged defaults (mirrors macOS)."""
+        from . import seed_branding
+
+        seed_branding.reset_to_packaged(self.paths)
 
     def cancel(self) -> None:
         self.exit_code = EXIT_CANCEL

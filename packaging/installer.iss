@@ -78,17 +78,41 @@ Filename: "{app}\OpenKimo.exe"; Description: "Launch {#AppName}"; Flags: nowait 
 [UninstallDelete]
 ; Always nuke the install dir contents (runtime/, exe, etc).
 Type: filesandordirs; Name: "{app}\runtime"
+Type: files; Name: "{app}\purge-user-data.marker"
 
 [Code]
+var
+  PurgeUserData: Boolean;
+
+function PurgeMarkerPath(): String;
+begin
+  Result := ExpandConstant('{app}\purge-user-data.marker');
+end;
+
+// WizardIsTaskSelected only exists while the install wizard is alive, so the
+// task choice is persisted to a marker file here and read back at uninstall
+// (calling it from uninstall code raises "cannot call WizardIsTaskSelected").
+procedure CurStepChanged(CurStep: TSetupStep);
+begin
+  if CurStep = ssPostInstall then
+  begin
+    if WizardIsTaskSelected('purgeuserdata') then
+      SaveStringToFile(PurgeMarkerPath(), '1', False)
+    else
+      DeleteFile(PurgeMarkerPath());
+  end;
+end;
+
 procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
 var
   UserDataDir: String;
-  PurgeRequested: Boolean;
 begin
+  // Read the marker before the uninstaller removes {app} contents.
+  if CurUninstallStep = usUninstall then
+    PurgeUserData := FileExists(PurgeMarkerPath());
   if CurUninstallStep = usPostUninstall then
   begin
-    PurgeRequested := WizardIsTaskSelected('purgeuserdata');
-    if PurgeRequested then
+    if PurgeUserData then
     begin
       UserDataDir := ExpandConstant('{userappdata}\{#AppName}');
       if DirExists(UserDataDir) then
