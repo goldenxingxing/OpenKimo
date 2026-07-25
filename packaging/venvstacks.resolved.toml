@@ -12,14 +12,15 @@ requirements = []
 [[frameworks]]
 name = "framework-kimi"
 runtime = "cpython-3.12"
+dynlib_exclude = ["**/skills/docx/**"]
 requirements = [
-    "file:///Users/jie/Develop/projects/kimi_agent/packaging/wheels/kosong-0.53.0-py3-none-any.whl",
-    "file:///Users/jie/Develop/projects/kimi_agent/packaging/wheels/kimi_code-1.41.0-py3-none-any.whl",
-    "file:///Users/jie/Develop/projects/kimi_agent/packaging/wheels/kimi_sdk-0.2.1-py3-none-any.whl",
-    "file:///Users/jie/Develop/projects/kimi_agent/packaging/wheels/kimi_cli-1.41.0-py3-none-any.whl",
-    "file:///Users/jie/Develop/projects/kimi_agent/packaging/wheels/pykaos-0.9.0-py3-none-any.whl",
-    "file:///Users/jie/Develop/projects/kimi_agent/packaging/wheels/ripgrepy-2.2.0-py3-none-any.whl",
-    "file:///Users/jie/Develop/projects/kimi_agent/packaging/wheels/rumps-0.4.0-py3-none-any.whl",
+    "file:///Users/qunwei/Documents/local_agent_work/OpenKimo/packaging/wheels/kosong-0.55.0-py3-none-any.whl",
+    "file:///Users/qunwei/Documents/local_agent_work/OpenKimo/packaging/wheels/kimi_code-1.49.0-py3-none-any.whl",
+    "file:///Users/qunwei/Documents/local_agent_work/OpenKimo/packaging/wheels/kimi_sdk-0.2.1-py3-none-any.whl",
+    "file:///Users/qunwei/Documents/local_agent_work/OpenKimo/packaging/wheels/kimi_cli-1.49.0-py3-none-any.whl",
+    "file:///Users/qunwei/Documents/local_agent_work/OpenKimo/packaging/wheels/pykaos-0.9.0-py3-none-any.whl",
+    "file:///Users/qunwei/Documents/local_agent_work/OpenKimo/packaging/wheels/ripgrepy-2.2.0-py3-none-any.whl",
+    "file:///Users/qunwei/Documents/local_agent_work/OpenKimo/packaging/wheels/rumps-0.4.0-py3-none-any.whl",
 ]
 
 [[applications]]
