@@ -18,6 +18,13 @@ jobs:
       packages: write   # push to ghcr.io
 
     steps:
+      # ubuntu-latest runners ship with ~14GB free; two image builds plus
+      # buildx cache (mode=max) exhaust it (seen as "no space left on
+      # device" during the sandbox build). Reclaim toolchains we never use
+      # (~30GB); keeps Docker itself intact.
+      - name: Free disk space
+        uses: jlumbroso/free-disk-space@main
+
       - uses: actions/checkout@v4
         with:
           submodules: recursive
@@ -44,6 +51,13 @@ jobs:
             ${{ env.GATEWAY_IMAGE }}:${{ github.ref_name }}
           cache-from: type=gha,scope=gateway
           cache-to: type=gha,mode=max,scope=gateway
+
+      # Drop the gateway build cache before the sandbox build; the sandbox
+      # build uses its own cache scope, so nothing needed later is lost.
+      - name: Prune gateway build cache
+        run: |
+          docker system prune -af
+          docker builder prune -af
 
       # ---- Sandbox ----
       - name: Build and push sandbox
