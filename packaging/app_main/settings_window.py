@@ -482,6 +482,7 @@ class SettingsController(NSWindowController):
 
     # LLM section state
     provider_rows = None              # type: list[_ProviderRow] | None
+    initial_default = ""              # default model resolved at window open
     providers_container = None        # type: NSView | None
     providers_chain_constraints = None  # type: list | None
     providers_bottom_pin = None       # type: Any | None
@@ -549,6 +550,13 @@ class SettingsController(NSWindowController):
                     if isinstance(p, dict) and p.get("name")
                 ]
                 keep_names = {str(p["name"]) for p in parsed}
+                # The preserved default may live outside the .env provider
+                # list (e.g. a model the user picked via the web selector);
+                # keep its toml sections so prune can't leave default_model
+                # pointing at a deleted [models.X] entry.
+                default_keep = (updates.get("LLM_DEFAULT_PROVIDER") or "").strip()
+                if default_keep:
+                    keep_names.add(default_keep)
                 toml_path = self.paths_ref.sessions_dir / "config.toml"
                 if keep_names:
                     configtoml.prune(toml_path, keep_names)
@@ -595,7 +603,13 @@ class SettingsController(NSWindowController):
             out["LLM_PROVIDERS"] = json.dumps(
                 provider_list, ensure_ascii=False, separators=(",", ":")
             )
-            out["LLM_DEFAULT_PROVIDER"] = default_name or provider_list[0]["name"]
+            # Never silently swap the user's default: when no radio is
+            # selected, keep the default that was in effect at window open
+            # (e.g. chosen via the web model selector and stored in
+            # config.toml) instead of clobbering it with the first provider.
+            out["LLM_DEFAULT_PROVIDER"] = (
+                default_name or self.initial_default or provider_list[0]["name"]
+            )
             for key in _LEGACY_LLM_KEYS:
                 out[key] = ""
         else:
@@ -1000,6 +1014,27 @@ def _build_provider_row(controller, entry: dict[str, Any] | None = None) -> _Pro
     return pr
 
 
+def _read_toml_default_model(paths) -> str:
+    """Read ``default_model`` from kimi-cli's ``config.toml``.
+
+    The web UI's model selector writes the default model to
+    ``sessions/config.toml`` (and does not touch ``.env``), so the toml is
+    the authoritative source for the default currently in effect. Returns
+    "" when the file is missing, unparseable, or has no default set.
+    """
+    try:
+        toml_path = paths.sessions_dir / "config.toml"
+        if not toml_path.exists():
+            return ""
+        import tomlkit
+
+        doc = tomlkit.parse(toml_path.read_text(encoding="utf-8"))
+        return str(doc.get("default_model", "") or "").strip()
+    except Exception:
+        log.exception("failed to read default_model from config.toml")
+        return ""
+
+
 def _build_llm_section(
     values: dict[str, str],
     controller: SettingsController,
@@ -1044,11 +1079,19 @@ def _build_llm_section(
     if not entries:
         entries = _legacy_entries(values)
 
-    default_value = (
-        values.get("LLM_DEFAULT_PROVIDER")
+    # The web UI's model selector writes default_model to config.toml
+    # without touching .env, so prefer the toml value; fall back to .env
+    # only when the toml has no default.
+    explicit_default = (
+        _read_toml_default_model(controller.paths_ref)
+        or values.get("LLM_DEFAULT_PROVIDER")
         or values.get("LLM_PROVIDER")
-        or (entries[0]["name"] if entries else "")
+        or ""
     ).strip().lower()
+    default_value = explicit_default or (
+        entries[0]["name"] if entries else ""
+    ).strip().lower()
+    controller.initial_default = default_value
 
     provider_rows: list[_ProviderRow] = []
     default_set = False
@@ -1059,7 +1102,10 @@ def _build_llm_section(
         if not default_set and str(entry.get("name", "")).strip().lower() == default_value:
             prow.default_radio.setState_(1)
             default_set = True
-    if not default_set and provider_rows:
+    # Only fall back to selecting the first provider when neither
+    # config.toml nor .env names a default; never override a default the
+    # user already picked elsewhere (e.g. via the web model selector).
+    if not default_set and provider_rows and not explicit_default:
         provider_rows[0].default_radio.setState_(1)
 
     # + Add Provider button (left-aligned, flat)

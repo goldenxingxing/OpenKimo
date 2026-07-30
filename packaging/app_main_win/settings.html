@@ -263,6 +263,13 @@
     // ---- provider cards -------------------------------------------------
 
     let providerSeq = 0;
+    // Default model state resolved at window open. initialDefault preserves
+    // the default that was in effect (e.g. chosen via the web model selector
+    // and stored in config.toml) so a save can never silently swap it for
+    // the first provider. hasExplicitDefault gates the first-item fallback:
+    // it is only allowed when neither config.toml nor .env names a default.
+    let initialDefault = "";
+    let hasExplicitDefault = false;
 
     function providerCard(entry) {
       entry = entry || {};
@@ -339,7 +346,10 @@
     function addProvider(entry, makeDefault) {
       const card = providerCard(entry);
       $("providers").appendChild(card);
-      if (makeDefault || !document.querySelector("#providers .p-default:checked")) {
+      // Only auto-check the first provider when no default was in effect at
+      // load; never override a default the user already picked elsewhere.
+      if (makeDefault ||
+          (!hasExplicitDefault && !document.querySelector("#providers .p-default:checked"))) {
         card.querySelector(".p-default").checked = true;
       }
       renumber();
@@ -392,8 +402,17 @@
         } catch (e) { /* fall through to legacy */ }
         if (!entries.length) entries = legacyEntries(data);
 
-        const defaultName = (data.LLM_DEFAULT_PROVIDER || data.LLM_PROVIDER ||
-          (entries[0] && entries[0].name) || "").trim().toLowerCase();
+        // The web UI's model selector writes default_model to config.toml
+        // without touching .env (injected by load_env as
+        // CONFIG_TOML_DEFAULT_MODEL), so prefer it; fall back to .env only
+        // when the toml has no default, and to the first entry only when
+        // neither names one.
+        const explicitDefault = (data.CONFIG_TOML_DEFAULT_MODEL ||
+          data.LLM_DEFAULT_PROVIDER || data.LLM_PROVIDER || "").trim().toLowerCase();
+        hasExplicitDefault = explicitDefault !== "";
+        const defaultName = explicitDefault ||
+          ((entries[0] && entries[0].name) || "").trim().toLowerCase();
+        initialDefault = defaultName;
 
         $("providers").innerHTML = "";
         entries.forEach((entry) => {
@@ -456,7 +475,10 @@
       };
       if (list.length) {
         updates.LLM_PROVIDERS = JSON.stringify(list);
-        updates.LLM_DEFAULT_PROVIDER = defaultName || list[0].name;
+        // Never silently swap the user's default: when no radio is checked,
+        // keep the default that was in effect at window open instead of
+        // clobbering it with the first provider.
+        updates.LLM_DEFAULT_PROVIDER = defaultName || initialDefault || list[0].name;
         LEGACY_LLM_KEYS.forEach((k) => { updates[k] = ""; });
       } else {
         updates.LLM_PROVIDERS = "";

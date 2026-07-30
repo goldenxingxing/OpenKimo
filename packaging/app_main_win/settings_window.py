@@ -42,6 +42,27 @@ EXIT_SAVE_RESTART = 3
 EXIT_SAVE = 4
 
 
+def _read_toml_default_model(paths: paths_mod.AppPaths) -> str:
+    """Read ``default_model`` from kimi-cli's ``config.toml``.
+
+    The web UI's model selector writes the default model to
+    ``sessions/config.toml`` (and does not touch ``.env``), so the toml is
+    the authoritative source for the default currently in effect. Returns
+    "" when the file is missing, unparseable, or has no default set.
+    """
+    try:
+        toml_path = paths.sessions_dir / "config.toml"
+        if not toml_path.exists():
+            return ""
+        import tomlkit
+
+        doc = tomlkit.parse(toml_path.read_text(encoding="utf-8"))
+        return str(doc.get("default_model", "") or "").strip()
+    except Exception:
+        log.exception("failed to read default_model from config.toml")
+        return ""
+
+
 class Api:
     """Python side of the pywebview JS bridge.
 
@@ -60,9 +81,18 @@ class Api:
     # ---- JS-callable API ---------------------------------------------
 
     def load_env(self) -> dict[str, str]:
-        """Return the current ``.env`` contents as a flat dict."""
+        """Return the current ``.env`` contents as a flat dict.
+
+        Also injects ``CONFIG_TOML_DEFAULT_MODEL`` — the ``default_model``
+        from kimi-cli's ``config.toml``. The web UI's model selector writes
+        there without touching ``.env``, so the JS side prefers it over the
+        possibly stale ``LLM_DEFAULT_PROVIDER`` when picking the initial
+        default provider. (Not an editable key; ``save_env`` would drop it.)
+        """
         try:
-            return dict(dotenv_io.read_editable(self.paths.env_file))
+            data = dict(dotenv_io.read_editable(self.paths.env_file))
+            data["CONFIG_TOML_DEFAULT_MODEL"] = _read_toml_default_model(self.paths)
+            return data
         except Exception:
             log.exception("load_env failed")
             return {}
@@ -115,6 +145,13 @@ class Api:
                     if isinstance(p, dict) and p.get("name")
                 ]
                 keep_names = {str(p["name"]) for p in parsed}
+                # The preserved default may live outside the .env provider
+                # list (e.g. a model the user picked via the web selector);
+                # keep its toml sections so prune can't leave default_model
+                # pointing at a deleted [models.X] entry.
+                default_keep = (clean.get("LLM_DEFAULT_PROVIDER") or "").strip()
+                if default_keep:
+                    keep_names.add(default_keep)
                 toml_path = self.paths.sessions_dir / "config.toml"
                 if keep_names:
                     configtoml.prune(toml_path, keep_names)
