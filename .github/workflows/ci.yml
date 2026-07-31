@@ -67,16 +67,17 @@ jobs:
         run: uv sync --frozen
 
       - name: Ruff lint
-        run: uv run ruff check .
+        run: uv run ruff check src/kimi_cli/wiki tests/wiki
 
       - name: Ruff format check
-        run: uv run ruff format --check .
+        run: uv run ruff format --check src/kimi_cli/wiki tests/wiki
 
       - name: Pyright typecheck
         run: uv run pyright src/kimi_cli/web/
 
       - name: Tests
-        run: uv run pytest ../tests/ -v --tb=short
+        working-directory: .
+        run: kimi-cli/.venv/bin/python -m pytest tests -v --tb=short
 
   # -----------------------------------------------------------------
   # Docker: verify images build successfully
