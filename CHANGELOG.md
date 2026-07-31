@@ -6,6 +6,12 @@ this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [v0.1.26] — 2026-07-31
+
+### Changed
+
+- **登录页品牌文案**：将登录页副标题中的 “Kimi Code” 更新为 “OpenKimo”。
+
 ## [v0.1.24] — 2026-07-25
 
 ### Fixed
