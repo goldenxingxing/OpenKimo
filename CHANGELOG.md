@@ -6,6 +6,18 @@ this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [v0.1.27] — 2026-08-03
+
+### Fixed
+
+- **Intel Mac 装不上（较低版本 macOS）**：`LSMinimumSystemVersion` 被设为 14.0（Sonoma），而多数 Intel 机型最高只能升到 Monterey 12 / Ventura 13，系统直接拒绝安装。实测捆绑的 CPython 与全部 195 个原生扩展都只要求 macOS 11.0，14.0 完全来自 `brand.toml` 的人为设定（同时喂给 Info.plist 和 launcher 的 `-mmacosx-version-min`）。下调至 11.0，Big Sur 及以上的 Intel Mac 均可安装。构建流程新增 `verify_min_macos()`：装配后、签名前扫描 bundle 内每个 Mach-O，任一二进制要求高于声明值即中断构建并列出具体文件——声称支持却跑不起来，比装不上更难排查。
+- **聊天视图偶发跳到历史最上方**：重连或 worker 重启会清空消息列表并分批回放历史。原有的"追随底部"标志在视口第一次到达底部时就被清除，而回放初期只有寥寥几条消息、视口天然就在底部，于是标志提前失效；随后涌入的数百条消息把内容高度撑过 1500px 容差，跟随规则放弃，视口就停在了巨大列表的开头。改为仅当读者**自己**滚动（wheel / touch / 键盘）时才交还控制权，列表增长永远不会提前结束追随。
+- **Tasks 进度显示滞后且不随新任务重置**：面板此前只在切换会话时清空，同一会话内发起新任务时旧清单继续挂着，若新任务未拆分则残留至会话结束；重开会话时回放会按序应用每个 todo block，导致显示的可能是很早以前那一轮的进度。改为在 `TurnBegin` 清空（实时与回放均生效）。同时明确 SetTodoList 的更新节奏：开始前标 `in_progress`，完成的瞬间在标记下一项的同一次调用里标 `done`，减少轮次内的显示滞后。
+
+### Added
+
+- **全局 Wiki 确定性运行时触发**：写入权限不再建立在模型的自我声明上，而是由运行时实际观测推导。运行时观察真实工具返回生成只含哈希的 evidence；evidence 加结论形成 checkpoint（机会而非许可）；root agent 必须对每个 checkpoint 明确 persist 或 discard；persist 需换取一次性 grant，且会重新读取并比对每个来源。模型提供的 `value="high"`、复述的哈希、自编的 checkpoint id 一律不参与授权。子模块可贡献 evidence 但零 Wiki 权限（无 manager／tool context／coordinator，提示词中 Wiki 段落清空，工具本身 root-only 兜底）。含每轮受控检索、单次提醒的解析循环、按事件白名单过滤的隐私安全遥测，以及跨平台与预算约束验证。
+
 ## [v0.1.26] — 2026-07-31
 
 ### Changed
