@@ -614,6 +614,68 @@ def create_app_bundle(cfg: BuildConfig, export_dir: Path) -> Path:
 
 # ---- 7. sign + DMG --------------------------------------------------------
 
+def _macho_min_os(path: Path) -> str | None:
+    """Return the minimum macOS version a Mach-O file declares, if any."""
+    try:
+        out = subprocess.run(
+            ["otool", "-l", str(path)],
+            capture_output=True, text=True, check=True,
+        ).stdout
+    except (subprocess.CalledProcessError, OSError):
+        return None
+    for line in out.splitlines():
+        fields = line.split()
+        # LC_BUILD_VERSION carries "minos X.Y"; older LC_VERSION_MIN_MACOSX
+        # carries "version X.Y".
+        if len(fields) == 2 and fields[0] in ("minos", "version"):
+            return fields[1]
+    return None
+
+
+def _version_tuple(value: str) -> tuple[int, ...]:
+    return tuple(int(part) for part in value.split(".") if part.isdigit())
+
+
+def verify_min_macos(cfg: BuildConfig, bundle: Path) -> None:
+    """Fail the build if anything shipped needs a newer macOS than we advertise.
+
+    LSMinimumSystemVersion is a promise, not a filter: macOS only refuses to
+    launch apps that ask for *more* than the host. Advertising a floor lower
+    than the bundled CPython or a native wheel actually supports produces an
+    app that installs on an old Mac and then dies at import time, which is far
+    harder to diagnose than a refusal to install.
+    """
+    section(f"Verifying every binary supports macOS {cfg.min_macos}")
+    declared = _version_tuple(cfg.min_macos)
+    offenders: list[tuple[Path, str]] = []
+    checked = 0
+    for path in bundle.rglob("*"):
+        if not path.is_file() or path.is_symlink():
+            continue
+        if path.suffix not in (".so", ".dylib", "") :
+            continue
+        minimum = _macho_min_os(path)
+        if minimum is None:
+            continue
+        checked += 1
+        if _version_tuple(minimum) > declared:
+            offenders.append((path.relative_to(bundle), minimum))
+    if offenders:
+        print(f"!! {len(offenders)} binary/binaries need a newer macOS than "
+              f"{cfg.min_macos}:", file=sys.stderr)
+        for rel, minimum in offenders[:20]:
+            print(f"     {minimum:>6}  {rel}", file=sys.stderr)
+        if len(offenders) > 20:
+            print(f"     ... and {len(offenders) - 20} more", file=sys.stderr)
+        raise SystemExit(
+            f"Refusing to ship an app that advertises macOS {cfg.min_macos} "
+            f"but cannot run there. Raise min_macos_version in brand.toml, or "
+            f"rebuild the offending dependencies against an older deployment "
+            f"target."
+        )
+    print(f"  {checked} Mach-O file(s) checked; all support macOS {cfg.min_macos} or older")
+
+
 def sign_app(cfg: BuildConfig, bundle: Path) -> None:
     section(f"Codesigning ({cfg.sign_identity})")
     # `codesign --deep` mis-detects venvstacks' lib/pythonX.Y directories as
@@ -738,6 +800,7 @@ def main(argv: list[str]) -> int:
         export_dir = ROOT / ".build" / "_export"
 
     bundle = create_app_bundle(cfg, export_dir)
+    verify_min_macos(cfg, bundle)
     sign_app(cfg, bundle)
     dmg = create_dmg(cfg, bundle)
     print(f"\n✓ {bundle}")

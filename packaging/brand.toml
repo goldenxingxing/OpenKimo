@@ -11,7 +11,11 @@
 name = "OpenKimo"
 bundle_id = "ai.openkimo.app"
 copyright = "© 2026 OpenKimo Contributors. Apache License 2.0."
-min_macos_version = "14.0"
+# 11.0 (Big Sur) is the real floor: it is the first arm64 macOS, and the
+# bundled CPython plus every native wheel declare 11.0. Raising this locks out
+# Intel Macs that cannot run a newer macOS; setting it below what the shipped
+# binaries support is caught by verify_min_macos() at build time.
+min_macos_version = "11.0"
 
 # Asset paths are resolved relative to this file (packaging/).
 icon = "../kimi-cli/web/public/logo.png"
