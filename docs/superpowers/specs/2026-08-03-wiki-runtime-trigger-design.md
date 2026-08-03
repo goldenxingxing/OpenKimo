@@ -7,10 +7,12 @@ The runtime, rather than the model's initiative alone, must:
 
 - retrieve a small amount of relevant global Wiki knowledge for each real root-user
   prompt;
+- create a main-agent Wiki checkpoint after the root agent itself completes
+  evidence-bearing work and forms a reusable conclusion;
+- create a main-agent Wiki checkpoint after an evidence-bearing subagent result returns
+  to the root agent;
 - create a main-agent Wiki checkpoint when the user explicitly asks OpenKimo to
-  remember something;
-- create a main-agent Wiki checkpoint after an evidence-bearing subagent result is
-  returned;
+  remember something or states a durable preference, fixed rule, or cross-session fact;
 - produce the trusted admission signals used by the value gate from runtime-observed
   events and source hashes, not from model-supplied booleans.
 
@@ -36,6 +38,8 @@ The code explains this outcome:
 - there is no automatic search based on the current user prompt;
 - the foreground and background subagent completion paths return summaries without
   creating a root-agent Wiki checkpoint;
+- successful root-agent file, Shell, search, and fetch results are not converted into
+  turn-bound Wiki evidence and therefore cannot trigger a root-only checkpoint;
 - built-in subagents do not have the Wiki tool, which is desirable, but the root
   agent currently receives no trusted bridge from their evidence to its Wiki tool.
 
@@ -51,8 +55,8 @@ This change provides:
 - bounded automatic global Wiki retrieval for real root-user prompts;
 - a root-only, turn-scoped Wiki checkpoint coordinator;
 - verified evidence capture for successful root and subagent tool results;
-- deterministic checkpoint creation for explicit remember intent and qualifying
-  subagent completions;
+- deterministic checkpoint creation for qualifying root-agent work, qualifying
+  subagent completions, and explicit durable user intent;
 - a single-use runtime admission grant that binds value, stability, grounding, and
   source reliability to a turn, workspace, checkpoint, and source hashes;
 - an explicit checkpoint discard path so medium- and low-value results disappear
@@ -76,7 +80,9 @@ This change does not:
   or a separate Wiki runtime;
 - relax secret, path, revision, approval, transaction, or recovery protections;
 - treat an arbitrary successful Shell command or web search result as a reliable
-  durable source by itself.
+  durable source by itself;
+- create a checkpoint for ordinary chat, current progress/status, or an unsourced model
+  hypothesis.
 
 ## Design principles
 
@@ -116,10 +122,12 @@ the authority or provenance needed to pass the gate merely by setting tool argum
 
 ### Root agent owns the decision
 
-Subagents remain focused workers. They neither see nor call Wiki mutation operations.
-The root agent receives their final summary plus a compact runtime-generated checkpoint
-when, and only when, the subagent produced qualifying evidence. The root then resolves
-the checkpoint by proposing a candidate or discarding it.
+The root agent owns all three checkpoint flows. It can record a durable conclusion from
+its own evidence-bearing work without using a subagent. Subagents remain focused workers:
+they neither see nor call Wiki mutation operations, and their evidence becomes eligible
+only after their result returns to the root. Explicit durable user instructions also
+arrive at the root. In every case the root resolves the checkpoint by proposing a
+candidate or discarding it.
 
 ## Architecture
 
@@ -175,7 +183,7 @@ class WikiEvidence:
 class WikiCheckpoint:
     checkpoint_id: str
     root_turn_id: str
-    cause: Literal["explicit_remember", "subagent_result"]
+    cause: Literal["root_evidence", "subagent_result", "explicit_user_durable"]
     evidence_ids: tuple[str, ...]
     summary_hash: str | None
     producer_id: str | None
@@ -230,8 +238,11 @@ files remain rejected by existing policy.
 
 For Shell, only a hash of normalized invocation metadata and a hash of bounded result
 bytes are retained. Raw commands, environment values, and output are not added to Wiki
-metadata. A Shell-only subagent result receives a checkpoint, but the checkpoint cannot
-grant `stable` or `reliable_source`; the root must read a cited artifact or discard it.
+metadata. Shell evidence can contribute to a root- or subagent-result checkpoint, but it
+cannot grant `stable` or `reliable_source` by itself; the root must bind the reusable
+conclusion to a cited durable artifact or discard it. Commands whose only outcome is
+current status, progress, clock time, process state, or another explicitly transient
+snapshot are marked non-triggering.
 
 For web sources, URLs are normalized and checked for userinfo and sensitive query or
 fragment parameters before recording. Search results trigger evaluation; only a
@@ -304,28 +315,53 @@ normal novelty/conflict checks.
 
 ## Deterministic checkpoint creation
 
-### Explicit user remember
+There are exactly three co-equal checkpoint sources. All three create a checkpoint owned
+and resolved by the root agent; none writes automatically.
 
-After prompt-hook acceptance, the existing multilingual, negation-aware remember
-detector runs on raw user-authored text. A positive match deterministically creates one
-`explicit_remember` checkpoint before the first model step.
+### A. Evidence-bearing root-agent work
 
-The checkpoint binds:
+The main agent must be able to compound knowledge without launching a subagent. Root
+tool calls report to the same turn-bound evidence collector. A `root_evidence`
+checkpoint is created when all of the following are true:
 
-- root turn ID and session provenance ID;
-- current workspace UUID, when local;
-- SHA-256 hashes of the exact raw and normalized user text;
-- the cause `explicit_remember`.
+1. the root is processing a real accepted user turn;
+2. it has at least one qualifying successful workspace-file, Shell, search, fetched-web,
+   or post-mutation evidence record;
+3. it reaches a completion boundary with a non-empty conclusion intended to answer or
+   complete the user's task; and
+4. the evidence set is not solely transient status/progress and has not already produced
+   an equivalent checkpoint in this turn.
 
-The raw message remains in normal conversation history but is not copied into checkpoint
-metadata or telemetry. Negated forms such as "do not remember" and "不要记住" create no
-checkpoint. Repeated matching phrases in one accepted prompt create only one checkpoint.
+The coordinator opens a root opportunity after the first qualifying result and
+accumulates subsequent root evidence. At the first no-tool completion boundary, it seals
+the evidence digest, creates the checkpoint, and requires the root to persist or discard
+before `TurnEnd`. This does not expose an unfinished conclusion to the Wiki, create a
+second model extraction job, or wait for session shutdown.
 
-An explicit user directive supplies user authority for high value and stability, but it
-does not bypass secret checks, source matching, duplicate detection, approval, revision,
-or transaction checks.
+Examples that can create a root checkpoint include reading and reconciling project
+configuration, diagnosing a recurring failure from logs plus source, fetching a durable
+external reference, and completing an evidence-backed workflow whose reusable conclusion
+will help future sessions. The Runtime binds the checkpoint to the root turn, workspace
+UUID, tool-call IDs, source hashes, and conclusion hash.
 
-### Evidence-bearing foreground subagent result
+These turn-bound root signals enter the identical write policy as subagent evidence:
+normal and AFK modes require `wiki.write` Approval, while YOLO may skip only the popup
+after the same value, stability, grounding, reliability, novelty, and safety gate passes.
+
+Pure chat, ungrounded reasoning, a model assertion that its answer is important, a
+current `git status`, task progress, a one-off test count, clock/process state, or an
+unsourced hypothesis does not create a root checkpoint. Root `Shell` or search evidence
+that may contain a reusable conclusion can open an opportunity, but it needs an exact
+workspace-file or fetched-document source before it can receive stable/reliable admission.
+
+If the root has already received a `subagent_result` checkpoint and then reads the exact
+source to resolve it, the new root evidence augments that existing checkpoint rather than
+creating a duplicate `root_evidence` checkpoint for the same conclusion and source
+digest.
+
+### B. Evidence-bearing subagent result returned to the root
+
+#### Foreground result
 
 Each subagent run has an evidence accumulator keyed by root runtime, agent ID, and run
 generation. When a foreground run completes successfully and produces a final summary,
@@ -347,7 +383,7 @@ credentials, or an extra copy of the full summary.
 A subagent that only reasons, asks a question, fails, or invokes no qualifying evidence
 tool returns normally with no checkpoint.
 
-### Evidence-bearing background subagent result
+#### Background result
 
 Background completion uses the same sealed evidence record. The first terminal
 completion notification or completed `TaskOutput` result observed by the root attaches
@@ -362,12 +398,42 @@ existing execution artifacts and is not duplicated.
 Failed, killed, lost, or timed-out background tasks create no checkpoint. Delivery
 through both notification and `TaskOutput` is deduplicated.
 
+### C. Explicit durable user intent
+
+After prompt-hook acceptance, a multilingual, negation-aware detector evaluates only
+raw user-authored text. It recognizes three narrow durable-intent families:
+
+- direct remember requests, such as "remember this" or "写入知识库";
+- explicit long-term preferences, such as "from now on, I prefer..." or "以后都...";
+- explicit fixed rules or cross-session facts, such as "our permanent release rule is..."
+  or "后续所有工作区都要遵守...".
+
+A positive match deterministically creates one `explicit_user_durable` checkpoint before
+the first model step. It binds:
+
+- root turn ID and session provenance ID;
+- current workspace UUID, when local;
+- SHA-256 hashes of the exact raw and normalized user text;
+- the matched durable-intent family.
+
+The detector uses bounded, reviewed language patterns and explicit durability markers;
+it does not ask the model whether arbitrary chat is a preference or fact. Negated forms
+such as "do not remember", "only for this run", "不要记住", and "这次临时使用" create no
+checkpoint. A statement limited to the present task, current status, or transient value
+does not match. Repeated durable phrases in one accepted prompt create one coalesced
+checkpoint.
+
+Explicit durable user intent supplies user authority for high value and stability, but
+does not bypass secret checks, source matching, duplicate detection, approval, revision,
+or transaction checks.
+
 ### Dedupe, concurrency, and budget
 
-The checkpoint dedupe key is the digest of session provenance ID, agent ID, run
-generation, summary hash, and ordered evidence IDs. Replaying an Agent result,
-reconciling the same background task, reading `TaskOutput` repeatedly, or resuming the
-root UI cannot create a second checkpoint for the same completed run.
+The checkpoint dedupe key includes cause, session provenance ID, root turn, producer/run
+generation when present, conclusion or summary hash, and ordered evidence IDs. Replaying
+an Agent result, re-observing the same root result, reconciling the same background task,
+reading `TaskOutput` repeatedly, or resuming the root UI cannot create a second
+checkpoint for the same conclusion.
 
 Parallel subagent completions may create separate records, but pending records delivered
 before one model step are coalesced into one managed block. A block includes at most four
@@ -376,8 +442,8 @@ and 6 KiB total. The coordinator holds at most 16 unresolved checkpoint records 
 memory. Additional background completions remain in their existing bounded evidence
 manifests and are delivered in later batches; additional foreground results apply
 backpressure until one batch is resolved. Qualifying results are not silently evicted.
-An explicit-remember checkpoint is delivered first and is never displaced by a
-subagent checkpoint.
+An `explicit_user_durable` checkpoint is delivered first and is never displaced by a
+root- or subagent-evidence checkpoint.
 
 This bounded ephemeral checkpoint state is distinct from the forbidden pending-review
 candidate store. No candidate Markdown survives a discard, decline, cancellation, or
@@ -402,8 +468,8 @@ emits only a privacy-safe event.
 When a checkpoint is delivered, Runtime marks it unresolved. If the model attempts to
 finish the root turn without resolving it, `KimiSoul` injects one synthetic internal
 follow-up reminding the main agent to persist or discard. This is the deterministic
-checkpoint guarantee: the opportunity cannot vanish silently after a subagent result or
-explicit remember request.
+checkpoint guarantee: the opportunity cannot vanish silently after qualifying root
+work, a subagent result, or explicit durable user intent.
 
 There is no infinite loop. If the root still does not resolve the checkpoint after one
 continuation, Runtime discards it with reason `unresolved`, records the outcome, and lets
@@ -429,14 +495,18 @@ ledger. A grant is issued only when:
 
 Rules by checkpoint cause:
 
-- `explicit_remember`: runtime sets high-value and stable authority from the real user
-  directive. Conversation sources must match the current session provenance ID and exact
-  accepted user-text hash. Other source kinds still require ledger matches.
+- `root_evidence`: runtime sets high-value authority only for the pending root completion
+  checkpoint and its exact conclusion/evidence digest. Stability requires at least one
+  exact durable source snapshot from this root turn. Shell and search-list evidence alone
+  cannot satisfy stable or reliable admission.
 - `subagent_result`: runtime sets high-value authority only for this pending,
   evidence-bearing checkpoint. Stability requires at least one exact durable source
   snapshot from that run or a root follow-up tool call in the same turn. Reliability
   requires all sources used for admission to be exact workspace-file or fetched-document
   evidence. Search listings and Shell-result hashes alone cannot satisfy the write gate.
+- `explicit_user_durable`: runtime sets high-value and stable authority from the real
+  user directive. Conversation sources must match the current session provenance ID and
+  exact accepted user-text hash. Other source kinds still require ledger matches.
 
 The model's `candidate.value` field is ignored for authorization and may be removed in a
 schema migration. Existing callers may continue to send it temporarily, but changing it
@@ -468,14 +538,20 @@ AFK is not YOLO. AFK Wiki writes still create and wait for page Approval.
 
 ## Low-value and stability policy
 
-Runtime checkpoint creation is intentionally narrower than "any subagent returned":
+Runtime checkpoint creation is intentionally narrower than "the root used a tool" or
+"a subagent returned":
 
-- no checkpoint for pure prose or reasoning without tool evidence;
+- no checkpoint for root work that contains no qualifying evidence or reusable
+  conclusion;
+- no evidence checkpoint for pure prose or reasoning without tool evidence; an explicit
+  durable user-intent checkpoint is the sole conversation-only exception;
 - no checkpoint for failed or empty tools;
 - no checkpoint for status-only background notifications;
 - no checkpoint merely because a model labels its answer important;
 - no stable admission from live Shell state, a file listing, a search result list, or a
   transient timestamp;
+- no checkpoint for ordinary chat, temporary preferences limited to the current task, or
+  durable intent that is negated explicitly;
 - no write from a checkpoint whose sources are unavailable, changed, or sensitive;
 - duplicate material is discarded before Approval;
 - one-off build output, temporary paths, current task progress, failed attempts, and
@@ -488,8 +564,9 @@ not the subagent's execution diary.
 
 ## Lifecycle and cancellation
 
-- A root turn cancellation cancels unresolved explicit-remember checkpoints created by
-  that turn and consumes no evidence grant.
+- A root turn cancellation cancels unresolved `root_evidence` and
+  `explicit_user_durable` checkpoints created by that turn and consumes no evidence
+  grant.
 - Cancelling a foreground subagent before success creates no checkpoint.
 - A background subagent may complete after its launching turn. Its sealed evidence is
   attached when the root next receives the completion result; the new checkpoint is
@@ -538,6 +615,8 @@ Emit structured events through the existing telemetry/logger boundary:
 - `wiki_retrieval_miss`: duration and skip-safe category;
 - `wiki_retrieval_skipped`: unavailable, empty, synthetic, sensitive, slash command,
   or too short;
+- `wiki_evidence_recorded`: producer role, evidence class, reliable/stable flags, and
+  bounded source count;
 - `wiki_checkpoint_created`: cause, producer role/type, evidence classes/count, and
   checkpoint ID;
 - `wiki_checkpoint_resolved`: persist/discard/unresolved/cancelled and duration;
@@ -550,13 +629,31 @@ Events never include the search query, page body, summary text, absolute path, r
 arguments/output, or credentials. Logging/telemetry failure never changes gate or commit
 behavior.
 
+The event flow is deterministic:
+
+1. an accepted real root prompt emits one retrieval hit/miss/skip; qualifying durable
+   user intent additionally emits `wiki_checkpoint_created(cause=explicit_user_durable)`;
+2. each qualifying root tool result emits `wiki_evidence_recorded(producer=root)`, and
+   the reusable root completion boundary emits
+   `wiki_checkpoint_created(cause=root_evidence)`;
+3. each qualifying subagent tool result emits
+   `wiki_evidence_recorded(producer=subagent)`, and successful result delivery to the
+   root emits `wiki_checkpoint_created(cause=subagent_result)` once;
+4. every checkpoint emits exactly one terminal `wiki_checkpoint_resolved`; persist then
+   proceeds through candidate-discarded or approval-requested and finally committed or a
+   safe failure event.
+
+A source-observation event does not mean a checkpoint was created, and a checkpoint event
+does not mean a write was admitted.
+
 ## Failure behavior
 
 - Retrieval failure: continue the user turn without retrieval context.
 - Evidence normalization failure: omit that evidence and log a safe reason; do not fail
   the subagent result.
-- Checkpoint block injection failure: return the normal subagent result and emit a safe
-  trigger-failed event; the runner itself is not converted to failed.
+- Checkpoint block injection failure: return the normal subagent result or finish the
+  normal root response and emit a safe trigger-failed event; the task itself is not
+  converted to failed.
 - Wiki unavailable: resolve checkpoint as unavailable and continue.
 - Forged, expired, cross-turn, cross-session, or replayed checkpoint: reject the write.
 - Changed source hash: reject as stale grounding and require a fresh read.
@@ -588,15 +685,34 @@ checkpoint IDs and evidence grants must never cross user identities.
 - FTS failure uses existing bounded fallback and never blocks the turn;
 - retrieval telemetry contains no query or body.
 
-### Explicit remember
+### Explicit durable user intent
 
 - English and Chinese positive forms create exactly one checkpoint;
 - negated forms create none;
+- explicit long-term preferences, fixed rules, and cross-session facts match, while
+  current-task-only and temporary forms do not;
 - raw and normalized text hashes bind conversation sources;
 - model-supplied session ID, content hash, high value, stability, or checkpoint ID cannot
   forge a grant;
 - an unresolved checkpoint gets one internal continuation and then a deterministic
   discard rather than a loop.
+
+### Root-agent bridge
+
+- root ReadFile, post-write file re-read, Shell, Grep/Glob, SearchWeb, and FetchURL
+  outcomes produce the same typed, turn-bound evidence records as subagent work;
+- a root that completes reusable evidence-backed work without launching any subagent
+  receives one `root_evidence` checkpoint;
+- a root no-tool reasoning answer, ordinary chat, failed tool, empty output, temporary
+  status, one-off progress result, or unsourced hypothesis receives none;
+- a root Shell/search conclusion can trigger evaluation but cannot pass stable/reliable
+  admission without an exact workspace-file or fetched-document source;
+- repeated no-tool completion attempts and repeated tool results do not duplicate the
+  checkpoint;
+- root follow-up evidence used to resolve a subagent checkpoint augments that checkpoint
+  instead of creating an equivalent root checkpoint;
+- forged model `high`, `stable`, source hashes, or checkpoint IDs cannot replace the
+  runtime's root-turn evidence grant.
 
 ### Subagent bridge
 
@@ -610,14 +726,15 @@ checkpoint IDs and evidence grants must never cross user identities.
   final summary and before Agent tool return;
 - background notification and repeated TaskOutput produce one deduplicated checkpoint;
 - resumed agent runs use a new run generation and cannot replay old evidence;
-- Shell/search-only evidence triggers a checkpoint but cannot pass stable/reliable
-  admission until the root obtains an exact durable source;
+- eligible non-transient Shell/search evidence can trigger a checkpoint but cannot pass
+  stable/reliable admission until the root obtains an exact durable source;
 - source file mutation after evidence capture invalidates the grant.
 
 ### Gate and approval
 
 - candidate `value="high"` without a valid checkpoint is rejected;
-- a valid explicit-remember grant reaches normal/AFK Approval;
+- valid root-evidence and explicit-user-durable grants reach normal/AFK Approval only
+  after their distinct source rules pass;
 - a valid sourced subagent checkpoint reaches Approval only after all source hashes match;
 - normal allow-once, session-wide allow, decline, cancellation, and delivery failure keep
   existing behavior;
@@ -629,6 +746,8 @@ checkpoint IDs and evidence grants must never cross user identities.
 
 ### Concurrency and lifecycle
 
+- concurrent root tool calls merge into one cause-bound turn ledger without losing or
+  cross-binding source hashes;
 - parallel subagent results create isolated, bounded, deduplicated checkpoint records;
 - two root sessions cannot consume one another's checkpoint or evidence;
 - cancellation at evidence capture, checkpoint delivery, approval, prepare, and commit
@@ -654,15 +773,20 @@ checkpoint IDs and evidence grants must never cross user identities.
 
 - A normal real-user question receives a bounded relevant global Wiki block when matches
   exist and no block when the Wiki is empty.
-- A real explicit remember request cannot silently finish without one root checkpoint
-  resolution attempt.
+- Evidence-bearing root work can produce durable Wiki knowledge without any subagent,
+  and cannot silently skip its one root checkpoint resolution attempt after a reusable
+  conclusion is completed.
 - Every evidence-bearing subagent completion is evaluated once by the root agent; a
   reasoning-only or failed subagent completion is not.
+- A real explicit remember request, long-term preference, fixed rule, or cross-session
+  fact cannot silently finish without one root checkpoint resolution attempt.
+- Ordinary chat, temporary state/progress, current-task-only preference, and unsourced
+  speculation create no checkpoint.
 - Subagents have no Wiki tool and cannot write or resolve Wiki checkpoints.
 - Runtime-generated single-use grants, not model fields, supply high-value, stable,
   grounding, and reliable-source authority.
-- Shell and search can trigger evaluation but cannot independently authorize durable
-  knowledge.
+- Root and subagent Shell/search evidence follow the same turn-bound trust rules: they
+  can trigger evaluation but cannot independently authorize durable knowledge.
 - Normal and AFK modes use compact Approval; YOLO alone skips the popup and still uses
   the same gate.
 - Medium/low, unstable, ungrounded, duplicate, declined, cancelled, and unresolved
