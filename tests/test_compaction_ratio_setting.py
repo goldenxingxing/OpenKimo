@@ -100,3 +100,44 @@ def test_what_settings_writes_is_what_kimi_cli_loads(tmp_path: Path, ratio: floa
     loaded = load_config_from_string(json.dumps(tomllib.loads(path.read_text(encoding="utf-8"))))
 
     assert loaded.loop_control.compaction_trigger_ratio == ratio
+
+
+# ---------------------------------------------------------------------------
+# Reading the current value back for the Settings control
+# ---------------------------------------------------------------------------
+
+
+def test_the_default_is_used_when_nothing_is_configured(tmp_path: Path) -> None:
+    from app_main.configtoml import DEFAULT_COMPACTION_RATIO, get_compaction_ratio
+
+    assert get_compaction_ratio(tmp_path / "absent.toml") == DEFAULT_COMPACTION_RATIO
+    assert get_compaction_ratio(_config(tmp_path)) == DEFAULT_COMPACTION_RATIO
+
+
+def test_a_written_value_reads_back(tmp_path: Path) -> None:
+    from app_main.configtoml import get_compaction_ratio
+
+    path = _config(tmp_path)
+    set_compaction_ratio(path, 0.72)
+
+    assert get_compaction_ratio(path) == 0.72
+
+
+@pytest.mark.parametrize("body", ["[loop_control]\ncompaction_trigger_ratio = 2.5\n", "== bad ==\n"])
+def test_an_unusable_file_falls_back_rather_than_crashing_settings(
+    tmp_path: Path, body: str
+) -> None:
+    from app_main.configtoml import DEFAULT_COMPACTION_RATIO, get_compaction_ratio
+
+    assert get_compaction_ratio(_config(tmp_path, body)) == DEFAULT_COMPACTION_RATIO
+
+
+def test_the_slider_range_matches_what_kimi_cli_accepts() -> None:
+    """A reachable slider position must never produce an unloadable config."""
+    source = (ROOT / "packaging" / "app_main" / "settings_window.py").read_text(encoding="utf-8")
+
+    assert "setMinValue_(0.5)" in source
+    assert "setMaxValue_(0.99)" in source
+    # Spliced into the vertical chain, and written on save.
+    assert "fr_compaction.bottomAnchor()" in source
+    assert "configtoml.set_compaction_ratio(" in source

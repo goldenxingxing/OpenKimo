@@ -477,6 +477,7 @@ class SettingsController(NSWindowController):
     """Backing window controller; built lazily via :func:`build_controller`."""
 
     paths_ref = None  # type: AppPaths | None
+    compaction_slider = None  # NSSlider; lives in config.toml, not .env
     on_save = None    # type: Callable[[bool], None] | None
     rows = None       # type: dict[str, list[_Row]] | None
 
@@ -567,6 +568,18 @@ class SettingsController(NSWindowController):
                     )
             except Exception:
                 log.exception("config.toml sync failed; continuing")
+        # config.toml-only setting, written whatever happened to the providers
+        # above. It takes effect on live sessions without a restart.
+        if self.compaction_slider is not None:
+            try:
+                from . import configtoml
+                configtoml.set_compaction_ratio(
+                    self.paths_ref.sessions_dir / "config.toml",
+                    round(float(self.compaction_slider.doubleValue()), 2),
+                )
+            except Exception:
+                log.exception("failed to save the auto-compaction ratio")
+
         if self.on_save:
             try:
                 self.on_save(restart)
@@ -1062,13 +1075,33 @@ def _build_llm_section(
     # Slider should stretch but at least 200pt wide.
     temp.widthAnchor().constraintGreaterThanOrEqualToConstant_(200.0).setActive_(True)
 
+    # Auto-compaction threshold. Unlike everything else here this lives in
+    # config.toml rather than .env, so it carries no row key and is written
+    # directly in _save.
+    from . import configtoml as _configtoml
+
+    try:
+        _toml_path = controller.paths_ref.sessions_dir / "config.toml"
+        compaction_val = _configtoml.get_compaction_ratio(_toml_path)
+    except Exception:
+        compaction_val = _configtoml.DEFAULT_COMPACTION_RATIO
+    compaction = NSSlider.alloc().init()
+    compaction.setMinValue_(0.5)
+    compaction.setMaxValue_(0.99)
+    compaction.setDoubleValue_(compaction_val)
+    compaction.setTranslatesAutoresizingMaskIntoConstraints_(False)
+    compaction.widthAnchor().constraintGreaterThanOrEqualToConstant_(200.0).setActive_(True)
+    controller.compaction_slider = compaction
+
     fr_thinking = _form_row(_label("Thinking"), thinking, fixed_width=60.0)
     fr_temp = _form_row(_label("Temperature"), temp)
+    fr_compaction = _form_row(_label("Auto-compact at"), compaction)
     rows.append(_Row("LLM_THINKING", _label("Thinking"), thinking))
     rows.append(_Row("LLM_TEMPERATURE", _label("Temperature"), temp))
 
     section.addSubview_(fr_thinking)
     section.addSubview_(fr_temp)
+    section.addSubview_(fr_compaction)
 
     # Providers container
     providers_container = _v()
@@ -1126,8 +1159,13 @@ def _build_llm_section(
         fr_temp.leadingAnchor().constraintEqualToAnchor_(section.leadingAnchor()),
         fr_temp.trailingAnchor().constraintEqualToAnchor_(section.trailingAnchor()),
 
+        fr_compaction.topAnchor().constraintEqualToAnchor_constant_(
+            fr_temp.bottomAnchor(), ROW_VGAP),
+        fr_compaction.leadingAnchor().constraintEqualToAnchor_(section.leadingAnchor()),
+        fr_compaction.trailingAnchor().constraintEqualToAnchor_(section.trailingAnchor()),
+
         providers_container.topAnchor().constraintEqualToAnchor_constant_(
-            fr_temp.bottomAnchor(), 14.0),
+            fr_compaction.bottomAnchor(), 14.0),
         providers_container.leadingAnchor().constraintEqualToAnchor_(
             section.leadingAnchor()),
         providers_container.trailingAnchor().constraintEqualToAnchor_(

@@ -352,6 +352,26 @@ def set_default_model(path: Path, default: str) -> None:
         raise
 
 
+DEFAULT_COMPACTION_RATIO = 0.95
+
+
+def get_compaction_ratio(path: Path) -> float:
+    """Read the current ratio, falling back to kimi-cli's default."""
+    if not path.exists():
+        return DEFAULT_COMPACTION_RATIO
+    try:
+        import tomlkit
+
+        doc = tomlkit.parse(path.read_text(encoding="utf-8"))
+        section = doc.get("loop_control")
+        if section is None:
+            return DEFAULT_COMPACTION_RATIO
+        value = float(section.get("compaction_trigger_ratio", DEFAULT_COMPACTION_RATIO))
+    except Exception:
+        return DEFAULT_COMPACTION_RATIO
+    return value if 0.5 <= value <= 0.99 else DEFAULT_COMPACTION_RATIO
+
+
 def set_compaction_ratio(path: Path, ratio: float) -> None:
     """Set ``[loop_control] compaction_trigger_ratio`` in ``config.toml``.
 
@@ -409,4 +429,6 @@ __all__ = [
     "update_models",
     "set_default_model",
     "set_compaction_ratio",
+    "get_compaction_ratio",
+    "DEFAULT_COMPACTION_RATIO",
 ]
