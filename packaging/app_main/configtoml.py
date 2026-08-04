@@ -352,4 +352,61 @@ def set_default_model(path: Path, default: str) -> None:
         raise
 
 
-__all__ = ["prune", "update_providers", "update_models", "set_default_model"]
+def set_compaction_ratio(path: Path, ratio: float) -> None:
+    """Set ``[loop_control] compaction_trigger_ratio`` in ``config.toml``.
+
+    This is the share of the context window that may fill before the agent
+    auto-compacts its history. kimi-cli validates the range on load, so a value
+    outside 0.5-0.99 is rejected here rather than written and blamed later.
+
+    No-ops if the file is missing, the toml is unparseable, or the value
+    already matches.
+    """
+    if not path.exists():
+        return
+    if not (0.5 <= ratio <= 0.99):
+        raise ValueError(f"compaction_trigger_ratio must be within 0.5-0.99, got {ratio}")
+
+    import tomlkit
+
+    text = path.read_text(encoding="utf-8")
+    try:
+        doc = tomlkit.parse(text)
+    except Exception:
+        return
+
+    section = doc.get("loop_control")
+    if section is None:
+        section = tomlkit.table()
+        doc["loop_control"] = section
+    elif float(section.get("compaction_trigger_ratio", -1)) == ratio:
+        return
+
+    section["compaction_trigger_ratio"] = ratio
+
+    new_text = tomlkit.dumps(doc)
+    if new_text == text:
+        return
+
+    fd, tmp = tempfile.mkstemp(
+        dir=str(path.parent), prefix=path.name + ".", suffix=".tmp"
+    )
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            f.write(new_text)
+        os.replace(tmp, path)
+    except Exception:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        raise
+
+
+__all__ = [
+    "prune",
+    "update_providers",
+    "update_models",
+    "set_default_model",
+    "set_compaction_ratio",
+]
