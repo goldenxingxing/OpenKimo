@@ -100,6 +100,15 @@ BUTTONBAR_HMARGIN: float = 20.0
 
 # ---- low-level helpers --------------------------------------------------
 
+def _format_temperature(value: float) -> str:
+    return f"{value:.2f}"
+
+
+def _format_ratio(value: float) -> str:
+    """Ratios read better as a percentage of the context window."""
+    return f"{round(value * 100)}%"
+
+
 def _v() -> NSView:
     """Construct an NSView with auto-resizing translation disabled."""
     view = NSView.alloc().init()
@@ -179,6 +188,40 @@ def _divider() -> NSView:
     except Exception:
         v.layer().setBackgroundColor_(NSColor.grayColor().CGColor())
     return v
+
+
+def _slider_row(
+    label: NSTextField,
+    slider: NSSlider,
+    readout: NSTextField,
+) -> NSView:
+    """A slider with its current value shown to its right.
+
+    A bare slider gives no way to tell 0.72 from 0.78, which matters for
+    values users type into config files and compare against defaults.
+    """
+    pair = _v()
+    pair.addSubview_(slider)
+    pair.addSubview_(readout)
+
+    readout.setContentHuggingPriority_forOrientation_(750, 0)
+    readout.setContentCompressionResistancePriority_forOrientation_(750, 0)
+
+    cs: list[Any] = [
+        slider.leadingAnchor().constraintEqualToAnchor_(pair.leadingAnchor()),
+        slider.centerYAnchor().constraintEqualToAnchor_(pair.centerYAnchor()),
+        slider.topAnchor().constraintEqualToAnchor_(pair.topAnchor()),
+        slider.bottomAnchor().constraintEqualToAnchor_(pair.bottomAnchor()),
+
+        readout.leadingAnchor().constraintEqualToAnchor_constant_(
+            slider.trailingAnchor(), 10.0),
+        readout.trailingAnchor().constraintEqualToAnchor_(pair.trailingAnchor()),
+        readout.centerYAnchor().constraintEqualToAnchor_(pair.centerYAnchor()),
+        # Fixed so the slider does not resize as the digits change.
+        readout.widthAnchor().constraintEqualToConstant_(48.0),
+    ]
+    NSLayoutConstraint.activateConstraints_(cs)
+    return _form_row(label, pair)
 
 
 def _form_row(
@@ -478,6 +521,9 @@ class SettingsController(NSWindowController):
 
     paths_ref = None  # type: AppPaths | None
     compaction_slider = None  # NSSlider; lives in config.toml, not .env
+    compaction_readout = None  # NSTextField
+    temp_slider = None  # NSSlider
+    temp_readout = None  # NSTextField
     on_save = None    # type: Callable[[bool], None] | None
     rows = None       # type: dict[str, list[_Row]] | None
 
@@ -498,6 +544,14 @@ class SettingsController(NSWindowController):
         NSApp.activateIgnoringOtherApps_(True)
 
     # ---- bottom buttons -----------------------------------------------
+
+    def onTemperatureChanged_(self, sender):  # noqa: N802
+        if self.temp_readout is not None:
+            self.temp_readout.setStringValue_(_format_temperature(sender.doubleValue()))
+
+    def onCompactionChanged_(self, sender):  # noqa: N802
+        if self.compaction_readout is not None:
+            self.compaction_readout.setStringValue_(_format_ratio(sender.doubleValue()))
 
     def onCancel_(self, _sender):  # noqa: N802
         self.window().performClose_(None)
@@ -1074,6 +1128,12 @@ def _build_llm_section(
     temp.setTranslatesAutoresizingMaskIntoConstraints_(False)
     # Slider should stretch but at least 200pt wide.
     temp.widthAnchor().constraintGreaterThanOrEqualToConstant_(200.0).setActive_(True)
+    temp_readout = _label(_format_temperature(temp_val))
+    temp.setContinuous_(True)
+    temp.setTarget_(controller)
+    temp.setAction_("onTemperatureChanged:")
+    controller.temp_slider = temp
+    controller.temp_readout = temp_readout
 
     # Auto-compaction threshold. Unlike everything else here this lives in
     # config.toml rather than .env, so it carries no row key and is written
@@ -1091,11 +1151,16 @@ def _build_llm_section(
     compaction.setDoubleValue_(compaction_val)
     compaction.setTranslatesAutoresizingMaskIntoConstraints_(False)
     compaction.widthAnchor().constraintGreaterThanOrEqualToConstant_(200.0).setActive_(True)
+    compaction_readout = _label(_format_ratio(compaction_val))
+    compaction.setContinuous_(True)
+    compaction.setTarget_(controller)
+    compaction.setAction_("onCompactionChanged:")
     controller.compaction_slider = compaction
+    controller.compaction_readout = compaction_readout
 
     fr_thinking = _form_row(_label("Thinking"), thinking, fixed_width=60.0)
-    fr_temp = _form_row(_label("Temperature"), temp)
-    fr_compaction = _form_row(_label("Auto-compact at"), compaction)
+    fr_temp = _slider_row(_label("Temperature"), temp, temp_readout)
+    fr_compaction = _slider_row(_label("Auto-compact at"), compaction, compaction_readout)
     rows.append(_Row("LLM_THINKING", _label("Thinking"), thinking))
     rows.append(_Row("LLM_TEMPERATURE", _label("Temperature"), temp))
 

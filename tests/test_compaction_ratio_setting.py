@@ -141,3 +141,51 @@ def test_the_slider_range_matches_what_kimi_cli_accepts() -> None:
     # Spliced into the vertical chain, and written on save.
     assert "fr_compaction.bottomAnchor()" in source
     assert "configtoml.set_compaction_ratio(" in source
+
+
+# ---------------------------------------------------------------------------
+# Slider readouts
+# ---------------------------------------------------------------------------
+
+
+def _settings_source() -> str:
+    return (ROOT / "packaging" / "app_main" / "settings_window.py").read_text(encoding="utf-8")
+
+
+def _extract(name: str) -> object:
+    """Evaluate one pure formatter without importing AppKit."""
+    import re
+
+    match = re.search(rf"def {name}\(value: float\) -> str:\n(?:    .*\n)+", _settings_source())
+    assert match is not None, f"{name} not found"
+    namespace: dict[str, object] = {}
+    exec(match.group(0), namespace)  # noqa: S102
+    return namespace[name]
+
+
+@pytest.mark.parametrize(
+    ("value", "shown"),
+    [(0.5, "50%"), (0.72, "72%"), (0.8, "80%"), (0.95, "95%"), (0.99, "99%")],
+)
+def test_the_ratio_reads_out_as_a_percentage(value: float, shown: str) -> None:
+    assert _extract("_format_ratio")(value) == shown  # type: ignore[operator]
+
+
+@pytest.mark.parametrize(("value", "shown"), [(0.0, "0.00"), (0.7, "0.70"), (2.0, "2.00")])
+def test_the_temperature_reads_out_to_two_decimals(value: float, shown: str) -> None:
+    assert _extract("_format_temperature")(value) == shown  # type: ignore[operator]
+
+
+def test_both_sliders_report_their_value_while_dragging() -> None:
+    """A bare slider gives no way to tell 0.72 from 0.78."""
+    source = _settings_source()
+
+    for slider in ("temp", "compaction"):
+        assert f"{slider}.setContinuous_(True)" in source
+        assert f"{slider}.setTarget_(controller)" in source
+    assert "def onTemperatureChanged_(self, sender)" in source
+    assert "def onCompactionChanged_(self, sender)" in source
+    # The initial readout goes through the same formatter as the live update,
+    # so the value shown on open cannot drift from the value shown on drag.
+    assert "_label(_format_ratio(compaction_val))" in source
+    assert "_label(_format_temperature(temp_val))" in source
