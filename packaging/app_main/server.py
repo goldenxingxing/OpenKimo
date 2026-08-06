@@ -127,6 +127,15 @@ def _build_env(p: AppPaths) -> dict[str, str]:
     env["OPENKIMO_APP_DATA_DIR"] = str(p.app_support)
     env["OPENKIMO_WIKI_ROOT"] = str(p.wiki_dir)
 
+    # 3b. Text is UTF-8, whatever the host codepage says.
+    # Python falls back to the locale encoding for open() and for stdout —
+    # cp936 on a Chinese-locale Windows, where our own log line or a model
+    # response containing a character GBK lacks raises UnicodeEncodeError far
+    # from anything the user did. macOS already defaults to UTF-8, so this
+    # only changes behaviour where it was wrong.
+    env["PYTHONUTF8"] = "1"
+    env["PYTHONIOENCODING"] = "utf-8"
+
     # 4. User-overlay Python (so kimi-cli's shell tool can pip install).
     env.update(userenv.env_overlay(p))
 

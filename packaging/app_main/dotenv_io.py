@@ -52,6 +52,37 @@ SECRET_KEYS: frozenset[str] = frozenset({
 _LINE_RE = re.compile(r"^\s*(?P<key>[A-Za-z_][A-Za-z0-9_]*)\s*=\s*(?P<val>.*)$")
 
 
+# What a `.env` written before we pinned UTF-8 is encoded in. Only Windows
+# ever wrote anything else, and there the ANSI codepage is what it used.
+# "mbcs" names that codepage directly; ``locale.getpreferredencoding()`` would
+# not, because PYTHONUTF8=1 — which the launcher and the server now set —
+# makes it report UTF-8 on exactly the machines whose files are not.
+LEGACY_ENCODING = "mbcs" if os.name == "nt" else "utf-8"
+
+
+def _read_text(path: Path) -> str:
+    """Read `.env` as UTF-8, tolerating a file written in the host codepage.
+
+    `.env` holds whatever the user typed into Settings — a provider named in
+    Chinese, a model string pasted with a superscript in it. Reading and
+    writing it with the platform default is invisible on macOS, where that
+    default is UTF-8, and broken on a Chinese-locale Windows, where it is
+    cp936: saving a provider config containing any character GBK cannot
+    represent failed outright, and the Settings window reported the codec
+    error rather than the setting.
+
+    We now write UTF-8 unconditionally. A file written before that is decoded
+    with the legacy encoding and normalised by the next save. `errors=
+    "replace"` on that second attempt, so one unreadable byte costs one
+    character rather than the whole configuration.
+    """
+    raw = path.read_bytes()
+    try:
+        return raw.decode("utf-8")
+    except UnicodeDecodeError:
+        return raw.decode(LEGACY_ENCODING, errors="replace")
+
+
 def _unquote(v: str) -> str:
     v = v.rstrip()
     if len(v) >= 2 and v[0] == v[-1]:
@@ -87,7 +118,7 @@ def read_env(path: Path) -> dict[str, str]:
     if not path.exists():
         return {}
     out: dict[str, str] = {}
-    for raw in path.read_text().splitlines():
+    for raw in _read_text(path).splitlines():
         stripped = raw.strip()
         if not stripped or stripped.startswith("#"):
             continue
@@ -119,7 +150,7 @@ def write_env(path: Path, updates: dict[str, str]) -> None:
 
     existing_lines: list[str] = []
     if path.exists():
-        existing_lines = path.read_text().splitlines()
+        existing_lines = _read_text(path).splitlines()
 
     seen: set[str] = set()
     new_lines: list[str] = []
@@ -152,7 +183,7 @@ def write_env(path: Path, updates: dict[str, str]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     fd, tmp = tempfile.mkstemp(prefix=".env.", dir=str(path.parent))
     try:
-        with os.fdopen(fd, "w") as f:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
             f.write(text)
         os.replace(tmp, path)
     except Exception:

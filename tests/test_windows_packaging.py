@@ -37,6 +37,12 @@ SERVER_SPEC = importlib.util.spec_from_file_location(
 server = importlib.util.module_from_spec(SERVER_SPEC)
 sys.modules[SERVER_SPEC.name] = server
 SERVER_SPEC.loader.exec_module(server)
+DOTENV_SPEC = importlib.util.spec_from_file_location(
+    "openkimo_app_main.dotenv_io", APP_MAIN_DIR / "dotenv_io.py"
+)
+dotenv_io = importlib.util.module_from_spec(DOTENV_SPEC)
+sys.modules[DOTENV_SPEC.name] = dotenv_io
+DOTENV_SPEC.loader.exec_module(dotenv_io)
 
 
 def _build_config(tmp_path: Path) -> build_windows.BuildConfig:
@@ -161,3 +167,76 @@ def test_posix_server_process_starts_a_new_session() -> None:
     assert server._popen_new_group_kwargs("darwin") == {
         "start_new_session": True
     }
+
+
+# --- Text encoding -------------------------------------------------------
+#
+# On a Chinese-locale Windows Python's default text encoding is cp936, which
+# cannot represent characters a user may well paste into a provider config.
+# Saving one used to fail with "'gbk' codec can't encode character '\xb3'"
+# and the Settings window reported the codec error instead of the setting.
+
+# '³' (U+00B3): representable in UTF-8, absent from GBK.
+_NOT_IN_GBK = "OpenKimo³"
+
+
+def test_env_round_trips_a_character_the_host_codepage_lacks(tmp_path: Path) -> None:
+    env_file = tmp_path / ".env"
+
+    dotenv_io.write_env(env_file, {"LLM_PROVIDERS": _NOT_IN_GBK})
+
+    assert env_file.read_bytes().decode("utf-8")
+    assert dotenv_io.read_env(env_file)["LLM_PROVIDERS"] == _NOT_IN_GBK
+
+
+def test_env_written_in_the_host_codepage_still_reads(
+    tmp_path: Path, monkeypatch
+) -> None:
+    # A file left behind by the version that wrote the ANSI codepage. It has to
+    # keep loading, or the app comes up with no provider configured at all.
+    # "mbcs" only exists on Windows, so stand in the concrete codepage here.
+    monkeypatch.setattr(dotenv_io, "LEGACY_ENCODING", "gbk")
+    env_file = tmp_path / ".env"
+    env_file.write_bytes("LLM_DEFAULT_PROVIDER=深度求索\n".encode("gbk"))
+
+    assert dotenv_io.read_env(env_file)["LLM_DEFAULT_PROVIDER"] == "深度求索"
+
+
+def test_saving_normalises_a_legacy_env_to_utf8(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setattr(dotenv_io, "LEGACY_ENCODING", "gbk")
+    env_file = tmp_path / ".env"
+    env_file.write_bytes("LLM_DEFAULT_PROVIDER=深度求索\n".encode("gbk"))
+
+    dotenv_io.write_env(env_file, {"KIMI_WEB_PORT": "5494"})
+
+    assert env_file.read_bytes().decode("utf-8").count("深度求索") == 1
+
+
+def test_worker_runs_in_utf8_mode(tmp_path: Path) -> None:
+    paths = SimpleNamespace(
+        app_name="OpenKimo",
+        static_dir=tmp_path / "static",
+        work_dir=tmp_path / "work",
+        sessions_dir=tmp_path / "sessions",
+        output_dir=tmp_path / "output",
+        skill_dir=tmp_path / "skills",
+        app_support=tmp_path,
+        wiki_dir=tmp_path / "wiki",
+        kimi_cli=tmp_path / "kimi_cli",
+        env_file=tmp_path / ".env",
+        userbase=tmp_path / "userbase",
+        userbase_bin=tmp_path / "userbase" / "bin",
+        pip_conf=tmp_path / "pip.conf",
+        bundled_python_bin=tmp_path / "python" / "bin",
+    )
+
+    env = server._build_env(paths)
+
+    assert env["PYTHONUTF8"] == "1"
+    assert env["PYTHONIOENCODING"] == "utf-8"
+
+
+def test_launcher_puts_the_tray_in_utf8_mode() -> None:
+    # The tray spawns the Settings window, which is what writes .env.
+    assert 'env["PYTHONUTF8"] = "1"' in build_windows._LAUNCHER_PY
+    assert 'env["PYTHONIOENCODING"] = "utf-8"' in build_windows._LAUNCHER_PY

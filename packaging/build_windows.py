@@ -677,6 +677,12 @@ def main() -> int:
         pythonpath_parts.append(env["PYTHONPATH"])
     env["PYTHONPATH"] = os.pathsep.join(pythonpath_parts)
     env["KIMI_OPENKIMO_WIN"] = "1"
+    # Everything below this process reads and writes text as UTF-8. Without
+    # it Python uses the ANSI codepage (cp936 on a Chinese-locale machine),
+    # which cannot represent characters a user may well paste into Settings
+    # and turns them into a codec error instead of a saved setting.
+    env["PYTHONUTF8"] = "1"
+    env["PYTHONIOENCODING"] = "utf-8"
 
     # Detach: the .exe should return immediately and the tray runs in pythonw.
     DETACHED_PROCESS = 0x00000008
