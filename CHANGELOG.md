@@ -6,6 +6,13 @@ this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [v0.1.30] — 2026-08-07
+
+### Fixed
+
+- **Windows 打开会话即 `worker process exited unexpectedly (exit code 1)`（v0.1.29 引入的回归）**：v0.1.29 为修 `.env` 的 GBK 问题给整个进程树设了 `PYTHONUTF8=1`。它不只影响本进程的读写——它还会改掉 `locale.getpreferredencoding()`，而那正是 `subprocess(text=True)` 用来解码子进程输出的编码。中文 Windows 上 `where.exe git` 找不到时会打印 `信息: 用提供的模式无法找到文件。`（GBK，首字节 `0xD0`），于是解码在 subprocess **自己的 reader 线程**里抛 `UnicodeDecodeError: 'utf-8' codec can't decode byte 0xd0 in position 0`——那个位置调用方根本 catch 不到。git 探测因此拿不到任何结果，退化成"没装 git-bash"，`Runtime.create` 抛 `GitBashNotFoundError`，worker 在用户开口之前就退出了。现在**不再设 `PYTHONUTF8`**；`PYTHONIOENCODING=utf-8` 保留——它只管本进程的 std 流（父进程正是用 `.decode("utf-8")` 读 worker 的 stderr），不影响子进程解码。v0.1.29 真正要修的 `.env` 编码问题不依赖 `PYTHONUTF8`，那部分是显式 `encoding="utf-8"`，不受本次回退影响。
+- **git-bash 探测不再会被一行读不懂的输出干掉**：上面那条的第二层原因是探测本身太脆。`where.exe git` 和 `git --exec-path` 的输出现在按 `errors="replace"` 解码——路径乱码是可恢复的，探测器死掉不是。即使今后有人在环境里设了 `PYTHONUTF8`，也不会再连锁到 worker 启动失败。
+
 ## [v0.1.29] — 2026-08-06
 
 ### Fixed
