@@ -127,13 +127,18 @@ def _build_env(p: AppPaths) -> dict[str, str]:
     env["OPENKIMO_APP_DATA_DIR"] = str(p.app_support)
     env["OPENKIMO_WIKI_ROOT"] = str(p.wiki_dir)
 
-    # 3b. Text is UTF-8, whatever the host codepage says.
-    # Python falls back to the locale encoding for open() and for stdout —
-    # cp936 on a Chinese-locale Windows, where our own log line or a model
-    # response containing a character GBK lacks raises UnicodeEncodeError far
-    # from anything the user did. macOS already defaults to UTF-8, so this
-    # only changes behaviour where it was wrong.
-    env["PYTHONUTF8"] = "1"
+    # 3b. Our own stdio is UTF-8, whatever the host codepage says: the worker's
+    # stderr is read back with .decode("utf-8"), and a model response containing
+    # a character the ANSI codepage lacks would otherwise raise
+    # UnicodeEncodeError far from anything the user did.
+    #
+    # PYTHONIOENCODING only covers this process's own std streams. Do NOT add
+    # PYTHONUTF8=1 here: that also switches locale.getpreferredencoding(), which
+    # is what subprocess(text=True) decodes child output with — and the Windows
+    # tools we shell out to legitimately emit the ANSI codepage. It shipped in
+    # v0.1.29 and broke git-bash detection on a Chinese Windows, where
+    # `where.exe git` prints GBK and the decode died inside subprocess's reader
+    # thread, taking the whole worker with it.
     env["PYTHONIOENCODING"] = "utf-8"
 
     # 4. User-overlay Python (so kimi-cli's shell tool can pip install).

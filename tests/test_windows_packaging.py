@@ -212,8 +212,8 @@ def test_saving_normalises_a_legacy_env_to_utf8(tmp_path: Path, monkeypatch) -> 
     assert env_file.read_bytes().decode("utf-8").count("深度求索") == 1
 
 
-def test_worker_runs_in_utf8_mode(tmp_path: Path) -> None:
-    paths = SimpleNamespace(
+def _fake_paths(tmp_path: Path) -> SimpleNamespace:
+    return SimpleNamespace(
         app_name="OpenKimo",
         static_dir=tmp_path / "static",
         work_dir=tmp_path / "work",
@@ -230,13 +230,34 @@ def test_worker_runs_in_utf8_mode(tmp_path: Path) -> None:
         bundled_python_bin=tmp_path / "python" / "bin",
     )
 
-    env = server._build_env(paths)
 
-    assert env["PYTHONUTF8"] == "1"
+def test_worker_writes_its_own_streams_as_utf8(tmp_path: Path) -> None:
+    # The parent reads the worker's stderr with .decode("utf-8"), and a model
+    # response containing a character the ANSI codepage lacks would otherwise
+    # raise UnicodeEncodeError far from anything the user did.
+    env = server._build_env(_fake_paths(tmp_path))
+
     assert env["PYTHONIOENCODING"] == "utf-8"
 
 
-def test_launcher_puts_the_tray_in_utf8_mode() -> None:
-    # The tray spawns the Settings window, which is what writes .env.
-    assert 'env["PYTHONUTF8"] = "1"' in build_windows._LAUNCHER_PY
+def test_worker_does_not_run_in_utf8_mode(tmp_path: Path) -> None:
+    """PYTHONUTF8 must stay unset. Regression guard for v0.1.29.
+
+    Unlike PYTHONIOENCODING, PYTHONUTF8=1 also switches
+    ``locale.getpreferredencoding()``, which is what ``subprocess(text=True)``
+    decodes child output with. The Windows tools we shell out to legitimately
+    emit the ANSI codepage: on a Chinese Windows, ``where.exe git`` prints GBK,
+    the decode died inside subprocess's reader thread, git-bash detection came
+    back empty, and the worker exited 1 with GitBashNotFoundError before the
+    user could type anything.
+    """
+    env = server._build_env(_fake_paths(tmp_path))
+
+    assert "PYTHONUTF8" not in env
+
+
+def test_launcher_makes_the_same_distinction() -> None:
+    # The comment there names PYTHONUTF8 to explain why it is absent, so match
+    # the assignment rather than the word.
     assert 'env["PYTHONIOENCODING"] = "utf-8"' in build_windows._LAUNCHER_PY
+    assert 'env["PYTHONUTF8"]' not in build_windows._LAUNCHER_PY

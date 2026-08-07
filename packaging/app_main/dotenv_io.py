@@ -54,9 +54,9 @@ _LINE_RE = re.compile(r"^\s*(?P<key>[A-Za-z_][A-Za-z0-9_]*)\s*=\s*(?P<val>.*)$")
 
 # What a `.env` written before we pinned UTF-8 is encoded in. Only Windows
 # ever wrote anything else, and there the ANSI codepage is what it used.
-# "mbcs" names that codepage directly; ``locale.getpreferredencoding()`` would
-# not, because PYTHONUTF8=1 — which the launcher and the server now set —
-# makes it report UTF-8 on exactly the machines whose files are not.
+# "mbcs" names that codepage directly rather than asking
+# ``locale.getpreferredencoding()``, so it stays correct no matter what the
+# process's UTF-8 mode is set to.
 LEGACY_ENCODING = "mbcs" if os.name == "nt" else "utf-8"
 
 
