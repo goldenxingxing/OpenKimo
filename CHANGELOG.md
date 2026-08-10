@@ -6,6 +6,18 @@ this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [v0.1.31] — 2026-08-10
+
+### Added
+
+- **安装包自带一个便携 shell，Windows 不装 Git 也能执行命令**：Shell 工具走的是 bash 而不是 PowerShell，所以一台没装 Git for Windows 的机器等于**一个 shell 都没有**。安装包现在附带一份钉死版本、校验过 sha256 的 busybox-w32（`FRP-6075`，x86_64 取 **w64u** 这个 Unicode 变体——不带 Unicode 的构建会把非 ASCII 路径和输出弄乱，对中文用户不是可选项），找不到 git-bash 时自动退到它。二进制不进仓库（`deps/bin` 是 ignore 的），由构建脚本按校验和拉取；拉不到也只是告警，不会让整个安装包构建失败。它被安装成 `sh.exe` 而非 `busybox.exe` 是刻意的：shell 的调用形式是 `<path> -c <command>`，而 busybox 按 argv[0] 分发，仍叫 busybox.exe 会去找一个名为 `-c` 的 applet。用户侧还有两条逃生口：`KIMI_CLI_SHELL_PATH` 可以指向任意 POSIX shell（全平台有效），或者把便携 shell 放到 `%USERPROFILE%\.kimi\bin\sh.exe`——后者不需要重装就能给已有安装补上。注意提示词里报告的 shell 名按文件名判定，busybox 的 ash 会如实报成 `sh` 而不是 `bash`，避免模型写出它跑不了的 bashism。
+- **Skill 使用统计**：管理面板新增用量视图——按天的调用曲线、Top skills、会话数与显式 `/skill:` 调用占比，以及每张卡片上的近 14 天迷你柱状图和最近一次使用时间。数据由会话 wire log 重建，不新增任何埋点；扫描有时间预算，触顶时会标注 "Partial" 而不是悄悄给一个偏小的数。已经不在安装列表里、但历史上被调用过的 skill 单独归入 "Used but not installed"，方便发现改名和误删。
+- **Skill 按分类分组，并可整类启停/删除**：386 个内置 skill 平铺成一张卡片墙，找东西只能靠肉眼。排序新增 "Category"，每个分类一个带标题和数量的分区，分区内仍按调用次数排。分类的来源是"能声明就声明，声明不了才猜"：SKILL.md 的 frontmatter 里写 `category:`（顶层或 `metadata` 下都认）具有最高优先级，取值可以是分类 id、完整标签或常见别名（`education` → Learning & Career，`ops`/`infra` → DevOps 等），写了库里没有的值也不会被丢掉或塞进 Other，而是自成一个分区；没声明的才按名字、其次描述做关键词判定。分类标题栏上还有整类的 Enable / Disable / Delete，按钮上直接标出会影响多少个，删除有二次确认。批量操作走的是一次性的服务端接口而不是循环调单个接口——一整类四十来个 skill 的状态在一次写入里落盘，不会出现中间态可见、或者失败一半停在半途。整类启用**不会**复活已删除的 skill：被删的内置 skill 不等于"被禁用"，从分类按钮里悄悄恢复太意外，恢复仍走卡片上的 Restore。
+
+### Fixed
+
+- **Windows 上找不到 bash 不再让整个产品打不开**：探测阶段一旦定位不到 `bash.exe` 就抛 `GitBashNotFoundError`，而这个调用发生在建 Runtime 的路上，于是"Shell 工具用不了"被放大成"会话根本起不来"——聊天、读写文件、Web UI、以及绝大多数不碰命令行的 skill 全都被一起拖下水。现在探测不再抛异常，缺少 shell 只是一条数据（连同一段可操作的修复说明一起带着），由真正需要 shell 的那一个工具在被调用时报告；前台和后台两条执行路径都有闸，不会拿一个字符串化的 `None` 去起进程。副作用是 Web 端那条"请安装 Git for Windows"的提示以前只看 git-bash 在不在，一台靠便携 shell 正常跑命令的机器会被一直误报，现在它看的是"到底有没有可用的 shell"。
+
 ## [v0.1.30] — 2026-08-07
 
 ### Fixed
