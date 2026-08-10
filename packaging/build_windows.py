@@ -90,6 +90,16 @@ PY_STANDALONE_URL = (
     f"{PY_STANDALONE_TAG}/cpython-{PY_STANDALONE_VERSION}+{PY_STANDALONE_TAG}"
     f"-{PY_STANDALONE_TARGET}.tar.gz"
 )
+# Pinned busybox-w32 build, shipped as the fallback shell for machines without
+# Git for Windows. The "w64u" variant is the 64-bit Unicode one — without
+# Unicode support busybox mangles non-ASCII paths and output. Checksum is
+# upstream's, from https://frippery.org/files/busybox/SHA256SUM (PGP-signed).
+# Keep in sync with kimi-cli/src/kimi_cli/deps/Makefile.
+BUSYBOX_VERSION = "FRP-6075-g169694ebd"
+BUSYBOX_FILE = f"busybox-w64u-{BUSYBOX_VERSION}.exe"
+BUSYBOX_URL = f"https://frippery.org/files/busybox/{BUSYBOX_FILE}"
+BUSYBOX_SHA256 = "6e263d154d8548d1eb936f65d1d8312c80df31c45974e48d6335e4dcc0f4f34c"
+
 LOGO_MAX_BYTES = 512 * 1024
 FAVICON_MAX_BYTES = 256 * 1024
 LEGACY_BUILTIN_ASSET_SHA256 = [
@@ -550,6 +560,43 @@ def copy_packaging_into_runtime(runtime: Path) -> None:
     shutil.copytree(ROOT / "app_main_win", dest / "app_main_win", ignore=_IGNORE_PATTERNS)
 
 
+def ensure_portable_shell(cache_dir: Path) -> None:
+    """Fetch the portable shell into ``kimi-cli/src/kimi_cli/deps/bin/sh.exe``.
+
+    kimi-cli runs shell commands through bash, so a Windows machine without Git
+    for Windows has no shell at all. Shipping busybox means the installer works
+    on a bare machine; without it those users can still run everything except
+    the Shell tool.
+
+    Must happen before :func:`copy_kimi_cli_source`, which is what actually
+    carries the file into the package. ``deps/bin`` is gitignored — the same
+    binary is fetched on dev machines by ``make prepare``; keep the pin here in
+    sync with ``kimi-cli/src/kimi_cli/deps/Makefile``.
+
+    Never fatal: a build without network still produces a working installer.
+    """
+    section("Staging portable shell (busybox)")
+    dest = KIMI_CLI / "src" / "kimi_cli" / "deps" / "bin" / "sh.exe"
+    if dest.exists():
+        print(f"  already present: {dest}")
+        return
+
+    cached = cache_dir / BUSYBOX_FILE
+    try:
+        if not cached.exists():
+            _download_with_progress(BUSYBOX_URL, cached)
+        digest = _sha256(cached)
+        if digest != BUSYBOX_SHA256:
+            cached.unlink(missing_ok=True)
+            raise RuntimeError(f"sha256 mismatch: expected {BUSYBOX_SHA256}, got {digest}")
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(cached, dest)
+        print(f"  staged {dest}")
+    except Exception as exc:  # noqa: BLE001 - a missing shell must not fail the build
+        print(f"  ! could not stage the portable shell: {exc}")
+        print("  ! the installer will require Git for Windows for shell commands.")
+
+
 def copy_kimi_cli_source(runtime: Path) -> None:
     """Mirror macOS build.py:copy_kimi_cli_source.
 
@@ -975,6 +1022,8 @@ def main(argv: list[str]) -> int:
 
     # 7. packaging/ tree + kimi_cli source
     copy_packaging_into_runtime(runtime)
+    # Fetch before the copy below — that copy is what ships it.
+    ensure_portable_shell(cache_dir)
     copy_kimi_cli_source(runtime)
     overlay_fresh_frontend(runtime)
 
