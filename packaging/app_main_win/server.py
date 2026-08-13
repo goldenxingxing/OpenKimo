@@ -14,6 +14,7 @@ from packaging.app_main.server import (  # noqa: F401
     MAX_AUTO_RESTARTS,
     ServerState,
     UvicornSupervisor,
+    _resolve_port,
 )
 
 __all__ = [
@@ -23,4 +24,5 @@ __all__ = [
     "MAX_AUTO_RESTARTS",
     "ServerState",
     "UvicornSupervisor",
+    "_resolve_port",
 ]

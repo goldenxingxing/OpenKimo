@@ -261,3 +261,224 @@ def test_launcher_makes_the_same_distinction() -> None:
     # the assignment rather than the word.
     assert 'env["PYTHONIOENCODING"] = "utf-8"' in build_windows._LAUNCHER_PY
     assert 'env["PYTHONUTF8"]' not in build_windows._LAUNCHER_PY
+
+
+# --- Port conflicts ------------------------------------------------------
+#
+# A machine that already has a listener on the port used to spin forever: the
+# supervisor spawned uvicorn, uvicorn died with WinError 10048, and the health
+# probe — which only asked whether *something* answered the port — saw the
+# other server's 200 and called the dead child healthy, resetting the restart
+# counter. 947 respawns in 90 minutes, with nothing in the UI but "lost
+# connection to the session".
+
+def test_health_probe_rejects_a_server_that_is_not_our_child(monkeypatch) -> None:
+    monkeypatch.setattr(server, "_probe_health", lambda port: (True, 4242))
+
+    assert server._check_health(5494, expect_pid=4242) is True
+    assert server._check_health(5494, expect_pid=1111) is False
+
+
+def test_health_probe_stays_lenient_with_a_server_that_reports_no_pid(monkeypatch) -> None:
+    """An older server predates the pid field; do not call it an impostor."""
+    monkeypatch.setattr(server, "_probe_health", lambda port: (True, None))
+
+    assert server._check_health(5494, expect_pid=1111) is True
+
+
+def test_health_probe_is_false_when_nothing_answers(monkeypatch) -> None:
+    monkeypatch.setattr(server, "_probe_health", lambda port: (False, None))
+
+    assert server._check_health(5494, expect_pid=1111) is False
+    assert server._port_owner_pid(5494) is None
+
+
+def test_health_is_probed_on_the_endpoint_that_actually_exists() -> None:
+    """`/health` does not exist — the SPA catch-all answers it with index.html
+    and a 200, so probing it declared every port healthy, including one held
+    by a stranger. That is what let a dead child be marked RUNNING."""
+    assert server._HEALTH_PATH == "/healthz"
+
+
+def test_an_html_page_is_not_a_health_check(monkeypatch) -> None:
+    import io
+
+    class _Resp(io.BytesIO):
+        status = 200
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return False
+
+    monkeypatch.setattr(
+        server, "_port_is_listening", lambda port: True, raising=False
+    )
+    import urllib.request
+
+    monkeypatch.setattr(
+        urllib.request, "urlopen", lambda *a, **k: _Resp(b"<!doctype html><html>")
+    )
+
+    assert server._probe_health(5494) == (False, None)
+
+
+def test_a_json_health_body_reports_its_pid(monkeypatch) -> None:
+    import io
+
+    class _Resp(io.BytesIO):
+        status = 200
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return False
+
+    import urllib.request
+
+    monkeypatch.setattr(
+        urllib.request,
+        "urlopen",
+        lambda *a, **k: _Resp(b'{"status":"ok","pid":4242}'),
+    )
+
+    assert server._probe_health(5494) == (True, 4242)
+
+
+def test_uvicorn_log_config_is_swapped_in_atomically(tmp_path: Path) -> None:
+    """Two instances writing this file concurrently used to leave a reader
+    parsing a truncated one — uvicorn then died on its own log config."""
+    target = tmp_path / "uvicorn-log.json"
+
+    server._write_atomic(target, json.dumps({"version": 1}))
+
+    assert json.loads(target.read_text(encoding="utf-8")) == {"version": 1}
+    assert [p.name for p in tmp_path.iterdir()] == ["uvicorn-log.json"]
+
+
+# --- Orphan listener reaping (Windows) -----------------------------------
+#
+# The POSIX reaper shells out to lsof and ps. Neither exists on Windows, so
+# the whole function was a no-op there and a uvicorn left behind by a
+# force-killed tray app kept the port indefinitely.
+
+_NETSTAT = """
+Active Connections
+
+  Proto  Local Address          Foreign Address        State           PID
+  TCP    127.0.0.1:5494         0.0.0.0:0              LISTENING       4242
+  TCP    127.0.0.1:54941        127.0.0.1:5494         ESTABLISHED     9001
+  TCP    0.0.0.0:135            0.0.0.0:0              LISTENING       1024
+  TCP    [::1]:5494             [::]:0                 LISTENING       4242
+"""
+
+
+def _fake_windows_calls(monkeypatch, cmdline: str, killed: list[int]):
+    def fake_run(cmd, **kwargs):
+        if cmd[0] == "netstat":
+            return SimpleNamespace(stdout=_NETSTAT, stderr="", returncode=0)
+        if cmd[0] == "powershell":
+            return SimpleNamespace(stdout=cmdline, stderr="", returncode=0)
+        if cmd[0] == "taskkill":
+            killed.append(int(cmd[2]))
+            return SimpleNamespace(stdout="", stderr="", returncode=0)
+        raise AssertionError(f"unexpected command {cmd!r}")
+
+    monkeypatch.setattr(server.subprocess, "run", fake_run)
+    monkeypatch.setattr(server, "_port_owner_pid", lambda port: None)
+
+
+def test_windows_reaper_kills_our_own_leftover_listener(monkeypatch) -> None:
+    killed: list[int] = []
+    _fake_windows_calls(
+        monkeypatch,
+        r"C:\Programs\OpenKimo\runtime\python\python.exe -m uvicorn kimi_cli.web.app:create_app",
+        killed,
+    )
+
+    server._reap_orphan_listener_windows(5494)
+
+    # Both the IPv4 and IPv6 rows name the same pid; it must be killed once.
+    assert killed == [4242]
+
+
+def test_windows_reaper_leaves_a_foreign_listener_alone(monkeypatch) -> None:
+    """Never kill by port alone — something else may legitimately own it."""
+    killed: list[int] = []
+    _fake_windows_calls(monkeypatch, r"C:\Windows\System32\inetsrv\w3wp.exe", killed)
+
+    server._reap_orphan_listener_windows(5494)
+
+    assert killed == []
+
+
+def test_windows_reaper_survives_netstat_being_unavailable(monkeypatch) -> None:
+    def boom(cmd, **kwargs):
+        raise FileNotFoundError(cmd[0])
+
+    monkeypatch.setattr(server.subprocess, "run", boom)
+
+    server._reap_orphan_listener_windows(5494)  # must not raise
+
+
+def test_watcher_does_not_overwrite_a_crash_diagnosis(tmp_path: Path) -> None:
+    """CRASHED carries the reason the user is meant to act on.
+
+    The watcher sees "no child process" for a clean stop and for a refusal to
+    start alike; only the latter has something to say.
+    """
+    import threading
+    import time as _time
+
+    paths = SimpleNamespace(
+        app_support=tmp_path, logs=tmp_path, server_log=tmp_path / "server.log"
+    )
+    sup = server.UvicornSupervisor(paths)  # type: ignore[arg-type]
+    states: list[server.ServerState] = []
+    sup.on_state_change = lambda state, info: states.append(state)
+    sup._state = server.ServerState.CRASHED
+    sup._proc = None
+
+    watcher = threading.Thread(target=sup._watch_loop, daemon=True)
+    watcher.start()
+    _time.sleep(0.6)
+    sup._stop_supervisor.set()
+    watcher.join(timeout=3)
+
+    assert sup.state is server.ServerState.CRASHED
+    assert states == []
+
+
+# --- Single instance -----------------------------------------------------
+
+APP_MAIN_WIN_DIR = ROOT / "packaging" / "app_main_win"
+SINGLE_SPEC = importlib.util.spec_from_file_location(
+    "openkimo_app_main_win.single_instance", APP_MAIN_WIN_DIR / "single_instance.py"
+)
+single_instance = importlib.util.module_from_spec(SINGLE_SPEC)
+sys.modules[SINGLE_SPEC.name] = single_instance
+SINGLE_SPEC.loader.exec_module(single_instance)
+
+
+def test_single_instance_guard_is_inert_off_windows(monkeypatch) -> None:
+    monkeypatch.setattr(single_instance.sys, "platform", "darwin")
+
+    assert single_instance.acquire("openkimo") is True
+
+
+def test_single_instance_guard_starts_anyway_when_the_mutex_cannot_be_made(
+    monkeypatch,
+) -> None:
+    """A machine that refuses the mutex is better served by launching.
+
+    Refusing to start would turn a hardening measure into an outage.
+    """
+    monkeypatch.setattr(single_instance.sys, "platform", "win32")
+
+    def boom(name):
+        raise OSError("no ctypes here")
+
+    monkeypatch.setitem(sys.modules, "ctypes", None)
+    assert single_instance.acquire("openkimo") is True

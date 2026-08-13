@@ -175,6 +175,20 @@ def _build_env(p: AppPaths) -> dict[str, str]:
     return env
 
 
+def _write_atomic(path: Path, text: str) -> None:
+    """Write via a temp file + rename so no reader ever sees a half file."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_name(f"{path.name}.{os.getpid()}.tmp")
+    try:
+        tmp.write_text(text, encoding="utf-8")
+        os.replace(tmp, path)
+    finally:
+        try:
+            tmp.unlink()
+        except FileNotFoundError:
+            pass
+
+
 def _resolve_port(env: dict[str, str]) -> int:
     raw = env.get("KIMI_WEB_PORT", "5494")
     try:
@@ -183,19 +197,140 @@ def _resolve_port(env: dict[str, str]) -> int:
         return 5494
 
 
-def _check_health(port: int) -> bool:
+#: The server's health endpoint. Note the ``z``: a probe of ``/health`` hits
+#: the SPA catch-all, which answers *any* GET with index.html and 200 — so it
+#: reported every port as healthy, including one held by a stranger.
+_HEALTH_PATH = "/healthz"
+
+
+def _probe_health(port: int) -> tuple[bool, int | None]:
+    """Ask whoever is on ``port`` whether they are our healthy server.
+
+    Returns ``(healthy, pid)``. Healthy means the response was JSON that says
+    so — an HTML page with a 200 is not a health check. ``pid`` is None when
+    the responder does not report one (a server older than this field).
+    """
     try:
+        import json as _json
         import urllib.request
         with urllib.request.urlopen(  # noqa: S310 - localhost only
-            f"http://127.0.0.1:{port}/health", timeout=1.0
+            f"http://127.0.0.1:{port}{_HEALTH_PATH}", timeout=1.0
         ) as resp:
-            return 200 <= resp.status < 500
+            if not 200 <= resp.status < 300:
+                return False, None
+            body = _json.loads(resp.read(4096).decode("utf-8"))
     except Exception:
+        return False, None
+
+    if not isinstance(body, dict) or body.get("status") != "ok":
+        return False, None
+    raw = body.get("pid")
+    pid = int(raw) if isinstance(raw, (int, str)) and str(raw).isdigit() else None
+    return True, pid
+
+
+def _port_is_listening(port: int) -> bool:
+    """Whether anything at all accepts connections on ``port``."""
+    try:
+        with socket.create_connection(("127.0.0.1", port), timeout=0.5):
+            return True
+    except OSError:
+        return False
+
+
+def _check_health(port: int, expect_pid: int | None = None) -> bool:
+    """Whether *our* server is serving ``port``.
+
+    The pid check is the point. Asking the port alone means a second copy of
+    the app — or any leftover server — answers on behalf of a child that has
+    already died on a bind error: the supervisor marks it RUNNING, the restart
+    counter resets, and it respawns forever without ever saying why. A
+    reported pid that is not ours proves the port belongs to someone else; no
+    pid at all (older server) keeps the previous lenient behaviour.
+    """
+    healthy, pid = _probe_health(port)
+    if not healthy:
+        return False
+    if expect_pid is not None and pid is not None and pid != expect_pid:
+        return False
+    return True
+
+
+def _port_owner_pid(port: int) -> int | None:
+    """Pid of a healthy server already on ``port``, if it reports one."""
+    healthy, pid = _probe_health(port)
+    return pid if healthy else None
+
+
+def _reap_orphan_listener_windows(port: int) -> None:
+    """Windows counterpart of :func:`_reap_orphan_listener`.
+
+    The POSIX version shells out to ``lsof`` and ``ps``, neither of which
+    exists on Windows — so on Windows it silently did nothing, and a leftover
+    uvicorn from a force-killed tray app kept the port forever while the new
+    supervisor respawned a doomed child every two seconds.
+
+    Ownership is decided the same way and just as narrowly: the command line
+    must mention ``kimi_cli.web.app``. There is no orphan test — Windows does
+    not reparent to a known pid — so this only ever kills our own server, and
+    the single-instance mutex is what keeps a *live* sibling from being here
+    in the first place.
+    """
+    try:
+        netstat = subprocess.run(
+            ["netstat", "-ano", "-p", "tcp"],
+            capture_output=True, text=True, timeout=3.0,
+        ).stdout
+    except Exception:
+        log.exception("netstat failed; cannot reap orphan listener")
+        return
+
+    pids: set[int] = set()
+    for line in netstat.splitlines():
+        parts = line.split()
+        # PROTO  LOCAL          FOREIGN     STATE       PID
+        if len(parts) < 5 or parts[3].upper() != "LISTENING":
+            continue
+        local = parts[1]
+        if not local.rsplit(":", 1)[-1] == str(port):
+            continue
         try:
-            with socket.create_connection(("127.0.0.1", port), timeout=0.5):
-                return True
-        except OSError:
-            return False
+            pids.add(int(parts[4]))
+        except ValueError:
+            continue
+
+    for pid in pids:
+        if pid == os.getpid():
+            continue
+        try:
+            cmd = subprocess.run(
+                [
+                    "powershell", "-NoProfile", "-NonInteractive", "-Command",
+                    f"(Get-CimInstance Win32_Process -Filter 'ProcessId={pid}').CommandLine",
+                ],
+                capture_output=True, text=True, timeout=5.0,
+            ).stdout.strip()
+        except Exception:
+            log.exception("could not read command line of pid %d", pid)
+            continue
+        if "kimi_cli.web.app" not in cmd:
+            log.warning("port %d held by foreign pid %d (%s); leaving alone", port, pid, cmd)
+            continue
+        log.warning("reaping orphan uvicorn pid %d on port %d", pid, port)
+        try:
+            subprocess.run(
+                ["taskkill", "/PID", str(pid), "/T", "/F"],
+                capture_output=True, text=True, timeout=5.0,
+            )
+        except Exception:
+            log.exception("failed to kill orphan pid %d", pid)
+            continue
+        # taskkill returns before the socket is released; give it a moment so
+        # the bind that follows does not race it.
+        for _ in range(20):
+            if _port_owner_pid(port) is None:
+                break
+            time.sleep(0.1)
 
 
 def _reap_orphan_listener(port: int) -> None:
@@ -207,6 +342,9 @@ def _reap_orphan_listener(port: int) -> None:
     processes whose cmdline mentions kimi_cli.web.app AND whose parent is
     launchd — never a dev server whose parent is a shell.
     """
+    if sys.platform == "win32":
+        _reap_orphan_listener_windows(port)
+        return
     try:
         lsof = subprocess.run(
             ["lsof", "-ti", f"tcp:{port}", "-sTCP:LISTEN"],
@@ -342,11 +480,30 @@ class UvicornSupervisor:
 
         _reap_orphan_listener(self._port)
 
+        # If the port is still taken after reaping, spawning is pointless: the
+        # child would die on a bind error and be restarted forever, with the
+        # UI showing nothing but lost sockets. Stop and say what is wrong.
+        # Asked as "is anything listening", not "is a healthy server there" —
+        # an unrelated program on the port blocks the bind just as effectively.
+        if _port_is_listening(self._port):
+            owner = _port_owner_pid(self._port)
+            log.error("port %s is already taken (owner pid %s); not spawning", self._port, owner)
+            self._set_state(
+                ServerState.CRASHED,
+                exit_code=None,
+                reason="port_in_use",
+                port_owner_pid=owner,
+            )
+            return
+
         self.paths.logs.mkdir(parents=True, exist_ok=True)
         log_fp = self.paths.server_log.open("ab", buffering=0)
 
+        # Written on every spawn, so two instances racing here can leave a
+        # reader seeing a truncated file — uvicorn then dies parsing its own
+        # log config. Swap it in atomically instead.
         log_config_path = self.paths.app_support / "uvicorn-log.json"
-        log_config_path.write_text(json.dumps(_UVICORN_LOG_CONFIG))
+        _write_atomic(log_config_path, json.dumps(_UVICORN_LOG_CONFIG))
 
         cmd = [
             str(self.paths.app_layer_python),
@@ -429,7 +586,12 @@ class UvicornSupervisor:
                 proc = self._proc
                 state = self._state
             if proc is None:
-                if state != ServerState.STOPPED:
+                # CRASHED is a conclusion, not a transient: something decided
+                # it and attached a reason the user is meant to read. "No child
+                # process" is true of it as much as of a clean stop, so without
+                # this the watcher would overwrite the diagnosis with "Stopped"
+                # half a second later.
+                if state not in (ServerState.STOPPED, ServerState.CRASHED):
                     self._set_state(ServerState.STOPPED)
                 time.sleep(0.5)
                 if self._stop_supervisor.is_set():
@@ -440,7 +602,7 @@ class UvicornSupervisor:
             if rc is None:
                 # Still alive — health-check only while STARTING.
                 if state == ServerState.STARTING:
-                    if _check_health(self._port):
+                    if _check_health(self._port, expect_pid=proc.pid):
                         self._set_state(ServerState.RUNNING)
                     elif time.monotonic() > self._healthcheck_deadline:
                         # Took too long; treat as crashed.

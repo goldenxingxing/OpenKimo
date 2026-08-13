@@ -31,8 +31,8 @@ from pathlib import Path
 import pystray
 from PIL import Image
 
-from . import dotenv_io, paths as paths_mod, seed_branding, userenv
-from .server import ServerState, UvicornSupervisor
+from . import dotenv_io, paths as paths_mod, seed_branding, single_instance, userenv
+from .server import ServerState, UvicornSupervisor, _resolve_port
 
 log = logging.getLogger(__name__)
 
@@ -47,13 +47,17 @@ _ICON_GLYPHS = {
 }
 
 
-def _status_line(state: ServerState, port: int) -> str:
+def _status_line(state: ServerState, port: int, reason: str | None = None) -> str:
     label = _ICON_GLYPHS.get(state, "?")
     if state == ServerState.RUNNING:
         return f"{label} · port {port}"
     if state == ServerState.STARTING:
         return f"{label}…"
     if state == ServerState.CRASHED:
+        # "see logs" is no answer when we already know the answer: a port we
+        # cannot have is the one failure the user can act on themselves.
+        if reason == "port_in_use":
+            return f"Port {port} in use — close the other copy"
         return f"{label} (see logs)"
     return label
 
@@ -73,6 +77,7 @@ class OpenKimoApp:
         self.paths = p
         self.supervisor = UvicornSupervisor(p, on_state_change=self._on_state_change)
         self._opened_once = False
+        self._last_reason: str | None = None
         self._settings_proc: subprocess.Popen | None = None
 
         # Tray icon image. Fall back to a generated solid square if the
@@ -104,7 +109,9 @@ class OpenKimoApp:
     def _build_menu(self) -> pystray.Menu:
         return pystray.Menu(
             pystray.MenuItem(
-                lambda _: _status_line(self.supervisor.state, self.supervisor.port),
+                lambda _: _status_line(
+                    self.supervisor.state, self.supervisor.port, self._last_reason
+                ),
                 None,
                 enabled=False,
             ),
@@ -186,6 +193,12 @@ class OpenKimoApp:
 
     def _on_state_change(self, state: ServerState, info: dict) -> None:
         port = info.get("port", self.supervisor.port)
+        self._last_reason = info.get("reason")
+        if self._last_reason == "port_in_use":
+            log.error(
+                "port %s is held by pid %s; refusing to start a second server",
+                port, info.get("port_owner_pid"),
+            )
         log.info("server state -> %s (port %s)", state.value, port)
         try:
             self.icon.update_menu()
@@ -357,6 +370,18 @@ def main() -> int:
         force=True,
     )
     log.info("app=%s slug=%s install_root=%s", p.app_name, p.slug, p.install_root)
+
+    # A second copy cannot work — the first one holds the port — so hand the
+    # user the instance they already have rather than starting a doomed one.
+    # Opening the UI matters: exiting silently makes the icon look dead.
+    if not single_instance.acquire(p.slug or p.app_name):
+        port = _resolve_port(dotenv_io.read_env(p.env_file))
+        log.warning("another instance is already running; opening its UI on port %s", port)
+        try:
+            webbrowser.open(f"http://127.0.0.1:{port}")
+        except Exception:
+            log.exception("webbrowser.open failed")
+        return 0
 
     # Make the packaged kimi_cli importable so seed_branding can reach
     # ``kimi_cli.web.db.crud`` for the SQLite seed step.
