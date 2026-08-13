@@ -6,6 +6,19 @@ this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [v0.1.32] — 2026-08-13
+
+### Fixed
+
+- **Windows 上"打开会话就 lost connection"，其实是两件事**。第一件：一台机器上跑起了两个实例，后启动的那个永远抢不到端口，守护进程每 2 秒重启一次 uvicorn，一份日志里转了 **947 次、一个半小时**，界面上只表现为会话掉线。撑住这个循环的是三个各自独立的缺陷。**健康检查从来没有在检查任何东西**——它探的是 `/health`，而这个路由根本不存在：SPA 兜底路由对任何 GET 都返回 index.html 和 200，于是任何端口都是"健康"的，包括被别人占着的那个；刚死于 10048 的子进程因此被判为 RUNNING，重启计数器被清零，`MAX_AUTO_RESTARTS = 3` 形同虚设。现在探 `/healthz`，要求 JSON 且 `status == "ok"`，并把响应里的 `pid` 和自己 spawn 的子进程比对——一个 HTML 页面配 200 不是健康检查。**没有任何东西清理残留监听者**：`_reap_orphan_listener` 调的是 `lsof` 和 `ps`，Windows 上两个命令都不存在，整个函数被异常吞掉，于是托盘被强杀后遗留的 uvicorn 能一直占着端口；Windows 分支改用 `netstat -ano` 定位、PowerShell 读命令行，只杀命令行包含 `kimi_cli.web.app` 的进程，绝不按端口盲杀。**没有任何东西阻止开第二个实例**：现在用命名内核 mutex（进程被强杀时系统自动释放句柄，pidfile 做不到这点），第二次启动会把已有实例的页面打开再退出，而不是静默消失——一个点了没反应的图标本身就是故障。端口确实被占用时（不管占用者是不是我们），守护进程不再 spawn，托盘直接显示 `Port 5494 in use — close the other copy`，而不是让用户去看一份他打不开的日志。顺带把 `uvicorn-log.json` 改成原子写：两个实例并发读写同一个文件，会让其中一个死在解析自己的日志配置上（日志里那两次 `JSONDecodeError`）。
+- **配置了 Session Token 之后，登录了也连不上会话**。第二件事：HTTP 和 WebSocket 的鉴权条件不一致。`AuthMiddleware` 在设置了 session token 时接受**两种**凭据——session token，**或**有效的 `kimi_session` 登录 cookie（这个 fallback 是特意写的）；而 WebSocket 端点只认 `?token=`。于是"在设置里填了 Session Token + 用账号密码登录"这个组合会精确地落进：**每个 HTTP 请求 200，每个 WebSocket 握手被拒**（服务端日志里是 403）。界面无从表达这件事——close code 被丢掉，5 次重试花在一个重试不可能改变的拒绝上，最后报成 "lost connection to the session and could not reconnect"，读起来像网络故障，把人引向完全错误的方向。现在凭据规则由 `user_from_connection` 共用：它接受 `HTTPConnection`，而一次握手和一个请求一样都是；两条路径走同一条规则。客户端也不再丢弃原因：4401/4403 归入终态 close code，各自给出服务端真正说的那句话（"未登录"／"服务器拒绝了这个连接"），而不是赖在连接上。
+- **切换会话时，聊天记录有时停在最顶部**。两层原因。滚动状态活过了它所描述的会话：只有内层虚拟列表带 key，组件本身和它的 catch-up 标记不会随切换重建，于是在任何一个会话里往上滚过一次，下一个会话就继承了"不要跟随"，最终停在哪里取决于历史消息恰好在哪个时刻到达。更根本的一层是：`followOutput` 滚到最后一条时，刚加进去的条目还在用 `defaultItemHeight`（160px）估算高度，真实消息远比这高，等它们被测量出来内容底部就往下跑了，而条目数已不再变化，`followOutput` 不会被第二次问到——**估算错多少，就停在离底部多远的地方**（实测差 21,006px）。现在 catch-up 期间同时跟随总高度，滚动到某个 index 本身不改变高度所以会收敛；读者第一次滚轮/触摸/按键即解除，位置仍然归他自己。
+
+### Added
+
+- **审核弹窗顶部给出一行提炼**。原来那段内容本身就是 `JSON.stringify(display_block)`——一次编辑会把前后全文当 JSON 摊在屏幕上，而这是知道自己在批准什么*之后*才需要读的东西。现在最上面一行直接说清楚：`执行命令 · git push origin main`、`修改文件 · src/a.ts · 3 → 5 行 · 共 2 个文件`。它取自结构化的 display block 而不是散文，所以给的是命令和路径本身，而不是把动作词重复一遍；原始 JSON 收进折叠区。
+- **Plan 右侧新增 YOLO 开关**，悬停有说明，等同于 `/yolo` 命令。刻意做成"设置为某个值"而不是"翻转"——终端里的 `/yolo` 和第二个客户端都会动这个状态，翻转只会把客户端最后看到的值取反；`/yolo` 现在也广播状态，所以在哪一边切换，另一边都会跟着动。`initialize` 会汇报当前值，因为 `--yolo` 可以在任何 wire 消息之前就打开，而它不像 plan mode 那样能靠 replay 重建。开启时标签变琥珀色：自动放行是唯一一个代价完全静默的开关。
+
 ## [v0.1.31] — 2026-08-10
 
 ### Added
