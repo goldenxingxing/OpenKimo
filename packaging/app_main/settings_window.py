@@ -522,6 +522,7 @@ class SettingsController(NSWindowController):
     paths_ref = None  # type: AppPaths | None
     compaction_slider = None  # NSSlider; lives in config.toml, not .env
     compaction_readout = None  # NSTextField
+    other_skills_switch = None  # NSSwitch; lives in config.toml, not .env
     temp_slider = None  # NSSlider
     temp_readout = None  # NSTextField
     on_save = None    # type: Callable[[bool], None] | None
@@ -624,6 +625,22 @@ class SettingsController(NSWindowController):
                 log.exception("config.toml sync failed; continuing")
         # config.toml-only setting, written whatever happened to the providers
         # above. It takes effect on live sessions without a restart.
+        if self.other_skills_switch is not None:
+            try:
+                from . import configtoml
+
+                # Off means "leave the other agents' catalogues out". The
+                # directories are named rather than a bare flag so the setting
+                # says which ones, and so a hand-edited list survives a save
+                # the switch was never touched for.
+                use_them = bool(self.other_skills_switch.state())
+                configtoml.set_skipped_skill_dirs(
+                    self.paths_ref.sessions_dir / "config.toml",
+                    [] if use_them else configtoml.OTHER_AGENT_SKILL_DIRS,
+                )
+            except Exception:
+                log.exception("failed to update skip_skill_dirs")
+
         if self.compaction_slider is not None:
             try:
                 from . import configtoml
@@ -1158,15 +1175,30 @@ def _build_llm_section(
     controller.compaction_slider = compaction
     controller.compaction_readout = compaction_readout
 
+    # Other agents keep their skills in ~/.claude/skills and friends. kimi-cli
+    # discovers them, and every discovered skill costs a few hundred characters
+    # of context on every request — a catalogue you never call is still paid
+    # for. The switch reads "use them", so on is the current default.
+    try:
+        _skipped_now = _configtoml.get_skipped_skill_dirs(_toml_path)
+    except Exception:
+        _skipped_now = []
+    other_skills = _switch(not _skipped_now)
+    controller.other_skills_switch = other_skills
+
     fr_thinking = _form_row(_label("Thinking"), thinking, fixed_width=60.0)
     fr_temp = _slider_row(_label("Temperature"), temp, temp_readout)
     fr_compaction = _slider_row(_label("Auto-compact at"), compaction, compaction_readout)
+    fr_other_skills = _form_row(
+        _label("Other agents' skills"), other_skills, fixed_width=60.0
+    )
     rows.append(_Row("LLM_THINKING", _label("Thinking"), thinking))
     rows.append(_Row("LLM_TEMPERATURE", _label("Temperature"), temp))
 
     section.addSubview_(fr_thinking)
     section.addSubview_(fr_temp)
     section.addSubview_(fr_compaction)
+    section.addSubview_(fr_other_skills)
 
     # Providers container
     providers_container = _v()
@@ -1229,8 +1261,13 @@ def _build_llm_section(
         fr_compaction.leadingAnchor().constraintEqualToAnchor_(section.leadingAnchor()),
         fr_compaction.trailingAnchor().constraintEqualToAnchor_(section.trailingAnchor()),
 
+        fr_other_skills.topAnchor().constraintEqualToAnchor_constant_(
+            fr_compaction.bottomAnchor(), ROW_VGAP),
+        fr_other_skills.leadingAnchor().constraintEqualToAnchor_(section.leadingAnchor()),
+        fr_other_skills.trailingAnchor().constraintEqualToAnchor_(section.trailingAnchor()),
+
         providers_container.topAnchor().constraintEqualToAnchor_constant_(
-            fr_compaction.bottomAnchor(), 14.0),
+            fr_other_skills.bottomAnchor(), 14.0),
         providers_container.leadingAnchor().constraintEqualToAnchor_(
             section.leadingAnchor()),
         providers_container.trailingAnchor().constraintEqualToAnchor_(

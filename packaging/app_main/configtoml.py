@@ -355,6 +355,78 @@ def set_default_model(path: Path, default: str) -> None:
 DEFAULT_COMPACTION_RATIO = 0.95
 
 
+#: Where other agents keep their skills. Listing these in ``skip_skill_dirs``
+#: is what the Settings switch does; they are named explicitly so the config
+#: file says what is being skipped rather than hiding it behind a flag.
+OTHER_AGENT_SKILL_DIRS: list[str] = [
+    "~/.claude/skills",
+    "~/.codex/skills",
+    "~/.agents/skills",
+    "~/.config/agents/skills",
+]
+
+
+def get_skipped_skill_dirs(path: Path) -> list[str]:
+    """Read ``skip_skill_dirs`` from ``config.toml``."""
+    if not path.exists():
+        return []
+    try:
+        import tomlkit
+
+        doc = tomlkit.parse(path.read_text(encoding="utf-8"))
+        value = doc.get("skip_skill_dirs")
+    except Exception:
+        return []
+    if not isinstance(value, list):
+        return []
+    return [str(v) for v in value]  # type: ignore[union-attr]
+
+
+def set_skipped_skill_dirs(path: Path, dirs: list[str]) -> None:
+    """Set top-level ``skip_skill_dirs`` in ``config.toml``.
+
+    Directories listed here are left out of skill auto-discovery. Every
+    discovered skill costs a few hundred characters of context on every single
+    request, so another agent's catalogue sitting in ``~/.claude/skills`` is
+    paid for whether or not it is ever used.
+
+    Writes an empty list rather than removing the key: an explicit ``[]`` says
+    "nothing is skipped" where a missing key says nothing at all, and the
+    difference matters when reading the file back to populate a checkbox.
+    """
+    if not path.exists():
+        return
+
+    import tomlkit
+
+    text = path.read_text(encoding="utf-8")
+    try:
+        doc = tomlkit.parse(text)
+    except Exception:
+        return
+
+    existing = doc.get("skip_skill_dirs")
+    if isinstance(existing, list) and [str(v) for v in existing] == dirs:  # type: ignore[union-attr]
+        return
+    doc["skip_skill_dirs"] = dirs
+
+    new_text = tomlkit.dumps(doc)
+    if new_text == text:
+        return
+
+    fd, tmp = tempfile.mkstemp(dir=str(path.parent), prefix=path.name + ".", suffix=".tmp")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            f.write(new_text)
+        os.replace(tmp, path)
+    except Exception:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        raise
+
+
 def get_compaction_ratio(path: Path) -> float:
     """Read the current ratio, falling back to kimi-cli's default."""
     if not path.exists():
