@@ -482,3 +482,53 @@ def test_single_instance_guard_starts_anyway_when_the_mutex_cannot_be_made(
 
     monkeypatch.setitem(sys.modules, "ctypes", None)
     assert single_instance.acquire("openkimo") is True
+
+
+class TestPackagingNameCollision:
+    """This directory is named ``packaging``, same as the PyPI distribution.
+
+    Whichever comes first on the path wins, and both layouts put this one
+    first: the Windows launcher sets ``PYTHONPATH=runtime;runtime/site-packages``
+    so ``runtime/packaging/`` shadows it, and in dev the repo root is the
+    working directory so this file shadows it there. The shim grafts the real
+    distribution onto ``__path__`` to keep both importable.
+
+    Only the bundled half of that was covered before, and the dev half did not
+    work: running anything from the repo root failed on ``import fastmcp``,
+    because fastmcp imports ``packaging.version``.
+    """
+
+    def test_the_real_distribution_is_reachable_from_the_repo_root(self) -> None:
+        import subprocess
+        import sys
+        from pathlib import Path
+
+        root = Path(__file__).resolve().parents[1]
+        result = subprocess.run(
+            [sys.executable, "-c", "import packaging.version; print(packaging.version.parse('1.0'))"],
+            cwd=root,
+            capture_output=True,
+            text=True,
+        )
+
+        assert result.returncode == 0, (
+            f"the repo's own packaging/ is shadowing the PyPI one: {result.stderr}"
+        )
+        assert "1.0" in result.stdout
+
+    def test_our_own_submodules_still_win(self) -> None:
+        """Grafting must add to the search path, never take it over."""
+        import subprocess
+        import sys
+        from pathlib import Path
+
+        root = Path(__file__).resolve().parents[1]
+        result = subprocess.run(
+            [sys.executable, "-c", "import packaging.app_main.server as s; print(s.__file__)"],
+            cwd=root,
+            capture_output=True,
+            text=True,
+        )
+
+        assert result.returncode == 0, result.stderr
+        assert str(root / "packaging") in result.stdout
