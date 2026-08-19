@@ -532,3 +532,57 @@ class TestPackagingNameCollision:
 
         assert result.returncode == 0, result.stderr
         assert str(root / "packaging") in result.stdout
+
+
+class TestOnlyOneKimiCli:
+    """The bundle must ship one copy of kimi_cli, not two.
+
+    The framework layer installs the kimi-cli wheel for its dependency tree and
+    receives the package's own code with it. That copy is stale and stays
+    stale: the wheel's version never changes, so the resolver treats
+    kimi-cli==1.49.0 as already satisfied however much the contents moved. The
+    copy in the last build was months behind — seven modules under `memory/`
+    against the wheel's thirteen — including none of the retrieval or
+    consolidation code.
+
+    Nothing broke only because the launcher puts Resources/ first on
+    PYTHONPATH. That is one ordering change, or one invocation of the bundled
+    Python without the launcher, away from the app silently running an old
+    memory system.
+    """
+
+    def test_the_build_removes_the_layered_copy(self) -> None:
+        import inspect
+        import sys
+        from pathlib import Path
+
+        sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+        from packaging import build
+
+        source = inspect.getsource(build.copy_runtimes)
+
+        assert "_drop_layered_kimi_cli" in source, (
+            "layers must be stripped before postinstall runs over them"
+        )
+
+    def test_it_removes_the_package_and_its_metadata_but_not_the_dependencies(self) -> None:
+        import sys
+        import tempfile
+        from pathlib import Path
+
+        sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+        from packaging import build
+
+        runtimes = Path(tempfile.mkdtemp())
+        packages = runtimes / "framework-x" / "lib" / "python3.12" / "site-packages"
+        packages.mkdir(parents=True)
+        (packages / "kimi_cli").mkdir()
+        (packages / "kimi_cli" / "__init__.py").write_text("", encoding="utf-8")
+        (packages / "kimi_cli-1.49.0.dist-info").mkdir()
+        (packages / "fastapi").mkdir()
+
+        build._drop_layered_kimi_cli(runtimes)
+
+        assert not (packages / "kimi_cli").exists()
+        assert not (packages / "kimi_cli-1.49.0.dist-info").exists()
+        assert (packages / "fastapi").exists(), "dependencies are why the wheel is installed"

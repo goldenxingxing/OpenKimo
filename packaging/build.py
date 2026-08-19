@@ -527,7 +527,46 @@ def copy_runtimes(export_dir: Path, runtimes: Path) -> None:
     for entry in export_dir.iterdir():
         if entry.is_dir():
             shutil.copytree(entry, runtimes / entry.name, symlinks=True)
+    _drop_layered_kimi_cli(runtimes)
     _run_layer_postinstall(runtimes)
+
+
+def _drop_layered_kimi_cli(runtimes: Path) -> None:
+    """Remove kimi_cli from the layers; Resources/kimi_cli is the only copy.
+
+    The framework layer installs the kimi-cli wheel to pull in its dependency
+    tree, and gets the package's own code as a side effect. That copy is a
+    liability twice over.
+
+    It is stale, and stays stale: the wheel's version never changes, so the
+    resolver sees kimi-cli==1.49.0 already installed and skips it however much
+    the contents moved. The copy shipped in the last build was months behind —
+    its dist-info listed seven modules under `memory/` where the wheel has
+    thirteen.
+
+    And it is only ever shadowed, never used. The launcher puts Resources/
+    first on PYTHONPATH precisely so the source copy wins, which means the
+    layered one contributes nothing but the chance of winning some day — after
+    a change to path order, or when anything runs the bundled Python directly.
+    Both would be silent: the app would simply behave like an older version.
+
+    Dependencies are untouched. Only the package directory and the metadata
+    that claims to describe it are removed.
+    """
+    removed = []
+    for layer in runtimes.iterdir():
+        site = layer / "lib"
+        if not site.is_dir():
+            continue
+        for packages in site.glob("python*/site-packages"):
+            package = packages / "kimi_cli"
+            if package.is_dir():
+                shutil.rmtree(package)
+                removed.append(f"{layer.name}/kimi_cli")
+            for metadata in packages.glob("kimi_cli-*.dist-info"):
+                shutil.rmtree(metadata)
+    if removed:
+        print(f"  removed shadowed copies: {', '.join(removed)}")
 
 
 def _run_layer_postinstall(runtimes: Path) -> None:
