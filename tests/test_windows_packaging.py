@@ -565,7 +565,14 @@ class TestOnlyOneKimiCli:
             "layers must be stripped before postinstall runs over them"
         )
 
-    def test_it_removes_the_package_and_its_metadata_but_not_the_dependencies(self) -> None:
+    def test_it_removes_the_package_but_keeps_the_metadata(self) -> None:
+        """The version lives in the metadata, and something asks for it.
+
+        Removing the dist-info too imported cleanly from Resources/ and then
+        crashed the server on startup: `kimi_cli.constant` reads
+        `importlib.metadata.version("kimi-cli")` to build the User-Agent, which
+        consults the dist-info rather than the package.
+        """
         import sys
         import tempfile
         from pathlib import Path
@@ -584,5 +591,7 @@ class TestOnlyOneKimiCli:
         build._drop_layered_kimi_cli(runtimes)
 
         assert not (packages / "kimi_cli").exists()
-        assert not (packages / "kimi_cli-1.49.0.dist-info").exists()
+        assert (packages / "kimi_cli-1.49.0.dist-info").exists(), (
+            "the version is read from here at import time"
+        )
         assert (packages / "fastapi").exists(), "dependencies are why the wheel is installed"

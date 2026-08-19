@@ -550,8 +550,18 @@ def _drop_layered_kimi_cli(runtimes: Path) -> None:
     a change to path order, or when anything runs the bundled Python directly.
     Both would be silent: the app would simply behave like an older version.
 
-    Dependencies are untouched. Only the package directory and the metadata
-    that claims to describe it are removed.
+    The dist-info stays. Only the package directory goes.
+
+    That distinction is the whole fix: `kimi_cli.constant` asks
+    `importlib.metadata.version("kimi-cli")` for the version it puts in the
+    User-Agent, and that reads the dist-info, not the package. Removing both
+    imported cleanly from Resources/ and then died at
+    `PackageNotFoundError: No package metadata was found for kimi-cli` — the
+    server came up crashed with the code perfectly in place.
+
+    A dist-info whose RECORD lists files that are gone is untidy and harmless:
+    nothing verifies RECORD at runtime, and the metadata's job here is to
+    answer one question about a version.
     """
     removed = []
     for layer in runtimes.iterdir():
@@ -563,8 +573,6 @@ def _drop_layered_kimi_cli(runtimes: Path) -> None:
             if package.is_dir():
                 shutil.rmtree(package)
                 removed.append(f"{layer.name}/kimi_cli")
-            for metadata in packages.glob("kimi_cli-*.dist-info"):
-                shutil.rmtree(metadata)
     if removed:
         print(f"  removed shadowed copies: {', '.join(removed)}")
 
