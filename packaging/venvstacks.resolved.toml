@@ -14,6 +14,7 @@ name = "framework-kimi"
 runtime = "cpython-3.12"
 dynlib_exclude = ["**/skills/docx/**"]
 requirements = [
+    "file:///Users/qunwei/Documents/local_agent_work/OpenKimo/packaging/wheels/amem-0.1.0-py3-none-any.whl",
     "file:///Users/qunwei/Documents/local_agent_work/OpenKimo/packaging/wheels/kosong-0.55.0-py3-none-any.whl",
     "file:///Users/qunwei/Documents/local_agent_work/OpenKimo/packaging/wheels/kimi_code-1.49.0-py3-none-any.whl",
     "file:///Users/qunwei/Documents/local_agent_work/OpenKimo/packaging/wheels/kimi_sdk-0.2.1-py3-none-any.whl",

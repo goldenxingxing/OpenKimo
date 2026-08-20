@@ -228,13 +228,23 @@ def build_frontend(cfg: BuildConfig) -> None:
 
 # ---- 1. wheels ------------------------------------------------------------
 
-WORKSPACE_DIRS = (
-    KIMI_CLI / "packages" / "kosong",
-    KIMI_CLI / "packages" / "kaos",
-    KIMI_CLI / "packages" / "kimi-code",
-    KIMI_CLI / "sdks" / "kimi-sdk",
-    KIMI_CLI,
-)
+def _workspace_dirs() -> tuple[Path, ...]:
+    """Every workspace member, read from the file that declares them.
+
+    This used to be a second list here, which meant adding a workspace member
+    was two edits in two repositories and the build only complained about the
+    missing one at resolution time — as a package that could not be found on
+    PyPI, which reads as a network problem rather than a forgotten line.
+
+    kimi-cli comes last: it depends on the others, and the resolved venvstacks
+    requirements keep that order.
+    """
+    with (KIMI_CLI / "pyproject.toml").open("rb") as f:
+        members = tomllib.load(f)["tool"]["uv"]["workspace"]["members"]
+    return tuple(KIMI_CLI / m for m in members) + (KIMI_CLI,)
+
+
+WORKSPACE_DIRS = _workspace_dirs()
 
 # Pure-Python deps that PyPI only ships as sdists. venvstacks locks with
 # `--only-binary :all:`, so we build wheels for them locally and drop them
@@ -286,11 +296,17 @@ def _create_resolved_toml(cfg: BuildConfig, wheels_dir: Path) -> Path:
         raise RuntimeError("no wheels were produced under packaging/wheels/")
 
     # Keep ordering: kosong / kaos / kimi-code / kimi-sdk first, then kimi-cli.
+    # Dependencies before dependents, in the order the workspace declares them,
+    # with kimi-cli last. Derived rather than transcribed for the same reason
+    # as the list itself: a member missing from a hand-written order sorts to
+    # the end and installs before what it needs.
+    order = [d.name.replace("-", "_") for d in WORKSPACE_DIRS]
+
     def order_key(p: Path) -> int:
-        for i, prefix in enumerate(("kosong", "kaos", "kimi_code", "kimi_sdk", "kimi_cli")):
+        for i, prefix in enumerate(order):
             if p.name.startswith(prefix):
                 return i
-        return 99
+        return len(order)
     wheels.sort(key=order_key)
 
     reqs = [f'"{w.as_uri()}"' for w in wheels]
