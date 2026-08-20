@@ -288,6 +288,31 @@ def build_local_wheels(cfg: BuildConfig) -> Path:
 
 # ---- 2. venvstacks --------------------------------------------------------
 
+def _unpin_local_wheels(build_dir: Path, wheels_dir: Path) -> None:
+    """Make venvstacks reinstall the locally built wheels.
+
+    pip skips a package whose installed version matches the wheel's, and the
+    workspace members keep their version across every local build — so a source
+    change ships stale and silently. Observed: a threshold added to amem was
+    present in the wheel, absent from the .app, and the mismatch only surfaced
+    as an ImportError when something imported it.
+
+    Removing the dist-info is enough to make pip treat it as not installed. It
+    is done per package rather than with venvstacks --clean, which rebuilds the
+    whole framework layer and costs minutes on every iteration.
+    """
+    names = {w.name.split("-")[0] for w in wheels_dir.glob("*.whl")}
+    if not names:
+        return
+    removed = 0
+    for info in build_dir.rglob("*.dist-info"):
+        if info.name.split("-")[0] in names:
+            shutil.rmtree(info, ignore_errors=True)
+            removed += 1
+    if removed:
+        print(f"  unpinned {removed} locally built package(s) so they are reinstalled")
+
+
 def _create_resolved_toml(cfg: BuildConfig, wheels_dir: Path) -> Path:
     """Substitute kimi-cli + workspace wheels into venvstacks.toml."""
     src = (ROOT / "venvstacks.toml").read_text()
@@ -342,6 +367,7 @@ def venvstacks_export(cfg: BuildConfig, resolved: Path) -> Path:
     run(base + ["lock", spec,
                 "--build-dir", build_dir,
                 "--local-wheels", local_wheels])
+    _unpin_local_wheels(ROOT / build_dir, ROOT / local_wheels)
     run(base + ["build", spec,
                 "--build-dir", build_dir,
                 "--output-dir", artifacts_dir,
