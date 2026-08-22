@@ -130,7 +130,7 @@ jobs:
           path: |
             packaging/.build
             packaging/wheels
-          key: ${{ runner.os }}-${{ runner.arch }}-venvstacks-${{ hashFiles('packaging/venvstacks.toml', 'packaging/venvstacks.resolved.toml') }}
+          key: ${{ runner.os }}-${{ runner.arch }}-venvstacks-${{ hashFiles('packaging/venvstacks.toml', 'kimi-cli/uv.lock') }}
           restore-keys: |
             ${{ runner.os }}-${{ runner.arch }}-venvstacks-
 
@@ -180,7 +180,7 @@ jobs:
           path: |
             packaging/.build
             packaging/wheels
-          key: ${{ runner.os }}-${{ runner.arch }}-venvstacks-${{ hashFiles('packaging/venvstacks.toml', 'packaging/venvstacks.resolved.toml') }}
+          key: ${{ runner.os }}-${{ runner.arch }}-venvstacks-${{ hashFiles('packaging/venvstacks.toml', 'kimi-cli/uv.lock') }}
           restore-keys: |
             ${{ runner.os }}-${{ runner.arch }}-venvstacks-
 

@@ -115,3 +115,8 @@ custom-skills/
 .claude/
 .agents/
 .worktrees/
+
+# Written by packaging/build.py on every build, with absolute paths to whatever
+# machine produced it. Committing it meant the repository carried one
+# developer's home directory and a wheel list that went stale silently.
+packaging/venvstacks.resolved.toml
