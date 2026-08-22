@@ -293,7 +293,7 @@ def _unpin_local_wheels(build_dir: Path, wheels_dir: Path) -> None:
 
     pip skips a package whose installed version matches the wheel's, and the
     workspace members keep their version across every local build — so a source
-    change ships stale and silently. Observed: a threshold added to amem was
+    change ships stale and silently. Observed: a threshold added to carryover was
     present in the wheel, absent from the .app, and the mismatch only surfaced
     as an ImportError when something imported it.
 
