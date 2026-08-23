@@ -6,6 +6,33 @@ this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [v0.1.35] — 2026-08-23
+
+### Changed
+
+- **记忆包改名 Carryover**。`Amem` 与 `A-MEM: Agentic Memory for LLM Agents` 撞名——NeurIPS 2025 的论文，两个实现各约一千星，同样两个音节、同一个领域。而这个包的 README 恰恰是一份跟其他记忆系统的对比，被读成那篇论文的实现两个方向都吃亏，副标题救不回一个读者已经认成别的东西的名字。`import carryover`、`python -m carryover check`，没有旧名兼容层：没发过 PyPI、没打过 tag，此刻没人在 import 它，为一个只存在一周的问题留一个永久答案不划算。
+
+  改名时顺带修掉一处**不只是措辞**的地方：抽取提示词写着 `project — a durable fact about a repository`，这句话在告诉模型什么算数，于是一段没有仓库的对话等于关掉了四个 kind 之一。现在是领域中立的说法。**已公布的对比数字是旧措辞下测的。**
+
+### Removed
+
+- **删掉 Wiki 的每轮自动检索**。`retrieve on demand instead of on every prompt` 那次已经拿掉了调用点，实现留了下来；此后它的每个公开符号在模块外都是 0 引用，只被自己的测试供养着，还有另一条测试专门守着这个调用点不许回来。跑不了的代码不会因此就不用读——每个打开它的人都得先判断一次它是死是活。同去的还有它的专属测试、六个驱动它的可观测性测试、两个只服务于它的 UTF-8 边界测试，以及三个没有别处发出的遥测事件名。
+
+### Fixed
+
+- **vis 的会话列表看不见任何新会话**。会话搬进工作目录的 `session-data/` 之后，列表和统计接口仍然只扫 `share_dir/sessions/`——**那之后写入的每一个会话在界面上都不存在**。页面照常渲染，只是历史变短了，这比报错更难发现。两处现在走同一个枚举器，新旧位置都读，正是 `legacy_sessions_dir` 那句"retained for reads"的本意。统计接口此前**一个测试都没有**，这就是它能一直错着的原因。
+
+- **测试套件会破坏运行它的那个仓库**。四个测试模块用 `cwd=` 临时目录调 git，以为这就决定了操作哪个仓库——不是，`GIT_DIR` 和 `GIT_WORK_TREE` 优先级更高，而 git 会把它们导出给自己执行的每一个钩子。从 pre-push 钩子里跑套件时，临时目录里的 `git init` 重新初始化了**真实仓库**（`core.bare=true`，此后那个检出里任何 git 命令都不工作），同一个 fixture 的 `git config user.email t@t.com` 落进了开发者的配置，**下一个提交就会用这个身份**。三十九个测试的失败是它们自己造成的破坏的副作用。
+
+- **四十四个失败的测试**。这个套件没人跑：CI 跑的是外层仓库的测试，而 kimi-cli 自己的 workflow 不是这里的门禁。除上面两条外，其余是测试落后于代码——假 session 对象缺 `work_dir`、mock 缺 `max_request_bytes`、进度条助手把 rich 画的底槽也算成已填充、e2e 的 mock 服务器把会话结束的记忆归档请求当成 tool-call 续写而报 500 导致重试被计成对话轮次。
+
+- **构建规范不再入库**。`packaging/venvstacks.resolved.toml` 由 `build.py` 每次构建生成，带着生成它那台机器的绝对路径。它不只是躺着——两处 release 缓存键都在对它求哈希，于是决定构建要不要复用缓存的是一份过期产物，而且依赖真的变了它也不会变。缓存键改为 `venvstacks.toml` 和 `kimi-cli/uv.lock`。
+
+### Added
+
+- **检查跑在会真正执行的地方**。CI 在这个账号上起不了任何 job（每次运行三秒内因计费失败），所以 `.githooks` 下装了 pre-commit（ruff，不到一秒）和 pre-push（不含 e2e 的 3773 个测试，约两分半）。两者都可以 `--no-verify` 跳过，这是有意的：一个跳不过去的钩子会被卸载掉。CI 的配置同时接上了 kimi-cli 的套件，计费恢复即生效。
+
+
 ## [v0.1.34] — 2026-08-20
 
 ### Added
