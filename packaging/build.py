@@ -225,6 +225,18 @@ def build_frontend(cfg: BuildConfig) -> None:
             "Check the Vite output above for errors."
         )
 
+    # Vite writes to web/dist; the wheel packages src/kimi_cli/web/static. This
+    # step used to stop at the check above, so the freshly built UI was thrown
+    # away and whatever happened to be sitting in static/ shipped instead —
+    # five days stale when it was noticed, and static/ is not even tracked, so
+    # there was nothing to notice it against. The docstring above describes
+    # exactly the failure this omission caused.
+    static = KIMI_CLI / "src" / "kimi_cli" / "web" / "static"
+    if static.exists():
+        shutil.rmtree(static)
+    shutil.copytree(dist, static)
+    print(f"  copied {sum(1 for _ in static.rglob('*') if _.is_file())} files into {static}")
+
 
 # ---- 1. wheels ------------------------------------------------------------
 
@@ -963,11 +975,30 @@ def verify_bundle_matches_source(bundle: Path) -> None:
         if name not in built_here:
             problems.append(f"{name}: installed from a local wheel this build no longer produces")
 
+    # The web UI is not a Python package, so the comparison above never saw
+    # it — which is how a frontend from five days earlier shipped inside a
+    # bundle whose Python was current.
+    shipped_static = bundle / "Contents" / "Resources" / "kimi_cli" / "web" / "static"
+    source_static = KIMI_CLI / "src" / "kimi_cli" / "web" / "static"
+    if source_static.is_dir():
+        if not shipped_static.is_dir():
+            problems.append("web/static: built here, absent from the bundle")
+        else:
+            for path in sorted(source_static.rglob("*")):
+                if not path.is_file():
+                    continue
+                mirror = shipped_static / path.relative_to(source_static)
+                if not mirror.is_file():
+                    problems.append(f"web/static: {path.relative_to(source_static)} missing")
+                elif mirror.read_bytes() != path.read_bytes():
+                    problems.append(f"web/static: {path.relative_to(source_static)} differs")
+
     if problems:
         raise RuntimeError(
             "the bundle does not match the source:\n  " + "\n  ".join(problems[:20])
         )
     print(f"  {len(built_here)} locally built package(s) match the source byte for byte")
+    print("  web/static matches what npm run build produced")
 
 
 def main(argv: list[str]) -> int:
