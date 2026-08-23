@@ -51,14 +51,16 @@ jobs:
     defaults:
       run:
         working-directory: kimi-cli
+    env:
+      # This job declared 3.12 through actions/setup-python and ran 3.14:
+      # `uv sync` picks the interpreter from .python-version and ignores what
+      # setup-python put on PATH. Setting it here is what actually decides,
+      # and 3.12 is what release.yml ships. Every step below was checked on it.
+      UV_PYTHON: "3.12"
     steps:
       - uses: actions/checkout@v4
         with:
           submodules: recursive
-
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
 
       - name: Install uv
         uses: astral-sh/setup-uv@v4
@@ -66,11 +68,14 @@ jobs:
       - name: Install dependencies
         run: uv sync --frozen
 
+      # Whole repository, not just wiki/. The narrow scope let six lint errors
+      # and thirteen unformatted files accumulate outside it, and a check that
+      # only looks at one directory reports nothing about the rest.
       - name: Ruff lint
-        run: uv run ruff check src/kimi_cli/wiki tests/wiki
+        run: uv run ruff check src tests benchmarks
 
       - name: Ruff format check
-        run: uv run ruff format --check src/kimi_cli/wiki tests/wiki
+        run: uv run ruff format --check src tests benchmarks
 
       - name: Pyright typecheck
         run: uv run pyright src/kimi_cli/web/
@@ -78,6 +83,49 @@ jobs:
       - name: Tests
         working-directory: .
         run: kimi-cli/.venv/bin/python -m pytest tests -v --tb=short
+
+  # -----------------------------------------------------------------
+  # kimi-cli's own suite, which nothing used to run
+  # -----------------------------------------------------------------
+  # The backend job above runs this repository's tests, and kimi-cli's own
+  # workflows are not what gates work here. Its suite went unrun long enough to
+  # reach forty-four failures, two of them real: a session listing that could
+  # not see any session written since sessions moved into the work directory,
+  # and a benchmark pinned to one machine's absolute path.
+  #
+  # Separate from `backend` so a five-minute run does not delay the lint and
+  # typecheck feedback, and so a failure says which suite broke.
+  kimi-cli-tests:
+    name: kimi-cli tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    defaults:
+      run:
+        working-directory: kimi-cli
+    env:
+      # 3.12 is what release.yml builds the shipped artifact on, and a suite
+      # green on the 3.14 in .python-version says nothing about the binary
+      # users get. Set here rather than through actions/setup-python, which
+      # `uv sync` ignores in favour of .python-version — verified, and the
+      # reason the job above reports 3.12 while running 3.14. The suite was
+      # checked on both before this was wired up.
+      UV_PYTHON: "3.12"
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v4
+
+      - name: Install dependencies
+        run: uv sync --frozen
+
+      - name: Confirm the interpreter under test
+        run: uv run python -c "import sys; print(sys.version); assert sys.version_info[:2] == (3, 12)"
+
+      - name: Tests
+        run: uv run pytest tests -q
 
   # -----------------------------------------------------------------
   # Docker: verify images build successfully

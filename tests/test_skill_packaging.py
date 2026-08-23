@@ -3,19 +3,29 @@ import subprocess
 from pathlib import Path
 
 
-def test_all_packaged_skills_have_one_source_location() -> None:
+def test_no_skill_ships_inside_the_package() -> None:
+    """Skills are installed by the user, not bundled.
+
+    This asserted the opposite until the 300 bundled skills were removed:
+    that six named ones existed and that the count was exactly 300. Shipping
+    them cost 274 MB, and every name stayed listed after the files went, so
+    the admin panel showed rows that answered "Skill not found".
+
+    Kept as a test rather than left to the build because the failure mode is
+    silent — a skill added under src/ works locally and only shows up as
+    package size.
+    """
     root = Path(__file__).parents[1]
     builtin = root / "kimi-cli/src/kimi_cli/skills"
-    skill_files = tuple(builtin.glob("*/SKILL.md"))
 
     assert not (root / "skills").exists()
-    assert (builtin / "kimi-cli-help/SKILL.md").is_file()
-    assert (builtin / "skill-creator/SKILL.md").is_file()
-    assert (builtin / "grounding-dino-seg2/SKILL.md").is_file()
-    assert (builtin / "deep-research/SKILL.md").is_file()
-    assert (builtin / "docx/SKILL.md").is_file()
-    assert (builtin / "xlsx/SKILL.md").is_file()
-    assert len(skill_files) == 300
+    assert tuple(builtin.glob("*/SKILL.md")) == ()
+    tracked = subprocess.check_output(
+        ["git", "-C", root / "kimi-cli", "ls-files", "src/kimi_cli/skills"],
+        text=True,
+    ).splitlines()
+
+    assert tracked == []
 
 
 def test_packaged_skills_do_not_include_local_secrets_or_caches() -> None:
@@ -34,15 +44,18 @@ def test_packaged_skills_do_not_include_local_secrets_or_caches() -> None:
     assert not tuple(path for path in tracked if "/obj/" in path)
 
 
-def test_xlsx_skill_uses_cross_platform_launcher() -> None:
-    root = Path(__file__).parents[1]
-    xlsx = root / "kimi-cli/src/kimi_cli/skills/xlsx"
-    instructions = (xlsx / "SKILL.md").read_text(encoding="utf-8")
+def test_the_builtin_skill_directory_is_still_collected_when_it_has_content() -> None:
+    """The packaging rule survives the directory being empty.
 
-    assert "python scripts/xlsx_cli.py" in instructions
-    assert "./scripts/Xlsx " not in instructions
-    assert (xlsx / "scripts/xlsx_cli.py").is_file()
-    assert (xlsx / "scripts/Xlsx-linux-x86_64").is_file()
+    There is no bundled xlsx skill to check a launcher on any more — that test
+    went with the skills. What is worth keeping is the rule that puts a skill
+    into the build at all, so that installing one into the package again does
+    not silently fail to ship.
+    """
+    root = Path(__file__).parents[1]
+    source = (root / "kimi-cli/src/kimi_cli/utils/pyinstaller.py").read_text(encoding="utf-8")
+
+    assert '"skills/**"' in source
 
 
 def test_pyinstaller_collects_builtin_skills() -> None:
