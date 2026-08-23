@@ -899,6 +899,77 @@ def create_dmg(cfg: BuildConfig, bundle: Path) -> Path:
 
 # ---- main -----------------------------------------------------------------
 
+def verify_bundle_matches_source(bundle: Path) -> None:
+    """Fail if the bundle carries different code than the tree it was built from.
+
+    Every packaging bug here has been silent. pip skipped a same-version wheel
+    and shipped a .app whose source differed from the repository's; the layer
+    kept a workspace member that had been renamed away, so both amem and
+    carryover shipped and the dead one stayed importable. Neither raised, and
+    both were found by accident well after the fact.
+
+    So it is asked directly, against the file rather than the version string: a
+    version can match while the contents do not, which is exactly what the pip
+    skip did. What is compared is every workspace member's package directory,
+    byte for byte.
+    """
+    section("Verifying the bundle matches the source")
+    # Every layer, not the first found: venvstacks builds three (cpython, the
+    # shared framework, the app) and the workspace members live in the middle
+    # one. Taking whichever rglob returned first reported all six packages
+    # missing from a bundle that had them.
+    sites = sorted((bundle / "Contents/Resources/runtimes").rglob("site-packages"))
+    if not sites:
+        raise RuntimeError(f"no site-packages inside {bundle}")
+    # kimi_cli is laid next to the runtimes rather than installed into one, so
+    # a search of site-packages alone reports the application itself missing.
+    sites.append(bundle / "Contents/Resources")
+
+    def installed(name: str) -> Path | None:
+        return next((site / name for site in sites if (site / name).is_dir()), None)
+
+    problems: list[str] = []
+    for src in WORKSPACE_DIRS:
+        for package in (src / "src").glob("*/"):
+            if not (package / "__init__.py").is_file():
+                continue
+            shipped = installed(package.name)
+            if shipped is None:
+                problems.append(f"{package.name}: in the workspace, absent from the bundle")
+                continue
+            for path in sorted(package.rglob("*.py")):
+                mirror = shipped / path.relative_to(package)
+                if not mirror.is_file():
+                    problems.append(f"{package.name}: {path.relative_to(package)} missing")
+                elif mirror.read_bytes() != path.read_bytes():
+                    problems.append(f"{package.name}: {path.relative_to(package)} differs")
+
+    # The other direction: something built here once, still installed, and no
+    # longer in the workspace — how a renamed package survives in the layer.
+    # Found through direct_url.json, which pip writes only for a distribution
+    # installed from a path, so the hundreds of packages that came from PyPI
+    # are not candidates and do not have to be enumerated.
+    built_here = {w.name.split("-")[0].replace("_", "-").lower() for w in (ROOT / "wheels").glob("*.whl")}
+    for info in sorted(i for site in sites for i in site.glob("*.dist-info")):
+        if not (info / "direct_url.json").is_file():
+            continue
+        try:
+            url = json.loads((info / "direct_url.json").read_text(encoding="utf-8")).get("url", "")
+        except ValueError:
+            continue
+        if not url.startswith("file://"):
+            continue
+        name = info.name.split("-")[0].replace("_", "-").lower()
+        if name not in built_here:
+            problems.append(f"{name}: installed from a local wheel this build no longer produces")
+
+    if problems:
+        raise RuntimeError(
+            "the bundle does not match the source:\n  " + "\n  ".join(problems[:20])
+        )
+    print(f"  {len(built_here)} locally built package(s) match the source byte for byte")
+
+
 def main(argv: list[str]) -> int:
     cfg = parse_args(argv)
     cfg.output_dir.mkdir(parents=True, exist_ok=True)
@@ -933,6 +1004,7 @@ def main(argv: list[str]) -> int:
 
     bundle = create_app_bundle(cfg, export_dir)
     verify_min_macos(cfg, bundle)
+    verify_bundle_matches_source(bundle)
     sign_app(cfg, bundle)
     dmg = create_dmg(cfg, bundle)
     print(f"\n✓ {bundle}")
