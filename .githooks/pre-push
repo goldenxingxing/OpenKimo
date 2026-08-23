@@ -1,0 +1,25 @@
+#!/bin/sh
+# This repository's own tests. Four seconds.
+#
+# They were red — three failures — and nothing said so, because CI on this
+# account cannot start a job: every run fails in three seconds on billing.
+# Two of the three asserted a world removed months earlier, that 300 skills
+# ship inside the package.
+#
+# kimi-cli has its own hook for its own suite; this one does not reach into
+# the submodule.
+#
+# `git push --no-verify` skips this.
+set -e
+
+root=$(git rev-parse --show-toplevel)
+cd "$root"
+
+python=kimi-cli/.venv/bin/python
+if [ ! -x "$python" ]; then
+    echo "pre-push: $python missing, skipping tests. Run 'uv sync' in kimi-cli." >&2
+    exit 0
+fi
+
+echo "pre-push: tests"
+"$python" -m pytest tests -q
