@@ -312,6 +312,49 @@ def _unpin_local_wheels(build_dir: Path, wheels_dir: Path) -> None:
     if removed:
         print(f"  unpinned {removed} locally built package(s) so they are reinstalled")
 
+    _evict_dropped_local_packages(build_dir, names)
+
+
+#: Names this build installed into the layer last time, so the next build can
+#: tell "no longer a workspace member" from "a dependency pulled in by pip".
+_LOCAL_MANIFEST = "local-packages.json"
+
+
+def _evict_dropped_local_packages(build_dir: Path, current: set[str]) -> None:
+    """Remove packages this build used to install and no longer does.
+
+    venvstacks reuses its layer between builds, and nothing in it removes a
+    package — installing is the only operation. So a workspace member that goes
+    away stays in the layer forever: renaming amem to carryover shipped a .app
+    containing both, the dead one still importable, and the rename looked
+    complete everywhere else.
+
+    Only names this build wrote itself are considered, recorded in a manifest
+    beside the layer. Walking the layer and deleting anything unexpected would
+    also delete pip's own transitive dependencies.
+    """
+    # From the parent: venvstacks builds under _build and exports under
+    # _export, and it is the export that becomes the .app. Evicting only where
+    # packages are installed leaves the copy that actually ships.
+    root = build_dir.parent if build_dir.name.startswith("_") else build_dir
+    manifest = root / _LOCAL_MANIFEST
+    try:
+        previous = set(json.loads(manifest.read_text(encoding="utf-8")))
+    except (OSError, ValueError):
+        previous = set()
+
+    for name in sorted(previous - current):
+        gone = 0
+        for site in root.rglob("site-packages"):
+            for path in (*site.glob(f"{name}"), *site.glob(f"{name}-*.dist-info")):
+                shutil.rmtree(path, ignore_errors=True)
+                gone += 1
+        if gone:
+            print(f"  evicted {name}: no longer built here, {gone} path(s) removed")
+
+    manifest.parent.mkdir(parents=True, exist_ok=True)
+    manifest.write_text(json.dumps(sorted(current), indent=2) + "\n", encoding="utf-8")
+
 
 def _create_resolved_toml(cfg: BuildConfig, wheels_dir: Path) -> Path:
     """Substitute kimi-cli + workspace wheels into venvstacks.toml."""
