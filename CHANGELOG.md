@@ -6,6 +6,20 @@ this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed
+
+- **不会再每天早上被踢回登录页**。会话过期是从登录那一刻钉死的 24 小时窗口（`web/api/auth_user.py` 里的 `_SESSION_MAX_AGE = 86400`），中间用得再频繁也不续期；而前端只在挂载时校验一次身份，`getMe()` 之后再没人问过服务器。两件事叠起来的症状很具体：**过一天回来，页面看着还在，实际已经死了，手动刷新才弹登录页**。
+
+  现在窗口会滑动：带着有效 cookie 的请求，在窗口剩余不足一半时把 `expires_at` 往后推并重发 cookie。做成 ASGI 中间件而不是依赖，有两个理由——只有中间件还能在响应出门前加 header，而且一个没碰到鉴权路由的请求同样说明"人还在"。静态资源跳过：它们占了请求的大头，且不代表任何人在场。
+
+  代价说清楚：带 cookie 的请求多一次主键 SELECT，UPDATE 和 `Set-Cookie` 只在窗口过半后发生。**续期不是无限的**——`KIMI_WEB_SESSION_ABSOLUTE_MAX_AGE`（默认 30 天，从登录时刻算，永不延长）是硬顶，一个被偷走的 cookie 到线就死，哪怕它每分钟都在用。
+
+- **过期时界面自己回登录页**。此前 HTTP 401 只写一行 `console.error`，WebSocket 4401 报的是"reload the page to sign in again"——把重新加载这件事交给了读者去猜。现在两条路都汇到同一个信号：清掉缓存的用户，`App` 据此渲染登录页，工作区随之卸载，登录后重新挂载并重连 socket。标签页重新可见时还会重新校验一次（30 秒内不重复问）。
+
+### Added
+
+- **`KIMI_WEB_SESSION_MAX_AGE`**（空闲窗口，秒，默认 86400）和 **`KIMI_WEB_SESSION_ABSOLUTE_MAX_AGE`**（从登录起算的上限，默认 30 天）。桌面版在 `_build_env` 里默认给 30 天：本机 loopback、单人使用，24 小时那道门槛换不到多少安全，代价却是每天一次登录。这行设在用户 `.env` 之前，所以不同意的人可以自己覆盖。
+
 ## [v0.1.37] — 2026-08-24
 
 ### Fixed

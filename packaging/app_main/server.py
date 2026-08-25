@@ -118,6 +118,12 @@ def _build_env(p: AppPaths) -> dict[str, str]:
     # 3. User-mutable storage paths.
     # The identity the agent presents in conversations follows the app brand
     # (a user .env may still override it below).
+    # A desktop install is one person on loopback. The server-side default of
+    # a 24-hour session means a login page every morning for no security worth
+    # having; a month of sliding window is the honest trade here. Set before
+    # the user's .env is layered on, so anyone who disagrees can override it.
+    env["KIMI_WEB_SESSION_MAX_AGE"] = str(30 * 24 * 60 * 60)
+
     env["KIMI_AGENT_NAME"] = p.app_name
     env["KIMI_DEFAULT_WORK_DIR"] = str(p.work_dir)
     env["KIMI_SESSIONS_DIR"] = str(p.sessions_dir)
