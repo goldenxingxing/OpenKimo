@@ -8,6 +8,24 @@ this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- **装好的 app 不再依赖打包它的那棵仓库树**。venvstacks 的 `postinstall.py` 是在构建目录里跑的，它把当时的绝对路径写进了每层的 `pyvenv.cfg` 和 `sitecustomize.py`；`.app` 拖进 `/Applications` 之后，这些路径**还指着仓库里的 `dist/`**。证据是装好的应用自己的 `sys.path`：
+
+      /Applications/OpenKimo.app/.../app-app-openkimo/lib/python3.12/site-packages
+      /Users/…/OpenKimo/dist/OpenKimo.app/.../framework-framework-kimi/…      ← 指回仓库
+      /Users/…/OpenKimo/dist/OpenKimo.app/.../cpython-3.12/…/lib-dynload      ← 也是
+
+  只要仓库被移走、清理，或者下一次构建把 `dist/` 删掉重建，装好的应用就再也起不来（`No module named 'acp'`，框架层看不见了）。它之所以一直没被发现，是因为**只要构建目录还在，一切看起来都正常**。
+
+  全包里只有 4 个文件带着这些路径，每层两个。现在两个都改成相对自身位置：`pyvenv.cfg` 的 `home` / `executable` 用相对路径（CPython 是相对 venv 目录解析的，不是相对 cwd，已在三个不同 cwd 下验证），`sitecustomize.py` 重新生成成从 `__file__` 推算同级层，目录清单读 venvstacks 自己那份层元数据。匹配用 `runtimes/` 作锚点而不是直接 relpath：记录的路径若不属于这棵树就不动它，让下面那道检查把构建拦住，而不是生成一串指向未知位置的 `../../..`。
+
+  **代价说清楚**：相对 `home` 会让解释器每次启动往 stderr 打一行 `Could not find platform dependent libraries <exec_prefix>` —— 发出这行的探测跑在相对路径被解析之前，之后三层依然全部正确落到 `sys.path`（ssl / sqlite3 / socket / select / zlib 均验证可导入）。另一条路是按 venvstacks 的设计在安装后重跑 `postinstall.py`，没有这行警告，代价是往已签名的 bundle 里写文件，毁掉 DMG 带的那份签名。
+
+### Added
+
+- **构建期检查 `verify_relocatable`，在签名前跑**。扫 `runtimes/` 下的文本文件，只要还出现 bundle 自身路径或仓库根目录就让构建失败。第一次跑它就抓到了东西——不过抓的是 `*.dist-info/direct_url.json`，那是 PEP 610 的安装来源记录，按定义就是构建机路径，且 import 时无人读取。已排除：**因为一份无害的元数据而让构建红掉，只会教会大家跳过这道检查**。
+
+### Fixed
+
 - **不会再每天早上被踢回登录页**。会话过期是从登录那一刻钉死的 24 小时窗口（`web/api/auth_user.py` 里的 `_SESSION_MAX_AGE = 86400`），中间用得再频繁也不续期；而前端只在挂载时校验一次身份，`getMe()` 之后再没人问过服务器。两件事叠起来的症状很具体：**过一天回来，页面看着还在，实际已经死了，手动刷新才弹登录页**。
 
   现在窗口会滑动：带着有效 cookie 的请求，在窗口剩余不足一半时把 `expires_at` 往后推并重发 cookie。做成 ASGI 中间件而不是依赖，有两个理由——只有中间件还能在响应出门前加 header，而且一个没碰到鉴权路由的请求同样说明"人还在"。静态资源跳过：它们占了请求的大头，且不代表任何人在场。
