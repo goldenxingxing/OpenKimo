@@ -8,6 +8,16 @@ this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- **一个不读数据的浏览器 tab 不再能把整个 session 冻住**。症状是 session 看着还停在半路，刷新一下才发现它早就把活干完、输出也结束了（复现于 session `30255445-d66c-44c9-be27-46074a7ea917`：worker 在 16:22:29 写完 `TurnEnd`，页面直到 16:40 手动刷新才看到）。
+
+  根因在 `web/runner/process.py`：`_broadcast()` 是在**读 worker stdout 的那个 task 里**逐个 `await ws.send_text()` 的。于是一条链路串起来了——某个客户端停止读它那条 socket（后台 tab、渲染线程卡住、机器睡眠、半死的连接）→ 该 socket 的 `send_text` 永远不返回 → `_broadcast` 卡住 → 读 stdout 的循环停止排空 → worker 的 stdout 管道（64KB）写满 → worker 的 `_write_loop` 卡在 `drain()`。
+
+  关键是 **agent 本身没有停**：`run_soul` 往 `wire.jsonl` 写文件走的是另一条路，完全不受影响。所以文件里一切齐全，而实时画面停在最后一条挤进管道的消息上——**刷新之所以能"修好"，正是因为刷新关掉了那条卡死的 socket，把阻塞的 `send_text` 释放了**。日志里的旁证：8/31 三次自动重连（15:45:53 / 15:49:03 / 15:51:53）之间隔着约 3 分钟，正好是"重放完整个 wire.jsonl 追上进度 → 再次卡住 → 前端 45 秒看门狗超时"的周期。
+
+  现在每条连接有自己的发送队列和写任务，`_broadcast` 只入队、从不阻塞；背压被关在它该待的那一条连接里。掉队太多（8192 条 / 64MB）或单帧 60 秒发不出去的客户端会被摘掉并以 1011 关闭，前端照常重连并从 `wire.jsonl` 重放——也就是说**过去要靠人手刷新的那一下，现在服务端在 60 秒内自己做了**。关闭握手本身也可能卡在同样的原因上，所以它是甩到后台带超时跑的，绝不让调用方等。
+
+  回归测试见 `kimi-cli/tests/web/test_websocket_backpressure.py`（修复前 5 条里挂 3 条）。
+
 - **装好的 app 不再依赖打包它的那棵仓库树**。venvstacks 的 `postinstall.py` 是在构建目录里跑的，它把当时的绝对路径写进了每层的 `pyvenv.cfg` 和 `sitecustomize.py`；`.app` 拖进 `/Applications` 之后，这些路径**还指着仓库里的 `dist/`**。证据是装好的应用自己的 `sys.path`：
 
       /Applications/OpenKimo.app/.../app-app-openkimo/lib/python3.12/site-packages
