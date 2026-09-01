@@ -6,6 +6,8 @@ this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [v0.1.39] — 2026-09-01
+
 ### Added
 
 - **一个会话可以自己选模型**。此前模型是全局的——`config` 里一个 `default_model`，改了对所有会话生效。想在某一条线上试更便宜或更强的模型，就得把整个工作区切过去，事后还要记得切回来。
