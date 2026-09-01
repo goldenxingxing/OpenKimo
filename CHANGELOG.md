@@ -6,6 +6,8 @@ this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [v0.1.38] — 2026-09-01
+
 ### Fixed
 
 - **一个不读数据的浏览器 tab 不再能把整个 session 冻住**。症状是 session 看着还停在半路，刷新一下才发现它早就把活干完、输出也结束了（复现于 session `30255445-d66c-44c9-be27-46074a7ea917`：worker 在 16:22:29 写完 `TurnEnd`，页面直到 16:40 手动刷新才看到）。
