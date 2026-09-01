@@ -21,11 +21,11 @@ jobs:
       run:
         working-directory: kimi-cli/web
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           submodules: recursive
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v5
         with:
           node-version: 20
           cache: npm
@@ -58,7 +58,7 @@ jobs:
       # and 3.12 is what release.yml ships. Every step below was checked on it.
       UV_PYTHON: "3.12"
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           submodules: recursive
 
@@ -111,7 +111,7 @@ jobs:
       # checked on both before this was wired up.
       UV_PYTHON: "3.12"
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           submodules: recursive
 
@@ -136,7 +136,7 @@ jobs:
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     needs: [frontend, backend]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           submodules: recursive
 
