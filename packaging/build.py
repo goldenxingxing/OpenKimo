@@ -3,7 +3,7 @@
 
 Pipeline:
   1. Parse CLI flags (defaults from ``packaging/brand.toml``).
-  2. ``npm install`` (if needed) + ``npm run build`` in ``kimi-cli/web/`` so
+  2. ``npm ci`` (if needed) + ``npm run build`` in ``kimi-cli/web/`` so
      the bundled UI matches the current kimi-cli version. Skip with
      ``--skip-frontend``.
   3. ``uv build --wheel`` for kimi-cli + workspace members.
@@ -121,7 +121,7 @@ def parse_args(argv: list[str]) -> BuildConfig:
     parser.add_argument("--skip-venv", action="store_true",
                         help="Reuse the existing venvstacks export.")
     parser.add_argument("--skip-frontend", action="store_true",
-                        help="Skip the npm install + npm run build step "
+                        help="Skip the npm ci + npm run build step "
                              "(assumes a fresh frontend dist or you've "
                              "already built it manually).")
     parser.add_argument("--dmg-only", action="store_true",
@@ -212,9 +212,15 @@ def build_frontend(cfg: BuildConfig) -> None:
         or package_json.stat().st_mtime > install_marker.stat().st_mtime
     )
     if needs_install:
-        run(["npm", "install"], cwd=str(web_dir))
+        # ci, not install: install rewrites package-lock.json to whatever the
+        # local npm emits, and an npm older than the one that wrote the lock
+        # silently drops fields it does not know. npm 10 strips the `libc`
+        # entries that select the musl vs glibc binary of a native dependency,
+        # so a routine local build left the lock quietly weaker for everyone
+        # else. ci installs exactly what the lock says and never writes to it.
+        run(["npm", "ci"], cwd=str(web_dir))
     else:
-        print(f"  node_modules in {web_dir} looks fresh; skipping npm install.")
+        print(f"  node_modules in {web_dir} looks fresh; skipping npm ci.")
 
     run(["npm", "run", "build"], cwd=str(web_dir))
 
@@ -899,7 +905,7 @@ def create_app_bundle(cfg: BuildConfig, export_dir: Path) -> Path:
         pass
     else:
         print("  ! frontend not built; KIMI_WEB_STATIC_DIR will be empty.\n"
-              "    Run `cd kimi-cli/web && npm install && npm run build` "
+              "    Run `cd kimi-cli/web && npm ci && npm run build` "
               "before packaging, or remove --skip-frontend.")
 
     return bundle
