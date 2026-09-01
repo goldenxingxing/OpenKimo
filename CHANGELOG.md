@@ -6,6 +6,18 @@ this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+
+- **一个会话可以自己选模型**。此前模型是全局的——`config` 里一个 `default_model`，改了对所有会话生效。想在某一条线上试更便宜或更强的模型，就得把整个工作区切过去，事后还要记得切回来。
+
+  现在会话可以带自己的模型，存在该会话的 `session_config.json` 里。这个文件**本来就在放会话级覆盖**（`thinking`、agent spec 路径），所以是顺着已有形状走的，没有新开一处地方。worker 通过 `read_session_overrides()` 读整张覆盖表，缺什么就回落到全局配置——没有覆盖的会话行为不变，包括全局默认之后被改动时仍然跟随。
+
+  `Session` 和 `UpdateSessionRequest` 各加一个可空的 `model`：`null` 表示"跟随全局默认"而不是"没有模型"，这正是让一个被钉住的会话能交还给默认值的原因。
+
+  选择器和 plan / YOLO 控件放在一起，显示会话自己的模型，没有则显示全局默认。**生成过程中拒绝切换**并给出提示——模型是在一轮开始时读取的，中途切换会静默不生效。尚未创建会话的输入框会把选择暂存为草稿，创建时再应用。
+
+  测试见 `kimi-cli/tests/web/test_session_model_override.py`。
+
 ## [v0.1.38] — 2026-09-01
 
 ### Fixed
