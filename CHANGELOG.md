@@ -6,6 +6,8 @@ this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [v0.1.40] — 2026-09-01
+
 ### Fixed
 
 - **全局默认模型重新可以设置了**。v0.1.39 加入会话级模型时，把原来的全局切换**顶掉了**而不是并存：输入框那个选择器过去写的是 `config.defaultModel`，会重启空闲会话让它们用上新模型、报告跳过的忙碌会话、并提供「强制重启」；改动之后它只写会话级覆盖。
