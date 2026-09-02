@@ -1,20 +1,57 @@
+import logging
+import re
 import subprocess
-from typing import Tuple, List
+from typing import List, Optional, Tuple
+
+logger = logging.getLogger(__name__)
+
+#: Fallback screen size, matching the Xvfb geometry start-sandbox.sh creates
+#: (`Xvfb :99 -screen 0 1920x1080x24`). Used when xrandr cannot be read.
+DEFAULT_SCREEN_SIZE = (1920, 1080)
+
+#: `xrandr` prints e.g. "Screen 0: minimum 1 x 1, current 1920 x 1080, ...".
+_CURRENT_RE = re.compile(r"current\s+(\d+)\s*x\s*(\d+)")
 
 
 def get_screensize() -> Tuple[int, int]:
-    """Get the screen size of the primary display."""
-    display_size = (
-        subprocess.run(
-            "xrandr | grep -oP '(?<=current )\d+ x \d+' | tr -d ' '",  # pyright: ignore[reportInvalidStringEscapeSequence]
-            shell=True,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
+    """Screen size of the primary display, or DEFAULT_SCREEN_SIZE.
+
+    Never raises. It used to shell out to `xrandr | grep -oP ... | tr -d ' '`,
+    ignore the exit code, and do `tuple(map(int, out.split("x")))` on whatever
+    came back — so a headless or Wayland session, a missing xrandr, a BusyBox
+    grep without -P, or simply a transient Xvfb blip produced `int("")` and a
+    ValueError. Both callers are in browser_guard's launch path, where that
+    ValueError aborted the launch and killed a browser that had started fine.
+    A screen size is a layout hint; failing to read one is not worth an
+    exception.
+    """
+    try:
+        proc = subprocess.run(
+            ["xrandr"],
+            capture_output=True,
+            text=True,
+            timeout=5,
         )
-        .stdout.decode()
-        .strip()
-    )
-    return tuple(map(int, display_size.split("x")))  # type: ignore
+    except (OSError, subprocess.SubprocessError) as exc:
+        logger.warning("xrandr unavailable (%s); using %s", exc, DEFAULT_SCREEN_SIZE)
+        return DEFAULT_SCREEN_SIZE
+
+    if proc.returncode != 0:
+        logger.warning(
+            "xrandr exited %s (%s); using %s",
+            proc.returncode,
+            (proc.stderr or "").strip()[:200],
+            DEFAULT_SCREEN_SIZE,
+        )
+        return DEFAULT_SCREEN_SIZE
+
+    match = _CURRENT_RE.search(proc.stdout or "")
+    if not match:
+        logger.warning(
+            "no 'current W x H' in xrandr output; using %s", DEFAULT_SCREEN_SIZE
+        )
+        return DEFAULT_SCREEN_SIZE
+    return int(match.group(1)), int(match.group(2))
 
 
 def run_command(
@@ -31,11 +68,21 @@ def run_command(
     return result
 
 
-def run_command_background(command: List[str]) -> subprocess.Popen:
-    """Run a shell command in the background and return the process object."""
-    process = subprocess.Popen(
-        command,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
+def run_command_background(
+    command: List[str], log_path: Optional[str] = None
+) -> subprocess.Popen:
+    """Start a command in the background and return the process.
+
+    Output goes to ``log_path`` when given, otherwise to DEVNULL — never to a
+    pipe. Piping both streams and never reading them deadlocks the child as
+    soon as it writes past the OS pipe buffer (~64 KiB): it blocks in write()
+    forever, which for a browser means hanging mid-startup while every
+    liveness probe reports failure. A caller that wants the output should pass
+    a path and read the file.
+    """
+    if log_path is not None:
+        sink = open(log_path, "ab", buffering=0)  # noqa: SIM115 - owned by the child
+        return subprocess.Popen(command, stdout=sink, stderr=subprocess.STDOUT)
+    return subprocess.Popen(
+        command, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
     )
-    return process

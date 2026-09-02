@@ -6,6 +6,17 @@ import json
 import subprocess
 import requests
 import websockets
+# Explicitly, not via `websockets.exceptions` off the bare package. websockets
+# 15 resolves submodules lazily and `import websockets` alone leaves
+# `websockets.exceptions` unresolvable — verified on 15.0.1:
+#     >>> import websockets; websockets.exceptions
+#     AttributeError: module 'websockets' has no attribute 'exceptions'
+# It happens to work once websockets.connect() has pulled the submodule in,
+# but the `except websockets.exceptions.ConnectionClosed:` clauses below are
+# evaluated *while handling an exception*, so on any path that fails before a
+# connect the AttributeError would replace the error being handled.
+# kimi-cli pins only `websockets>=14.0`, so the resolved version varies.
+import websockets.exceptions
 from typing import Dict, Optional, List
 from loguru import logger
 from playwright.async_api import async_playwright, Page, BrowserContext
@@ -86,7 +97,14 @@ class BrowserGuard:
     async def start(self):
         try:
             logger.info("Starting browser initialization...")
+            # Kept on the instance and stopped in shutdown(). It used to be a
+            # local, so each restart left its Node driver process behind:
+            # _monitor_loop() restarts on every exception, once per
+            # check_interval, so a persistent fault leaked one driver per
+            # second until the container hit SANDBOX_PID_LIMIT.
+            await self._stop_playwright()
             playwright = await async_playwright().start()
+            self._playwright = playwright
             logger.info("Playwright started, launching browser...")
 
             # Build environment-aware identity
@@ -141,7 +159,8 @@ class BrowserGuard:
                     "--disable-gpu",
                     # "--disable-extensions",
                     "--load-extension=/app/pdf-viewer",
-                    '--js-flags="--max_old_space_size=1024"',
+                    # 同 CDP 路径：argv 条目不能自带引号，否则 V8 拒绝该 flag。
+                    "--js-flags=--max_old_space_size=1024",
                     *extra_args,
                 ],
                 "ignore_default_args": [
@@ -177,6 +196,17 @@ class BrowserGuard:
             logger.info(f"Browser startup error: {str(e)}")
             raise RuntimeError(f"Browser initialization failed: {str(e)}")
 
+    async def _stop_playwright(self):
+        """Stop the Playwright driver, if one is running."""
+        playwright = getattr(self, "_playwright", None)
+        if playwright is None:
+            return
+        self._playwright = None
+        try:
+            await playwright.stop()
+        except Exception as e:  # noqa: BLE001 - teardown must not mask the caller
+            logger.error(f"Playwright stop error: {e}")
+
     async def shutdown(self):
         """Clean up browser instance on shutdown"""
         try:
@@ -187,6 +217,8 @@ class BrowserGuard:
                 self.current_page_index = 0
         except Exception as e:
             logger.error(f"Shutdown error: {str(e)}")
+        finally:
+            await self._stop_playwright()
 
     async def _monitor_loop(self):
         """监控循环"""
@@ -198,6 +230,7 @@ class BrowserGuard:
                     logger.info("浏览器未启动，重新启动浏览器...")
                     await self.shutdown()
                     await self.start()
+                    await asyncio.sleep(self.check_interval)
                     continue
                 if not self.browser.pages:
                     logger.info("浏览器没有打开标签页，重新启动浏览器...")
@@ -207,9 +240,20 @@ class BrowserGuard:
                 logger.debug(f"浏览器标签页: {self.browser.pages}")
 
             except Exception as e:
+                # A failed recovery must not end the loop. start() raises
+                # RuntimeError when all three launch attempts fail, and that
+                # propagated straight out of _monitor_loop: the guard stopped
+                # supervising and the process kept running with no browser and
+                # no monitor, exiting 0 whenever the caller finished.
                 logger.error(f"监控循环出错: {e}")
-                await self.shutdown()
-                await self.start()
+                try:
+                    await self.shutdown()
+                    await self.start()
+                except Exception as restart_error:
+                    logger.error(
+                        f"重启浏览器失败，将在 {self.check_interval}s 后重试: "
+                        f"{restart_error}"
+                    )
 
             await asyncio.sleep(self.check_interval)
 
@@ -251,6 +295,26 @@ class BrowserGuard:
             )
 
 
+def _ws_is_closed(ws) -> bool:
+    """True when a websocket connection is no longer usable.
+
+    websockets has moved this signal around between versions: `.closed` on the
+    legacy client protocol, `.close_code`/`.state` on the newer one. Probe in
+    order and treat "cannot tell" as open, so a version bump degrades to the
+    old behaviour rather than reconnecting on every call.
+    """
+    closed = getattr(ws, "closed", None)
+    if isinstance(closed, bool):
+        return closed
+    if getattr(ws, "close_code", None) is not None:
+        return True
+    state = getattr(ws, "state", None)
+    name = getattr(state, "name", None)
+    if isinstance(name, str):
+        return name in ("CLOSED", "CLOSING")
+    return False
+
+
 class BrowserCDPGuard:
     """
     Chromium 监控器，使用 CDP (Chrome DevTools Protocol) 直接控制浏览器。
@@ -265,6 +329,7 @@ class BrowserCDPGuard:
         self.browser_process = None
         self.cdp_url = "http://localhost:9222"
         self.ws_connections = {}  # 存储每个标签页的 WebSocket 连接
+        self._cdp_request_id = 0  # 单调递增，见 _send_cdp_command
         self.executable_path = executable_path or "/usr/bin/chromium"
 
     async def _send_cdp_command(
@@ -274,11 +339,20 @@ class BrowserCDPGuard:
         params: Optional[Dict] = None,
         timeout: float = 5.0,
     ):
-        """发送 CDP 命令"""
+        """发送 CDP 命令。
+
+        每条命令用一个自增 id。原来固定写 ``"id": 1``：一条命令超时后它的回复
+        并没有从 socket 里取走，而连接仍被缓存复用，于是那条迟到的回复会被
+        当成**下一条**命令的结果 —— ``getWindowForTarget`` 的回复被当作
+        ``getWindowBounds`` 的返回，于是 bounds 为空、窗口状态读成 ""，或者在
+        ``set_screen_resolution`` 里拿到错的 windowId。id 唯一之后，迟到的回复
+        走下面「未匹配」那条分支被跳过。
+        """
         if params is None:
             params = {}
 
-        message = {"id": 1, "method": command, "params": params}
+        self._cdp_request_id += 1
+        message = {"id": self._cdp_request_id, "method": command, "params": params}
 
         try:
             data = json.dumps(message)
@@ -302,14 +376,22 @@ class BrowserCDPGuard:
                             return None
                         return response_obj.get("result", {})
 
-                    # 如果不是我们的响应，继续等待
-                    logger.info(f"收到未匹配的响应: {response_obj}")
+                    # 如果不是我们的响应（比如上一条超时命令迟到的回复），
+                    # 跳过继续等待。
+                    logger.debug(f"跳过未匹配的响应: id={response_obj.get('id')}")
 
             return await asyncio.wait_for(wait_for_response(), timeout)
 
         except asyncio.TimeoutError:
-            logger.error(f"CDP 命令超时: {command}")
+            logger.error(f"CDP 命令超时: {command} (id={message['id']})")
             return None
+        except websockets.exceptions.ConnectionClosed:
+            # 交给调用方，让它把这条死连接从 ws_connections 里剔除。原来这里
+            # 和其它异常一起被吞成 None，所以调用方那个
+            # `except ConnectionClosed` 永远到不了，一条已关闭的缓存连接会被
+            # 反复复用，窗口管理从此静默失效。
+            logger.warning(f"CDP 连接已关闭: {command}")
+            raise
         except Exception as e:
             logger.error(f"CDP 命令执行失败: {e}")
             return None
@@ -347,7 +429,11 @@ class BrowserCDPGuard:
                 "--user-data-dir=/tmp/chromium_user_data",
                 "--allow-file-access-from-files",  # This is a dangerous flag, use it at your own risk
                 "--load-extension=/app/pdf-viewer",
-                '--js-flags="--max_old_space_size=512"',
+                # 不能带引号：这是 argv 条目而不是 shell 词，带上双引号后 V8
+                # 收到的是 '"--max_old_space_size=512"' 并直接拒绝，内存上限
+                # 从未生效 —— 失控页面会一路涨到容器的 SANDBOX_MEMORY_LIMIT，
+                # 被 OOM 杀掉的是整个 sandbox 而不只是渲染进程。
+                "--js-flags=--max_old_space_size=512",
             ]
             chrome_flags = os.getenv("CHROME_FLAGS", "")
             extra_args: List[str] = []
@@ -361,11 +447,15 @@ class BrowserCDPGuard:
 
             count = 0
             while count < retry_count:
-                # 启动浏览器进程
+                # 启动浏览器进程。
+                # 输出丢给 /dev/null 而不是 PIPE：这两个管道从来没人读，
+                # Chromium 用 GPU/DBus/sandbox 的警告填满 ~64KiB 缓冲区后就会
+                # 阻塞在 write() 上，浏览器卡在启动中途，而存活检查一直报失败。
+                # (--enable-logging=file 只重定向它自己的日志，不含这些。)
                 self.browser_process = subprocess.Popen(
                     chrome_args,
-                    stdout=subprocess.PIPE,
-                    stderr=subprocess.PIPE,
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
                 )
 
                 # 等待浏览器启动
@@ -375,10 +465,27 @@ class BrowserCDPGuard:
                 if not self._is_browser_running():
                     count += 1
                     self.browser_process.kill()
+                    # wait() 之后进程才真正被回收；不 wait 的话每次重试和每次
+                    # 监控循环重启都留下一个僵尸，累积到 SANDBOX_PID_LIMIT。
+                    try:
+                        self.browser_process.wait(timeout=5)
+                    except Exception:
+                        pass
+                    self.browser_process = None
                     logger.error(f"浏览器启动失败，尝试第 {count} 次")
                     time.sleep(0.1 * (2**count))
                     continue
                 break
+
+            if count >= retry_count:
+                # 原来这里直接落到下面 return True：所有尝试都失败之后仍然
+                # 记录「Chromium 已启动并连接」并返回成功，调用方接着进入
+                # start_monitoring()，而根本没有浏览器 —— 监控循环于是每一轮
+                # 都抛异常并重启，无限刷 Chromium 进程。
+                # BrowserGuard.start() 在同样的位置是有这个检查的。
+                logger.error(f"Chromium 启动失败，已重试 {retry_count} 次")
+                await self.stop_async()
+                return False
 
             width, _ = get_screensize()
             subprocess.run(
@@ -483,12 +590,13 @@ class BrowserCDPGuard:
             ws_url = tab_info["webSocketDebuggerUrl"]
             ws = self.ws_connections.get(ws_url)
 
-            # 检查连接是否有效
-            if not ws:
+            # 检查连接是否有效。`if not ws` 看不出连接是否已关闭 —— 一个已关闭
+            # 的 WebSocketClientProtocol 依然是真值，所以这个分支只在缓存里
+            # 根本没有条目时才成立，死连接会被一直复用。
+            if ws is not None and _ws_is_closed(ws):
                 logger.debug("WebSocket 连接已关闭，重新连接")
                 ws = None
-                if ws_url in self.ws_connections:
-                    del self.ws_connections[ws_url]
+                self.ws_connections.pop(ws_url, None)
 
             if not ws:
                 logger.debug(f"创建新的 WebSocket 连接: {ws_url}")
