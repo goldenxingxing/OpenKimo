@@ -7,7 +7,6 @@ so a white-label rebrand cleanly isolates its own state.
 from __future__ import annotations
 
 import json
-import os
 import re
 import sys
 from dataclasses import dataclass

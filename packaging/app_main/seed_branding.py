@@ -138,7 +138,10 @@ def seed_if_needed(p: AppPaths) -> None:
     db = _db_path(p)
     try:
         conn = _connect(db)
-    except sqlite3.Error:
+    except (sqlite3.Error, OSError):
+        # OSError too: _connect() does db.parent.mkdir(), which fails on a
+        # read-only volume or a bad KIMI_SHARE_DIR. This runs during launch,
+        # and the docstring promises it is safe to call every time.
         log.exception("branding seed failed opening %s", db)
         return
     try:
@@ -169,13 +172,33 @@ def seed_if_needed(p: AppPaths) -> None:
 
 
 def reset_to_packaged(p: AppPaths) -> None:
-    """Wipe branding rows and re-apply the packaged seed (Settings button)."""
+    """Wipe branding rows and re-apply the packaged seed (Settings button).
+
+    Refuses to run without a seed. The DELETE used to be unconditional and the
+    re-apply guarded by `if seed:`, so a missing, unreadable or
+    branding_seed-less brand.json turned "Reset Branding to Packaged Defaults"
+    into "delete all branding": every admin customisation gone, nothing put
+    back, and the button still reporting success. There is nothing to reset
+    *to* in that state, and doing nothing is the honest outcome.
+    """
     seed = _load_seed(p)
-    conn = _connect(_db_path(p))
+    if not seed:
+        log.warning(
+            "no usable branding_seed in %s; refusing to wipe branding with "
+            "nothing to restore", p.brand_json,
+        )
+        raise RuntimeError(
+            f"no packaged branding seed in {p.brand_json}; branding left unchanged"
+        )
+    db = _db_path(p)
+    try:
+        conn = _connect(db)
+    except sqlite3.Error:
+        log.exception("branding reset failed opening %s", db)
+        raise
     try:
         conn.execute("DELETE FROM branding")
-        if seed:
-            _upsert(conn, seed)
+        _upsert(conn, seed)
         conn.commit()
     finally:
         conn.close()

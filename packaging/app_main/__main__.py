@@ -176,6 +176,19 @@ class OpenKimoApp(rumps.App):
         stopped = state in (ServerState.STOPPED, ServerState.CRASHED)
 
         # rumps MenuItem doesn't expose enabled directly; use NSMenuItem.
+        #
+        # setEnabled_ alone does nothing: NSMenu.autoenablesItems defaults to
+        # YES and rumps never clears it, so AppKit re-validates every item just
+        # before the menu is displayed and overrides whatever we set for any
+        # item whose target responds to the action. The result was a "Open Web
+        # UI" that stayed clickable with the server stopped and opened a tab to
+        # a dead 127.0.0.1:5494. Turning autoenables off makes setEnabled_ the
+        # authority.
+        try:
+            self.menu._menu.setAutoenablesItems_(False)
+        except Exception:
+            log.debug("could not disable menu auto-enabling", exc_info=True)
+
         def _enable(item: rumps.MenuItem, on: bool) -> None:
             try:
                 item._menuitem.setEnabled_(bool(on))
@@ -207,8 +220,18 @@ class OpenKimoApp(rumps.App):
             log.exception("seed_branding failed")
 
         if self._needs_setup():
-            # Defer to main thread so AppKit is happy.
-            rumps.Timer(self._open_settings_first_run, 0.1).start()
+            # Hop to the main queue, not rumps.Timer. _startup() runs on the
+            # kimi-startup worker thread, and rumps.Timer.start() adds the
+            # NSTimer to NSRunLoop.currentRunLoop() — that thread's run loop,
+            # which is never run and dies with the daemon thread. The callback
+            # never fired, and because this branch also returns before
+            # supervisor.start(), a fresh install sat at "Stopped" with no
+            # Settings window and no server. Same hazard, same fix as
+            # _on_state_change below.
+            from Foundation import NSOperationQueue
+            NSOperationQueue.mainQueue().addOperationWithBlock_(
+                self._open_settings_first_run
+            )
             return
         self.supervisor.start()
 
@@ -220,8 +243,8 @@ class OpenKimoApp(rumps.App):
             return False
         return not any(env.get(k) for k in ("KIMI_API_KEY", "OPENAI_API_KEY", "ANTHROPIC_API_KEY"))
 
-    def _open_settings_first_run(self, timer: rumps.Timer) -> None:
-        timer.stop()
+    def _open_settings_first_run(self) -> None:
+        """Open Settings on first run. Called on the main queue, not a timer."""
         self._on_settings(None)
 
     # ---- supervisor callback ------------------------------------------
@@ -358,7 +381,6 @@ class OpenKimoApp(rumps.App):
     def _on_about(self, _):
         try:
             from AppKit import NSApp, NSAttributedString
-            from Foundation import NSURL
             opts = {
                 "ApplicationName": self.paths.app_name,
                 "ApplicationVersion": _read_version(self.paths),
@@ -378,18 +400,42 @@ class OpenKimoApp(rumps.App):
             rumps.alert(f"About {self.paths.app_name}", _read_version(self.paths))
 
     def _on_quit(self, _):
-        try:
-            self.supervisor.shutdown()
-        finally:
-            rumps.quit_application()
+        # shutdown() can block for GRACEFUL_KILL_TIMEOUT (5s) plus a further 2s
+        # after kill() when the child ignores SIGTERM — a request stuck past
+        # uvicorn's --timeout-graceful-shutdown, say. This runs on the AppKit
+        # main thread, so that showed up as a frozen menu bar and a spinner for
+        # up to 7 seconds. Every other supervisor control here is already
+        # pushed onto a worker thread; do the same and quit when it returns.
+        def _shutdown_then_quit() -> None:
+            try:
+                self.supervisor.shutdown()
+            except Exception:
+                log.exception("shutdown failed during quit")
+            finally:
+                from Foundation import NSOperationQueue
+                NSOperationQueue.mainQueue().addOperationWithBlock_(
+                    rumps.quit_application
+                )
+
+        threading.Thread(
+            target=_shutdown_then_quit, name="kimi-quit", daemon=True
+        ).start()
 
 
-def _read_version(p: paths_mod.AppPaths) -> str:
+def _read_version(_p: paths_mod.AppPaths) -> str:
+    """Version string from brand.json.
+
+    The parameter is unused and kept only for call-site symmetry: the value
+    comes from paths_mod.load_brand_json(), which resolves through the
+    module-level lru_cached app_paths(), so passing a different AppPaths here
+    would not select a different brand file.
+    """
     data = paths_mod.load_brand_json()
     return data.get("version") or "0.0.0"
 
 
-def _read_copyright(p: paths_mod.AppPaths) -> str:
+def _read_copyright(_p: paths_mod.AppPaths) -> str:
+    """Copyright string from brand.json. See _read_version on the parameter."""
     data = paths_mod.load_brand_json()
     return data.get("copyright") or "© OpenKimo Contributors. Apache License 2.0."
 

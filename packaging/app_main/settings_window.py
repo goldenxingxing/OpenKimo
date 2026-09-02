@@ -29,11 +29,8 @@ from AppKit import (
     NSColor,
     NSFont,
     NSFontWeightSemibold,
-    NSImage,
     NSLayoutConstraint,
     NSMakeRect,
-    NSModalResponseOK,
-    NSOpenPanel,
     NSPopUpButton,
     NSScrollView,
     NSSecureTextField,
@@ -455,9 +452,11 @@ class _ProviderRow:
             "model": str(self.model.stringValue()).strip(),
             "max_context_size": ctx,
         }
-        caps = [k for k in _CAPABILITIES if self.caps[k].state()]
-        if caps:
-            out["capabilities"] = caps
+        # Always emitted, empty list included. `if caps:` meant unticking all
+        # four wrote nothing, configtoml.update_models left the old value in
+        # place (its docstring says an empty list overwrites), and reopening
+        # Settings showed them ticked again.
+        out["capabilities"] = [k for k in _CAPABILITIES if self.caps[k].state()]
         return out
 
 
@@ -597,8 +596,13 @@ class SettingsController(NSWindowController):
         # base_url / api_key / type / max_context / capabilities / default
         # actually take effect (otherwise _build_global_config keeps the
         # stale toml values).
-        providers_json = updates.get("LLM_PROVIDERS", "")
-        if providers_json:
+        # Note the `is not None`: an empty LLM_PROVIDERS means the user
+        # deleted every provider, which still has to reach config.toml. `if
+        # providers_json:` skipped the whole block in exactly that case, so
+        # .env was cleared while [providers.X] / [models.X] / default_model
+        # stayed behind and kept appearing in the model selector.
+        providers_json = updates.get("LLM_PROVIDERS")
+        if providers_json is not None:
             try:
                 from . import configtoml
                 parsed = [
@@ -614,13 +618,12 @@ class SettingsController(NSWindowController):
                 if default_keep:
                     keep_names.add(default_keep)
                 toml_path = self.paths_ref.sessions_dir / "config.toml"
-                if keep_names:
-                    configtoml.prune(toml_path, keep_names)
-                    configtoml.update_providers(toml_path, parsed)
-                    configtoml.update_models(toml_path, parsed)
-                    configtoml.set_default_model(
-                        toml_path, updates.get("LLM_DEFAULT_PROVIDER", "")
-                    )
+                configtoml.prune(toml_path, keep_names, allow_empty=True)
+                configtoml.update_providers(toml_path, parsed)
+                configtoml.update_models(toml_path, parsed)
+                configtoml.set_default_model(
+                    toml_path, updates.get("LLM_DEFAULT_PROVIDER", "")
+                )
             except Exception:
                 log.exception("config.toml sync failed; continuing")
         # config.toml-only setting, written whatever happened to the providers
@@ -836,26 +839,11 @@ class SettingsController(NSWindowController):
                 row.control.setStringValue_(secrets.token_hex(32))
                 return
 
-    def onChooseDir_(self, sender):  # noqa: N802
-        tag = int(sender.tag())
-        for row in self.rows["PATHS"]:
-            if id(row.extra) == tag:
-                panel = NSOpenPanel.openPanel()
-                panel.setCanChooseFiles_(False)
-                panel.setCanChooseDirectories_(True)
-                panel.setAllowsMultipleSelection_(False)
-                panel.setCanCreateDirectories_(True)
-                if panel.runModal() == NSModalResponseOK:
-                    url = panel.URLs()[0]
-                    row.control.setStringValue_(str(url.path()))
-                return
-
-    def onResetDir_(self, sender):  # noqa: N802
-        tag = int(sender.tag())
-        for row in self.rows["PATHS"]:
-            if id(row.extra) == tag:
-                row.control.setStringValue_("")
-                return
+    # onChooseDir_ / onResetDir_ lived here. They looped over
+    # self.rows["PATHS"], and controller.rows is built with only "LLM", "WEB"
+    # and "BRANDING" — the Paths section was removed. Nothing targets them, so
+    # the KeyError was unreachable, but they were live selectors on the
+    # controller: one setAction_ away from raising inside an ObjC action.
 
     def onResetBranding_(self, _sender):  # noqa: N802
         from . import seed_branding
@@ -949,10 +937,17 @@ def _build_provider_row(controller, entry: dict[str, Any] | None = None) -> _Pro
     row.addSubview_(advanced_btn)
 
     raw_caps = entry.get("capabilities")
-    if isinstance(raw_caps, list) and raw_caps:
+    if isinstance(raw_caps, list):
+        # An explicit list wins, including an empty one: `[]` means "none",
+        # not "unset".
         cap_initial = {str(c) for c in raw_caps}
     else:
-        cap_initial = set(_CAPABILITIES)
+        # No capabilities key at all — every entry from _legacy_entries, and
+        # any LLM_PROVIDERS blob written before capabilities existed. Defaulting
+        # to the full set meant opening Settings to change the port and pressing
+        # Save advertised a text-only local model as accepting images and video
+        # and as always_thinking.
+        cap_initial = set()
 
     advanced_view = _v()
     advanced_view.setHidden_(True)
@@ -1212,16 +1207,30 @@ def _build_llm_section(
     # The web UI's model selector writes default_model to config.toml
     # without touching .env, so prefer the toml value; fall back to .env
     # only when the toml has no default.
+    # Two values, deliberately. The lower-cased one is only for matching a
+    # radio button; the original spelling is what gets written back.
+    #
+    # They used to be one. `initial_default` held the lower-cased string, and
+    # _collect_updates writes it to LLM_DEFAULT_PROVIDER whenever no radio is
+    # selected — which is exactly the case when the effective default names
+    # something not in the provider list, e.g. a hand-added [models.MyLocal]
+    # or one chosen in the web model selector. _save then adds that lower-cased
+    # name to keep_names, configtoml.prune compares case-sensitively and so
+    # *deletes* [models.MyLocal]/[providers.MyLocal], and set_default_model
+    # writes default_model = "mylocal". kimi_cli.config.validate_model then
+    # raises "Default model mylocal not found in models" on every load_config,
+    # and the server no longer starts.
     explicit_default = (
         _read_toml_default_model(controller.paths_ref)
         or values.get("LLM_DEFAULT_PROVIDER")
         or values.get("LLM_PROVIDER")
         or ""
-    ).strip().lower()
-    default_value = explicit_default or (
+    ).strip()
+    default_original = explicit_default or (
         entries[0]["name"] if entries else ""
-    ).strip().lower()
-    controller.initial_default = default_value
+    ).strip()
+    default_value = default_original.lower()
+    controller.initial_default = default_original
 
     provider_rows: list[_ProviderRow] = []
     default_set = False

@@ -255,6 +255,14 @@ class OpenKimoApp:
             return
         except AttributeError:
             pass  # not on Windows
+        except OSError:
+            # os.startfile raises OSError for a real failure, not just a
+            # missing attribute — WinError 1155 when no application is
+            # associated with the extension, which is the ordinary case for a
+            # .log file on a fresh Windows install. Only AttributeError was
+            # caught, so it escaped into the pystray menu callback. Log it and
+            # fall through to the generic opener below.
+            log.exception("os.startfile failed for %s; trying the fallback opener", path)
         opener = "open" if sys.platform == "darwin" else "xdg-open"
         try:
             subprocess.run([opener, str(path)], check=False)

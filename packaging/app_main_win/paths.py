@@ -143,10 +143,19 @@ def _read_brand(install_root: Path) -> tuple[str, dict]:
     brand_json = install_root / "brand.json"
     if brand_json.exists():
         try:
+            # UnicodeDecodeError too: a hand-edited or truncated brand.json
+            # that is not valid UTF-8 raised out of main()'s very first
+            # statement, before logging exists — the tray died with nothing on
+            # screen and nothing in the log.
             data = json.loads(brand_json.read_text(encoding="utf-8"))
-            return data.get("app_name", "OpenKimo"), data
-        except (OSError, json.JSONDecodeError):
-            pass
+        except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+            return "OpenKimo", {}
+        # A JSON document whose root is a list or a string parses fine and then
+        # blows up on .get().
+        if not isinstance(data, dict):
+            return "OpenKimo", {}
+        name = data.get("app_name")
+        return (name if isinstance(name, str) and name else "OpenKimo"), data
     return "OpenKimo", {}
 
 
@@ -226,9 +235,13 @@ def load_brand_json() -> dict:
     p = app_paths()
     if p.brand_json.exists():
         try:
-            return json.loads(p.brand_json.read_text(encoding="utf-8"))
-        except json.JSONDecodeError:
-            pass
+            data = json.loads(p.brand_json.read_text(encoding="utf-8"))
+        except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+            # The mirror-image gap of _read_brand's: this one caught only
+            # JSONDecodeError, so an unreadable file or a bad encoding
+            # propagated instead of falling back.
+            return {}
+        return data if isinstance(data, dict) else {}
     return {}
 
 

@@ -53,14 +53,21 @@ def _section_first_subkey(top: str, inner: str) -> str | None:
     return rest.split(".", 1)[0]
 
 
-def prune(path: Path, keep_names: set[str]) -> None:
+def prune(path: Path, keep_names: set[str], *, allow_empty: bool = False) -> None:
     """Drop ``[models.X]`` / ``[providers.X]`` blocks where X is not in
     ``keep_names``, and clear ``default_model`` if it points outside the set.
 
-    No-ops if the file doesn't exist or ``keep_names`` is empty (we don't want
-    to wipe everything if the caller hasn't computed a real allowlist yet).
+    No-ops if the file doesn't exist, or if ``keep_names`` is empty and
+    ``allow_empty`` is False — the guard exists so a caller that has not
+    computed a real allowlist cannot wipe the file by accident.
+
+    ``allow_empty=True`` is how a caller says the empty set is the answer: the
+    user deleted every provider in Settings. Without it, that case skipped the
+    sync entirely and ``_build_global_config`` kept serving the deleted
+    providers in the model selector — the exact drift this module exists to
+    prevent.
     """
-    if not path.exists() or not keep_names:
+    if not path.exists() or (not keep_names and not allow_empty):
         return
 
     text = path.read_text(encoding="utf-8")
@@ -393,13 +400,14 @@ def set_skipped_skill_dirs(path: Path, dirs: list[str]) -> None:
     Writes an empty list rather than removing the key: an explicit ``[]`` says
     "nothing is skipped" where a missing key says nothing at all, and the
     difference matters when reading the file back to populate a checkbox.
-    """
-    if not path.exists():
-        return
 
+    Creates the file if it is missing. On first run the Settings window opens
+    before the server has ever written config.toml, and this setting has no
+    .env counterpart, so returning early discarded the switch silently.
+    """
     import tomlkit
 
-    text = path.read_text(encoding="utf-8")
+    text = path.read_text(encoding="utf-8") if path.exists() else ""
     try:
         doc = tomlkit.parse(text)
     except Exception:
@@ -451,17 +459,23 @@ def set_compaction_ratio(path: Path, ratio: float) -> None:
     auto-compacts its history. kimi-cli validates the range on load, so a value
     outside 0.5-0.99 is rejected here rather than written and blamed later.
 
-    No-ops if the file is missing, the toml is unparseable, or the value
-    already matches.
+    Creates the file if it is missing. On first run the Settings window opens
+    before the server has ever started, so sessions/config.toml does not exist
+    yet — and this setting has no .env counterpart, so returning early meant
+    the slider was silently discarded and reverted on the next open.
+
+    No-ops if the toml is unparseable or the value already matches.
     """
-    if not path.exists():
-        return
+    # Range first. It used to sit after the existence check, so
+    # set_compaction_ratio(missing_path, 5.0) returned quietly instead of
+    # refusing — the "rejected rather than written" contract held only when
+    # the file already existed.
     if not (0.5 <= ratio <= 0.99):
         raise ValueError(f"compaction_trigger_ratio must be within 0.5-0.99, got {ratio}")
 
     import tomlkit
 
-    text = path.read_text(encoding="utf-8")
+    text = path.read_text(encoding="utf-8") if path.exists() else ""
     try:
         doc = tomlkit.parse(text)
     except Exception:
@@ -471,8 +485,17 @@ def set_compaction_ratio(path: Path, ratio: float) -> None:
     if section is None:
         section = tomlkit.table()
         doc["loop_control"] = section
-    elif float(section.get("compaction_trigger_ratio", -1)) == ratio:
-        return
+    else:
+        # A non-numeric existing value used to raise a bare ValueError from
+        # float() — one without the "0.5-0.99" text, so settings_window's
+        # `except Exception: log.exception(...)` swallowed it and the user's
+        # slider change vanished with no message.
+        try:
+            current = float(section.get("compaction_trigger_ratio", -1))
+        except (TypeError, ValueError):
+            current = None
+        if current == ratio:
+            return
 
     section["compaction_trigger_ratio"] = ratio
 

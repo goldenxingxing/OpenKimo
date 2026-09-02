@@ -71,12 +71,54 @@ def test_an_out_of_range_ratio_is_refused_rather_than_written(
     assert path.read_text(encoding="utf-8") == before
 
 
-def test_a_missing_config_file_is_a_no_op(tmp_path: Path) -> None:
+def test_a_missing_config_file_is_created(tmp_path: Path) -> None:
+    """First run has no config.toml yet, and the slider must still stick.
+
+    This used to be a no-op, copied from set_default_model. That is harmless
+    for providers — the env merge re-seeds them from LLM_PROVIDERS on the next
+    server start — but compaction_trigger_ratio has no .env counterpart, so the
+    user's change was discarded silently and reverted on the next open. The
+    Settings window opens before the server has ever run on a fresh install,
+    which is exactly when it matters.
+
+    Safe because kimi-cli tolerates a partial config: load_config() on a file
+    holding only [loop_control] returns models={} and default_model='' without
+    raising.
+    """
     missing = tmp_path / "absent.toml"
 
     set_compaction_ratio(missing, 0.8)
 
+    assert missing.exists()
+    assert "compaction_trigger_ratio = 0.8" in missing.read_text(encoding="utf-8")
+
+
+def test_an_out_of_range_value_is_refused_even_without_a_file(tmp_path: Path) -> None:
+    """The range check used to sit after the existence check.
+
+    So set_compaction_ratio(missing, 5.0) returned quietly instead of
+    refusing — the "rejected rather than written" contract held only when the
+    file already existed.
+    """
+    missing = tmp_path / "absent.toml"
+
+    with pytest.raises(ValueError, match="0.5-0.99"):
+        set_compaction_ratio(missing, 5.0)
+
     assert not missing.exists()
+
+
+def test_a_non_numeric_existing_value_is_replaced(tmp_path: Path) -> None:
+    """float() on it raised a ValueError without the "0.5-0.99" text.
+
+    settings_window's `except Exception: log.exception(...)` then swallowed it
+    and the user's slider change vanished with no message.
+    """
+    path = _config(tmp_path, '[loop_control]\ncompaction_trigger_ratio = "high"\n')
+
+    set_compaction_ratio(path, 0.8)
+
+    assert "compaction_trigger_ratio = 0.8" in path.read_text(encoding="utf-8")
 
 
 def test_unparseable_toml_is_left_alone(tmp_path: Path) -> None:

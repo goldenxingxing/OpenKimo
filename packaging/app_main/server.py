@@ -587,6 +587,27 @@ class UvicornSupervisor:
         t.start()
 
     def _watch_loop(self) -> None:
+        """Supervise the child until shutdown.
+
+        Wrapped: _handle_exit() respawns, and _spawn_locked() can raise —
+        FileNotFoundError when app_layer_python is missing (paths.py falls
+        back silently when the runtimes glob finds nothing), OSError from
+        mkdir/_write_atomic on a full disk. Those propagated out of this
+        thread and killed it, leaving state and menu frozen at their last
+        value: the menu bar kept showing "Running · port 5494" with no server
+        and no supervision, indefinitely.
+        """
+        try:
+            self._watch_forever()
+        except BaseException:
+            log.exception("watcher thread died; marking the server crashed")
+            self._proc = None
+            self._set_state(
+                ServerState.CRASHED, exit_code=None, reason="supervisor_error"
+            )
+            raise
+
+    def _watch_forever(self) -> None:
         while not self._stop_supervisor.is_set():
             with self._lock:
                 proc = self._proc
@@ -609,22 +630,56 @@ class UvicornSupervisor:
                 # Still alive — health-check only while STARTING.
                 if state == ServerState.STARTING:
                     if _check_health(self._port, expect_pid=proc.pid):
+                        # Reaching RUNNING clears the budget: it was only ever
+                        # reset in start() and on exit code 3, so three crashes
+                        # spread over a week of healthy uptime spent it, and
+                        # the fourth unrelated crash went straight to
+                        # "giving up after 3 retries".
+                        self._restart_attempts = 0
                         self._set_state(ServerState.RUNNING)
                     elif time.monotonic() > self._healthcheck_deadline:
                         # Took too long; treat as crashed.
                         with self._lock:
                             self._terminate_locked()
-                        self._handle_exit(rc=-1)
+                        self._handle_exit(rc=-1, proc=proc)
                         continue
                 time.sleep(1.0)
                 continue
 
             # Child exited.
-            self._handle_exit(rc=rc)
+            self._handle_exit(rc=rc, proc=proc)
 
-    def _handle_exit(self, rc: int) -> None:
+    def _respawn(self) -> None:
+        """Spawn a replacement, unless someone decided to stop meanwhile.
+
+        The crash path sleeps for up to ten seconds before it gets here, and
+        stop()/shutdown() run on other threads (the tray callbacks). Sampling
+        the flags before that sleep and acting on the sample afterwards is a
+        check-then-act race: the user picked "Stop Server", saw the menu flip,
+        and the watcher spawned a fresh uvicorn two seconds later. On the
+        shutdown() path it left an orphaned start_new_session child holding
+        the port after the app had quit.
+        """
         with self._lock:
-            self._proc = None
+            if self._explicit_stop or self._stop_supervisor.is_set():
+                log.info("respawn cancelled; a stop was requested while backing off")
+                return
+            self._spawn_locked()
+
+    def _handle_exit(self, rc: int, proc: subprocess.Popen | None = None) -> None:
+        with self._lock:
+            # Only clear the handle if it is still the process that exited.
+            # restart() terminates the old child and spawns a new one, and the
+            # watcher then reported the old child's rc: clearing
+            # unconditionally dropped the reference to the *live* replacement,
+            # so the supervisor lost track of it, tried to spawn again, and
+            # reported CRASHED / port_in_use against the child it had just
+            # orphaned — while an unsupervised uvicorn kept running.
+            if proc is None or self._proc is proc:
+                self._proc = None
+            else:
+                log.debug("ignoring exit of a superseded child (rc=%s)", rc)
+                return
             explicit = self._explicit_stop
         if explicit:
             self._set_state(ServerState.STOPPED)
@@ -632,8 +687,7 @@ class UvicornSupervisor:
         if rc == EXIT_CODE_RESTART:
             log.info("uvicorn requested restart (exit 3); respawning")
             self._restart_attempts = 0
-            with self._lock:
-                self._spawn_locked()
+            self._respawn()
             return
         # Crash path.
         if self._restart_attempts < MAX_AUTO_RESTARTS:
@@ -641,8 +695,7 @@ class UvicornSupervisor:
             log.warning("uvicorn exited rc=%s; auto-restart %d/%d",
                         rc, self._restart_attempts, MAX_AUTO_RESTARTS)
             time.sleep(min(2 ** self._restart_attempts, 10))
-            with self._lock:
-                self._spawn_locked()
+            self._respawn()
             return
         log.error("uvicorn exited rc=%s; giving up after %d retries",
                   rc, MAX_AUTO_RESTARTS)

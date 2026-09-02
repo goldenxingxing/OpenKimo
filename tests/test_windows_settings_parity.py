@@ -11,9 +11,25 @@ MAC_SETTINGS = (ROOT / "packaging" / "app_main" / "settings_window.py").read_tex
 
 
 def _mac_tuple(name: str) -> list[str]:
+    """Extract a tuple-of-strings constant from the macOS settings module.
+
+    The non-empty assertion is the point. Every caller feeds this into a `for`
+    loop, so an empty result runs no assertions and the parity test passes
+    while checking nothing — and the parser is easy to defeat by accident: it
+    assumes a parenthesised tuple of double-quoted strings, so switching the
+    constant to a list, to single quotes, or adding a nested parenthesis
+    silently yields []. Failing loudly here is what keeps the parity tests
+    honest.
+    """
     match = re.search(rf"{name}[^=]*=\s*\((.*?)\)", MAC_SETTINGS, re.S)
     assert match, f"{name} not found in macOS settings_window.py"
-    return re.findall(r'"([^"]+)"', match.group(1))
+    values = re.findall(r'"([^"]+)"', match.group(1))
+    assert values, (
+        f"{name} matched but yielded no strings — the parser no longer "
+        f"understands how it is declared, so every parity assertion over it "
+        f"would pass vacuously"
+    )
+    return values
 
 
 def test_provider_types_match_macos():

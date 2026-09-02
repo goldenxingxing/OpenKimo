@@ -12,6 +12,7 @@ on first run.
 from __future__ import annotations
 
 import os
+import shlex
 import shutil
 import stat
 from pathlib import Path
@@ -48,35 +49,45 @@ def _ensure_wrappers(p: AppPaths) -> None:
     python_shim = p.userbase_bin / "python"
     pip_shim = p.userbase_bin / "pip"
 
+    # shlex.quote, not bare double quotes. These paths come from the install
+    # location and the app name, so a backtick, $, " or newline in either — an
+    # app renamed by the user, a home directory with a quote in it — produced a
+    # malformed /bin/sh script that would execute whatever the interpolation
+    # opened up. Everything here is generated once and then run by the user's
+    # shell, so quoting it is the whole defence.
     common = (
-        f'export PYTHONUSERBASE="{p.userbase}"\n'
-        f'export PIP_CONFIG_FILE="{p.pip_conf}"\n'
+        f"export PYTHONUSERBASE={shlex.quote(str(p.userbase))}\n"
+        f"export PIP_CONFIG_FILE={shlex.quote(str(p.pip_conf))}\n"
     )
+    bundled_python = shlex.quote(str(p.bundled_python))
 
     _write_wrapper(
         python_shim,
         '#!/bin/sh\n'
         + common
-        + f'exec "{p.bundled_python}" "$@"\n',
+        + f'exec {bundled_python} "$@"\n',
     )
     # python3 alias
     python3_shim = p.userbase_bin / "python3"
-    if python3_shim.is_symlink() or python3_shim.exists():
-        try:
-            python3_shim.unlink()
-        except OSError:
-            pass
     try:
-        python3_shim.symlink_to(python_shim)
+        # Create under a temporary name and rename over the target: os.replace
+        # is atomic, so the shim is never missing and there is no window
+        # between "it exists, unlink it" and "now create it" for anything else
+        # to occupy.
+        tmp_link = python3_shim.with_name(f".python3.{os.getpid()}.tmp")
+        tmp_link.unlink(missing_ok=True)
+        tmp_link.symlink_to(python_shim)
+        os.replace(tmp_link, python3_shim)
     except OSError:
         # File system without symlinks: fall back to a duplicate script.
+        tmp_link.unlink(missing_ok=True)
         shutil.copy2(python_shim, python3_shim)
 
     _write_wrapper(
         pip_shim,
         '#!/bin/sh\n'
         + common
-        + f'exec "{p.bundled_python}" -m pip "$@"\n',
+        + f'exec {bundled_python} -m pip "$@"\n',
     )
     pip3_shim = p.userbase_bin / "pip3"
     if pip3_shim.is_symlink() or pip3_shim.exists():
