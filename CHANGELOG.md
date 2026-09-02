@@ -6,6 +6,51 @@ this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [v0.1.41] — 2026-09-02
+
+一次全项目审查后的修复集。60 个首方文件、约 14.3k 行，由三条互相独立的路径各审一遍（内置 code review、OpenCodeReview、以及一批无上下文的独立 agent），取交叉命中和逐条复现后的结果。
+
+### Security
+
+- **一个 sandbox 可以在另一个 sandbox 的会话里执行任意代码**。`JupyterKernel` 用 `KernelManager(ip=get_host_ip())` 把 kernel 的五个 ZMQ socket 绑到了容器的可路由桥接 IP 上——而那个函数的兜底是 `except: return "0.0.0.0"`，即绑所有网卡。jupyter_client 的默认是 loopback，它自己的文档就在这个参数上写了警告。
+
+  单独看这还只是暴露面。真正成链的是另一端：kernel 管理服务监听 `0.0.0.0:8888`，而 `/kernel/connection` **无鉴权**返回完整的 connection file，**包含 HMAC 签名 key**。于是同一个 `kimi-agent-network` 上的 sandbox A 可以读到 B 的 key 和端口，签一个 `execute_request` 发到 B 的 shell 通道，在**另一个用户的会话里**跑代码。
+
+  现在 kernel 和管理服务都绑回环，`/kernel/connection` 打码签名 key，`/kernel/debug`（docstring 一直写着"开发用"却无条件注册）改为 `KERNEL_SERVER_DEBUG=1` 才启用，CORS 去掉 `allow_credentials`——它配着通配符 origin 本来就被浏览器拒绝，开着只是让一个无鉴权 API 看起来更开放。
+
+- **打包脚本对 bundled CPython 不做校验**。busybox 有 `BUSYBOX_SHA256` 且强制比对，而 python-build-standalone 的 tarball 只是算出 SHA256 打印出来、**不与任何值比较**，然后无过滤 `tar.extractall()`。同时 `release.yml` 缓存 `packaging/.cache`，而 GitHub Actions 的缓存对该仓库**任意分支**的 workflow 可写。现在钉住校验和，不匹配即报错并删除缓存副本，解包改用 `filter="data"`。
+
+- **生成的 shell 垫片未转义安装路径**。`userenv` 把 `PYTHONUSERBASE` 等路径用裸双引号插进 `#!/bin/sh` 脚本，路径里的反引号或 `$(...)` 会在用户每次调用 `python`/`pip` 时被执行。改用 `shlex.quote`。
+
+### Fixed
+
+- **Windows 安装包缺少 carryover，启动即崩**。`carryover` 曾是 `src/kimi_cli/` 里的 vendored 副本，随源码复制进 runtime；成为 uv workspace 成员后它只存在于工作区、从未发布到 PyPI，于是只看到 kimi-cli wheel 的那次 pip resolve 会去 PyPI 找它、拿到 404、什么都不装——而构建**只打了一行 warning**。装好的应用在 `kimi_cli/utils/string.py` 第 7 行抛 `ModuleNotFoundError: No module named 'carryover'`。
+
+  现在从声明它们的文件读出全部 workspace 成员、逐个构建 wheel，并与 `requirements-windows.txt` 合进**同一次 pip resolve**。必须同一次：只有作为直接需求，本地的 carryover wheel 才能满足 kimi-cli 的依赖。`requirements-windows.txt` 一起进来则是反过来的道理——作为第二次 `--upgrade` 安装打进同一个 `--target`，它的 `Pillow>=10.0` 会悄悄覆盖 kimi-cli 钉住的 `pillow==12.2.0`。
+
+- **Docker 部署路径三处独立断裂**。compose 指向 `ghcr.io/j0x7c4/*` 而 release 实际发布的是 `ghcr.io/goldenxingxing/*`；`deploy.sh` 往 `.env` 写的 sandbox 镜像是裸本地 tag，而 compose 只定义 gateway 一个服务、CI 只构建 gateway，`Dockerfile.sandbox` 全仓库只在 `release.yml` 出现一次，所以那个镜像**没有任何人构建或拉取**，每个会话都以 `No such image` 失败；`KIMI_SESSION_DATA_DIR` 默认相对路径，而 gateway 把它原样交给 `docker run -v`，docker CLI 按**客户端 cwd** 解析——也就是 gateway 容器内的 `/app`，于是每个 sandbox 挂到的是宿主机上另一个空目录，worker 看不见会话数据且不报错。
+
+- **首次安装既不弹设置窗口也不启动服务器**。`_startup()` 跑在工作线程上，而 `rumps.Timer.start()` 把 NSTimer 挂到该线程的 run loop——那个 loop 从不运行，随守护线程一起消失。同一文件的 `_on_state_change` 早就用主队列并写了注释说明这个坑，首次安装这条路径没用上。
+
+- **服务器监管的三处竞态**：崩溃退避期间点「Stop Server」，两秒后看门狗仍会拉起新进程；重启时旧进程迟到的退出码会清掉对**新**进程的引用，监管器随后重复 spawn、发现端口被自己刚遗弃的进程占用、报 CRASHED，而那个无人监管的服务器还在跑；`_spawn_locked` 抛异常会直接打死看门狗线程，菜单栏永远停在「Running」而服务器并不存在。
+
+- **Settings 保存会毁掉 config.toml**。默认模型名被小写化后当作精确 TOML key 写回，导致 `prune` 删掉 `[models.MyLocal]` 并写下 `default_model = "mylocal"`，此后每次 `load_config` 都抛 `Default model mylocal not found in models`，服务器起不来。
+
+- **CDP 命令按固定 id 配对**。每条请求都写死 `"id": 1`，超时命令的回复不排空、连接继续复用，于是迟到的回复被当成**下一条**命令的结果。已用真实 Chromium 复现并验证修复。
+
+- 另有二十余项：`packaging/__init__.py` 在没有 PyPI `packaging` 的解释器上抛 `NameError` 导致 Windows launcher 无法 import；`launcher.c` 定义了 `CPYTHON_PREFIX` 却四处硬编码 `3.12`；macOS 构建的 wheel 排序对 `pykaos` 永远失效（它的目录名是 `kaos`），使依赖排在依赖者之后；`verify_min_macos` 按后缀过滤，从未检查过 bundled 解释器本身；`.env` 未加引号而 `start.sh` 会 `source` 它；kernel 执行循环里一个永远不成立的字符串比较使每次超时都重启 kernel、清掉用户状态。
+
+### Changed
+
+- **发布流水线**：四个 job 竞相创建同一个 Release（其一会拿到 HTTP 422），改为单独一个 `create-release` job 由其余四个依赖；第三方 action 从 `@main` 移动分支钉到具体 commit（该 job 持有 `packages: write` 和 `RELEASES_TOKEN`）；补齐 `permissions` 与 `timeout-minutes`。
+- **CI 新增一步 lint**，覆盖 `app/`、`packaging/`、本仓库 `tests/` ——此前 ruff 只跑 kimi-cli 子模块的 `src tests benchmarks`，这些目录从未被检查。`packaging/app_main/settings_window.py` 有 1500 行且没有任何测试 import 它（全部引用都是读文本做匹配），一个未定义名字整套测试照样全绿。
+- **`deploy.sh` 不再询问不生效的限额**：`SANDBOX_DISK_LIMIT`、`MAX_SESSION_CONTAINERS`、`SANDBOX_TIMEOUT_SECONDS` 在代码里没有任何消费者，`container.py` 只施加 `--cpus`/`--memory`/`--pids-limit`。问了却不生效比不问危险。
+
+### 已知未验证
+
+macOS 安装包已本地构建并验证。Windows 打包、Docker 部署、以及重构后的 `release.yml` 本身，均以本次发布为首次真实执行。多架构（arm64）镜像仍未提供。
+
+
 ## [v0.1.40] — 2026-09-01
 
 ### Fixed
