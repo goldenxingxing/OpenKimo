@@ -26,6 +26,7 @@ from __future__ import annotations
 import argparse
 import base64
 import datetime as dt
+import functools
 import json
 import os
 import platform
@@ -205,11 +206,20 @@ def build_frontend(cfg: BuildConfig) -> None:
 
     node_modules = web_dir / "node_modules"
     package_json = web_dir / "package.json"
+    package_lock = web_dir / "package-lock.json"
     install_marker = node_modules / ".package-lock.json"
+    # Both files, because `npm ci` installs from the lock: comparing only
+    # package.json's mtime meant a lock-only dependency bump — the ordinary
+    # shape of a security update — was judged "fresh" and built against stale
+    # node_modules.
+    newest_input = max(
+        (f.stat().st_mtime for f in (package_json, package_lock) if f.exists()),
+        default=0.0,
+    )
     needs_install = (
         not node_modules.exists()
         or not install_marker.exists()
-        or package_json.stat().st_mtime > install_marker.stat().st_mtime
+        or newest_input > install_marker.stat().st_mtime
     )
     if needs_install:
         # ci, not install: install rewrites package-lock.json to whatever the
@@ -246,6 +256,13 @@ def build_frontend(cfg: BuildConfig) -> None:
 
 # ---- 1. wheels ------------------------------------------------------------
 
+_SUBMODULE_HINT = (
+    "{what} not found. kimi-cli and its workspace members (carryover, kosong, "
+    "...) are git submodules; run `git submodule update --init --recursive` "
+    "before building."
+)
+
+
 def _workspace_dirs() -> tuple[Path, ...]:
     """Every workspace member, read from the file that declares them.
 
@@ -256,13 +273,26 @@ def _workspace_dirs() -> tuple[Path, ...]:
 
     kimi-cli comes last: it depends on the others, and the resolved venvstacks
     requirements keep that order.
+
+    Read on demand, not at import. As a module-level constant this opened
+    kimi-cli/pyproject.toml when the module was imported, so a clone without
+    the submodules raised a bare FileNotFoundError before any of the build's
+    own error handling ran — and took test_macos_deployment_target.py and
+    test_relocatable_bundle.py down at collection time with it, since both
+    load this file with importlib.
     """
-    with (KIMI_CLI / "pyproject.toml").open("rb") as f:
+    pyproject = KIMI_CLI / "pyproject.toml"
+    if not pyproject.exists():
+        raise RuntimeError(_SUBMODULE_HINT.format(what=pyproject))
+    with pyproject.open("rb") as f:
         members = tomllib.load(f)["tool"]["uv"]["workspace"]["members"]
     return tuple(KIMI_CLI / m for m in members) + (KIMI_CLI,)
 
 
-WORKSPACE_DIRS = _workspace_dirs()
+@functools.cache
+def workspace_dirs() -> tuple[Path, ...]:
+    """Cached `_workspace_dirs()`; the workspace cannot change mid-build."""
+    return _workspace_dirs()
 
 # Pure-Python deps that PyPI only ships as sdists. venvstacks locks with
 # `--only-binary :all:`, so we build wheels for them locally and drop them
@@ -291,10 +321,15 @@ def build_local_wheels(cfg: BuildConfig) -> Path:
         shutil.rmtree(wheels_dir)
     wheels_dir.mkdir()
 
-    for src in WORKSPACE_DIRS:
-        if not src.exists():
-            print(f"  ! skip missing workspace member: {src}")
-            continue
+    for src in workspace_dirs():
+        # Not `src.exists()`: git leaves the directory of an uninitialised
+        # submodule behind, empty, and packages/carryover is exactly that kind
+        # of submodule. Skipping with a warning was worse than stopping — the
+        # wheel simply went missing from the resolved requirements and
+        # venvstacks then went to PyPI for the bare name `carryover`, which
+        # reads as a registry outage rather than a forgotten submodule.
+        if not (src / "pyproject.toml").exists():
+            raise RuntimeError(_SUBMODULE_HINT.format(what=f"workspace member {src}"))
         # uv build --wheel writes into <pkg>/dist/
         run(["uv", "build", "--wheel", "--out-dir", str(wheels_dir), str(src)])
 
@@ -338,6 +373,24 @@ def _unpin_local_wheels(build_dir: Path, wheels_dir: Path) -> None:
 _LOCAL_MANIFEST = "local-packages.json"
 
 
+def _installed_dirs_of(site: Path, dist: str) -> list[Path]:
+    """Package directories a distribution installed, from its own metadata.
+
+    Read from top_level.txt in the dist-info rather than guessed from the
+    distribution name, so a member whose two names differ is evicted whole.
+    """
+    dirs: list[Path] = []
+    for info in site.glob(f"{dist}-*.dist-info"):
+        top = info / "top_level.txt"
+        if not top.is_file():
+            continue
+        for line in top.read_text(encoding="utf-8").split():
+            candidate = site / line
+            if candidate.is_dir():
+                dirs.append(candidate)
+    return dirs
+
+
 def _evict_dropped_local_packages(build_dir: Path, current: set[str]) -> None:
     """Remove packages this build used to install and no longer does.
 
@@ -363,8 +416,16 @@ def _evict_dropped_local_packages(build_dir: Path, current: set[str]) -> None:
 
     for name in sorted(previous - current):
         gone = 0
+        # A distribution can install a package directory under a different
+        # name — pykaos installs `kaos` — so globbing the dist name alone
+        # removed the dist-info and left the package importable, which is a
+        # worse version of the amem/carryover failure this exists to prevent.
         for site in root.rglob("site-packages"):
-            for path in (*site.glob(f"{name}"), *site.glob(f"{name}-*.dist-info")):
+            for path in (
+                *site.glob(f"{name}"),
+                *site.glob(f"{name}-*.dist-info"),
+                *_installed_dirs_of(site, name),
+            ):
                 shutil.rmtree(path, ignore_errors=True)
                 gone += 1
         if gone:
@@ -372,6 +433,23 @@ def _evict_dropped_local_packages(build_dir: Path, current: set[str]) -> None:
 
     manifest.parent.mkdir(parents=True, exist_ok=True)
     manifest.write_text(json.dumps(sorted(current), indent=2) + "\n", encoding="utf-8")
+
+
+def _dist_name(src: Path) -> str:
+    """The distribution name a member publishes, normalised the way wheels are.
+
+    Not the directory name. `packages/kaos` declares `name = "pykaos"` and so
+    builds `pykaos-0.9.0-py3-none-any.whl`; every place here that guessed the
+    dist name from the directory silently failed on exactly that member.
+    """
+    with (src / "pyproject.toml").open("rb") as f:
+        name = tomllib.load(f)["project"]["name"]
+    return name.replace("-", "_")
+
+
+def _local_dist_names() -> tuple[str, ...]:
+    """Every workspace member's distribution name, in declaration order."""
+    return tuple(_dist_name(d) for d in workspace_dirs())
 
 
 def _create_resolved_toml(cfg: BuildConfig, wheels_dir: Path) -> Path:
@@ -386,7 +464,13 @@ def _create_resolved_toml(cfg: BuildConfig, wheels_dir: Path) -> Path:
     # with kimi-cli last. Derived rather than transcribed for the same reason
     # as the list itself: a member missing from a hand-written order sorts to
     # the end and installs before what it needs.
-    order = [d.name.replace("-", "_") for d in WORKSPACE_DIRS]
+    #
+    # Keyed on the DECLARED distribution name, not the directory name. Those
+    # differ for packages/kaos, which publishes `pykaos`, so no directory-derived
+    # prefix ever matched its wheel: it fell through to the len(order) fallback
+    # and sorted *behind* kimi_cli — which pins pykaos==0.9.0. The committed
+    # venvstacks.resolved.toml carried that inversion.
+    order = list(_local_dist_names())
 
     def order_key(p: Path) -> int:
         for i, prefix in enumerate(order):
@@ -951,8 +1035,12 @@ def verify_min_macos(cfg: BuildConfig, bundle: Path) -> None:
     for path in bundle.rglob("*"):
         if not path.is_file() or path.is_symlink():
             continue
-        if path.suffix not in (".so", ".dylib", "") :
-            continue
+        # No suffix filter. It used to skip anything whose suffix was not
+        # ".so", ".dylib" or "" — which excluded `bin/python3.12`, whose suffix
+        # is ".12", i.e. the bundled interpreter itself never got checked while
+        # the step announced that every binary had been. _macho_min_os()
+        # already returns None for anything that is not a Mach-O, so it is the
+        # only filter needed; the cost is reading a 4-byte magic per file.
         minimum = _macho_min_os(path)
         if minimum is None:
             continue
@@ -1096,7 +1184,7 @@ def verify_bundle_matches_source(bundle: Path) -> None:
         return next((site / name for site in sites if (site / name).is_dir()), None)
 
     problems: list[str] = []
-    for src in WORKSPACE_DIRS:
+    for src in workspace_dirs():
         for package in (src / "src").glob("*/"):
             if not (package / "__init__.py").is_file():
                 continue

@@ -41,6 +41,21 @@
 #define CPYTHON_PREFIX "cpython-3.12"
 #endif
 
+// The X.Y part of CPYTHON_PREFIX, used for libpython<VER>.dylib and the
+// lib/python<VER>/site-packages paths below.
+//
+// build.py passes -DCPYTHON_PREFIX="cpython-<py_version>" from brand.toml, but
+// every use of the version was written out as a literal 3.12 — so pointing
+// --py-version at anything else produced a launcher that dlopen'd a libpython
+// that is not in the bundle and failed on every launch, with the define it was
+// given sitting unused two lines above.
+#ifndef CPYTHON_VERSION
+// Array indexing, not pointer arithmetic on the literal: the latter is
+// the same value but trips -Wstring-plus-int on clang, which reads as a
+// bug at every build.
+#define CPYTHON_VERSION (&CPYTHON_PREFIX[sizeof("cpython-") - 1])
+#endif
+
 typedef int (*Py_BytesMain_t)(int argc, char **argv);
 
 // Resolve `<runtimes>` to its absolute path based on the running binary.
@@ -147,7 +162,7 @@ int main(int argc, char *argv[]) {
     // 2. dlopen cpython's libpython.
     char dylib_path[MAXPATHLEN];
     snprintf(dylib_path, sizeof(dylib_path),
-             "%s/lib/libpython3.12.dylib", cpython_layer);
+             "%s/lib/libpython%s.dylib", cpython_layer, CPYTHON_VERSION);
     void *handle = dlopen(dylib_path, RTLD_NOW | RTLD_GLOBAL);
     if (!handle) {
         fprintf(stderr, "launcher: failed to dlopen %s: %s\n",
@@ -163,9 +178,9 @@ int main(int argc, char *argv[]) {
 
     // 3. PYTHONPATH (final order, leftmost wins):
     //    Resources/                                 (so `python -m app_main` resolves)
-    //    <app>/lib/python3.12/site-packages
-    //    <framework>/lib/python3.12/site-packages
-    //    <cpython>/lib/python3.12/site-packages
+    //    <app>/lib/python<VER>/site-packages
+    //    <framework>/lib/python<VER>/site-packages
+    //    <cpython>/lib/python<VER>/site-packages
     //    <existing $PYTHONPATH>                     (user/shell additions)
     //
     // The site-package entries are load-bearing: venvstacks' postinstall.py
@@ -181,14 +196,14 @@ int main(int argc, char *argv[]) {
     // entry of the final string is `Resources/`.
     char sp[MAXPATHLEN];
     snprintf(sp, sizeof(sp),
-             "%s/lib/python3.12/site-packages", cpython_layer);
+             "%s/lib/python%s/site-packages", cpython_layer, CPYTHON_VERSION);
     prepend_env("PYTHONPATH", sp);
     if (framework_layer) {
         snprintf(sp, sizeof(sp),
-                 "%s/lib/python3.12/site-packages", framework_layer);
+                 "%s/lib/python%s/site-packages", framework_layer, CPYTHON_VERSION);
         prepend_env("PYTHONPATH", sp);
     }
-    snprintf(sp, sizeof(sp), "%s/lib/python3.12/site-packages", app_layer);
+    snprintf(sp, sizeof(sp), "%s/lib/python%s/site-packages", app_layer, CPYTHON_VERSION);
     prepend_env("PYTHONPATH", sp);
 
     char resources_dir[MAXPATHLEN];

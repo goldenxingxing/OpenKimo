@@ -169,10 +169,42 @@ def test_a_clean_bundle_passes_the_guard(tmp_path: Path) -> None:
 
 
 def test_the_build_checks_before_it_signs() -> None:
-    """Signing a bundle that still points at the build tree just ships the bug."""
-    source = BUILD_PY.read_text(encoding="utf-8")
-    make_at = source.index("make_layers_relocatable(runtimes)")
-    verify_at = source.index("verify_relocatable(bundle)", source.index("def main("))
-    sign_at = source.index("sign_app(cfg, bundle)", verify_at)
+    """Signing a bundle that still points at the build tree just ships the bug.
 
-    assert make_at < verify_at < sign_at
+    Anchored inside main(), and on calls that are actually there. The first
+    version compared the position of `make_layers_relocatable(runtimes)` —
+    which appears only inside copy_runtimes(), several hundred lines *above*
+    `def main(` — against positions searched from main() onwards. `make_at <
+    verify_at` was therefore true no matter how main() was ordered, so the
+    assertion could not fail for the reason it names.
+    """
+    source = BUILD_PY.read_text(encoding="utf-8")
+    main_at = source.index("def main(")
+    main_body = source[main_at:]
+
+    # Not create_dmg: main() has an early-return branch that builds a DMG from
+    # an existing bundle and returns, so it appears twice and the first
+    # occurrence is before the main build path.
+    create_at = main_body.index("create_app_bundle(cfg, export_dir)")
+    verify_at = main_body.index("verify_relocatable(bundle)")
+    sign_at = main_body.index("sign_app(cfg, bundle)")
+
+    assert create_at < verify_at < sign_at
+
+    # And the relocation itself still happens on the way in, inside
+    # copy_runtimes — the step create_app_bundle depends on. Checked with the
+    # AST, not a substring: `pass  # make_layers_relocatable(runtimes)` still
+    # contains the text, so a substring test cannot tell a call from a comment.
+    import ast
+
+    tree = ast.parse(source)
+    copy_runtimes = next(
+        node for node in ast.walk(tree)
+        if isinstance(node, ast.FunctionDef) and node.name == "copy_runtimes"
+    )
+    called = {
+        node.func.id
+        for node in ast.walk(copy_runtimes)
+        if isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
+    }
+    assert "make_layers_relocatable" in called
