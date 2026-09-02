@@ -36,6 +36,44 @@ dist/
 └── OpenKimo-<version>-<arch>.dmg    # arch = arm64 or x86_64
 ```
 
+## Dependency locks (not reproducible yet)
+
+`venvstacks lock` writes a fully pinned, hashed requirement set per layer and
+per platform into `packaging/requirements/`. Those files are **not committed**
+(`packaging/.gitignore`), and `build.py` runs `venvstacks lock` unconditionally,
+so every build re-resolves from PyPI. Two consequences:
+
+* **A rebuild of the same tag can ship different dependencies.** kimi-cli's
+  `uv.lock` pins `anthropic 0.78.0`, which is what CI tests run against;
+  v0.1.41 shipped `anthropic 1.3.0`, because `kosong` asks for
+  `anthropic>=0.78.0` with no upper bound. That major bump also pulled the HTTP
+  stack from `httpx` to `httpx2`. Nothing tested that combination — its 35
+  symbols still import, which was checked by hand, but nothing beyond that.
+* **The shipped set is only knowable after the fact.** Each release job now
+  uploads its `packaging/requirements/` as a `venvstacks-locks-<ARCH>`
+  artifact, so it can be retrieved and diffed against the previous release.
+
+To close this, all three steps are needed together:
+
+1. Commit the locks for **both** platforms. They are platform-specific
+   (`...-macosx_arm64.txt`, `...-macosx_x86_64.txt`) and each must be generated
+   on its own architecture — running the locker under Rosetta still produces
+   arm64 files, so the x86_64 one has to come off an Intel machine or the
+   `build-macos-intel` job's artifact.
+2. Switch `build.py`'s lock step to `venvstacks lock --if-needed`, which skips
+   layers whose lock is still valid. Verified locally: with inputs unchanged it
+   leaves the files untouched, and adding a requirement re-locks that layer and
+   only that layer.
+3. Stop caching the locks. `release.yml` caches `packaging/.build`, and with
+   `--if-needed` a cache hit would freeze dependencies at whatever the cache
+   holds — trading "resolved fresh every time" for "resolved whenever the cache
+   last missed", which is worse. The committed files must be the only source.
+
+Doing 2 without 1 is worse than doing nothing: the arm64 build would honour a
+committed lock while the Intel build kept floating, so the two installers for
+one tag would genuinely diverge — which today they do not (verified by
+comparing the published v0.1.41 arm64 and x86_64 DMGs: identical package sets).
+
 ## White-Label / OEM builds
 
 All branding is parameterized at build time. Override any field from
