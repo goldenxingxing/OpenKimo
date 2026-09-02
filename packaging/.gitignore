@@ -1,11 +1,12 @@
 # Build artifacts
+#
+# Only what actually lands *inside* packaging/. The installers do not: both
+# build scripts default --output-dir to the repo root (build.py -> ../dist,
+# build_windows.py -> ../dist-win), so `dist/`, `dist-win/`, `*.dmg` and
+# `*.exe` here matched nothing and a ~200 MB dist-win/ showed up untracked at
+# the root. The root .gitignore covers those.
 .build/
 .cache/
-dist/
-dist-win/
-*.dmg
-*.app
-*.exe
 
 # Generated requirements (recreated by venvstacks lock)
 requirements/

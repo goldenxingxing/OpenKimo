@@ -149,6 +149,33 @@ class GiteeReleaseTargetTests(unittest.TestCase):
 
         self.assertEqual([call.method for call in api.calls], ["GET", "PATCH"])
 
+    def test_prerelease_is_carried_from_the_source_release(self):
+        """An -rc tag must not be republished on Gitee as stable.
+
+        `prerelease` was hardcoded to "false". A prerelease tag matches the
+        workflow's `v*` filter and its startsWith(..., 'v') gate, so it reaches
+        the sync and was announced to mainland users as a stable release.
+        """
+        api = FakeApi([{"id": 7}, {"id": 7}])
+        target = sync.GiteeReleaseTarget(api, "qunwei", "OpenKimo")
+        release = sync.Release(
+            tag="v1.2.0-rc1", name="v1.2.0-rc1", body="notes",
+            assets=[], prerelease=True,
+        )
+
+        target.sync(release)
+
+        self.assertEqual(api.calls[1].fields["prerelease"], "true")
+
+    def test_a_stable_release_is_still_stable(self):
+        api = FakeApi([{"id": 7}, {"id": 7}])
+        target = sync.GiteeReleaseTarget(api, "qunwei", "OpenKimo")
+        release = sync.Release(tag="v1.2.0", name="v1.2.0", body="notes", assets=[])
+
+        target.sync(release)
+
+        self.assertEqual(api.calls[1].fields["prerelease"], "false")
+
     def test_replaces_same_named_asset_and_keeps_other_assets(self):
         existing = [
             {"id": 3, "name": "OpenKimo.dmg"},

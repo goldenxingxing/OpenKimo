@@ -10,8 +10,54 @@ env:
   SANDBOX_IMAGE: ghcr.io/goldenxingxing/kimi-agent-sandbox
 
 jobs:
+  create-release:
+    name: Create GitHub Release
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      # The single creator of the release. The image job and the three
+      # installer jobs all upload into it, so none of them races to create it:
+      # concurrent creates meant one job could fail with HTTP 422
+      # already_exists, or a body-less create from a build job could win and
+      # leave the release with no notes.
+      #
+      # Published to the public downloads repo; this code repo is private, so
+      # its own releases would not be downloadable.
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v3
+        with:
+          repository: goldenxingxing/OpenKimo-releases
+          token: ${{ secrets.RELEASES_TOKEN }}
+          tag_name: ${{ github.ref_name }}
+          body: |
+            ## Docker Images
+
+            Pull pre-built images (no local build required):
+
+            ```bash
+            docker pull ${{ env.GATEWAY_IMAGE }}:${{ github.ref_name }}
+            docker pull ${{ env.SANDBOX_IMAGE }}:${{ github.ref_name }}
+            ```
+
+            ## Quick Start
+
+            ```bash
+            # 1. Download config files
+            curl -O https://raw.githubusercontent.com/goldenxingxing/OpenKimo-releases/main/docker-compose.yml
+            curl -O https://raw.githubusercontent.com/goldenxingxing/OpenKimo-releases/main/.env.example
+            cp .env.example .env
+
+            # 2. Set your API key in .env
+            # 3. Start (pulls images automatically)
+            docker compose up -d
+            ```
+
   release:
+    timeout-minutes: 90
     name: Build & Push Images
+    needs: create-release
     runs-on: ubuntu-latest
     permissions:
       contents: write   # create GitHub Release
@@ -23,7 +69,11 @@ jobs:
       # device" during the sandbox build). Reclaim toolchains we never use
       # (~30GB); keeps Docker itself intact.
       - name: Free disk space
-        uses: jlumbroso/free-disk-space@main
+        # Pinned to a commit, not @main: this is the first step of the one job
+        # holding packages: write and RELEASES_TOKEN, so a force-push or an
+        # account compromise upstream would run attacker code with both. The
+        # SHA below is tag v1.3.1.
+        uses: jlumbroso/free-disk-space@54081f138730dfa15788a46383842cd2f914a1be
 
       - uses: actions/checkout@v5
         with:
@@ -72,39 +122,10 @@ jobs:
           cache-from: type=gha,scope=sandbox
           cache-to: type=gha,mode=max,scope=sandbox
 
-      # ---- GitHub Release (published to the public downloads repo; this
-      # code repo is private, so its releases would not be downloadable) ----
-      - name: Create GitHub Release
-        uses: softprops/action-gh-release@v3
-        with:
-          repository: goldenxingxing/OpenKimo-releases
-          token: ${{ secrets.RELEASES_TOKEN }}
-          tag_name: ${{ github.ref_name }}
-          body: |
-            ## Docker Images
-
-            Pull pre-built images (no local build required):
-
-            ```bash
-            docker pull ${{ env.GATEWAY_IMAGE }}:${{ github.ref_name }}
-            docker pull ${{ env.SANDBOX_IMAGE }}:${{ github.ref_name }}
-            ```
-
-            ## Quick Start
-
-            ```bash
-            # 1. Download config files
-            curl -O https://raw.githubusercontent.com/goldenxingxing/OpenKimo-releases/main/docker-compose.yml
-            curl -O https://raw.githubusercontent.com/goldenxingxing/OpenKimo-releases/main/.env.example
-            cp .env.example .env
-
-            # 2. Set your API key in .env
-            # 3. Start (pulls images automatically)
-            docker compose up -d
-            ```
-
   build-macos:
+    timeout-minutes: 60
     name: Build macOS .app DMG
+    needs: create-release
     runs-on: macos-latest   # ARM64 (M-series) runner
     permissions:
       contents: write       # upload release assets
@@ -154,7 +175,9 @@ jobs:
           fail_on_unmatched_files: true
 
   build-macos-intel:
+    timeout-minutes: 60
     name: Build macOS .app DMG (Intel x86_64)
+    needs: create-release
     runs-on: macos-15-intel   # current Intel runner from GitHub Actions (macos-13 retired)
     permissions:
       contents: write       # upload release assets
@@ -204,7 +227,9 @@ jobs:
           fail_on_unmatched_files: true
 
   build-windows:
+    timeout-minutes: 60
     name: Build Windows x64 installer
+    needs: create-release
     runs-on: windows-latest
     permissions:
       contents: write

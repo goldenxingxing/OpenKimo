@@ -1,11 +1,11 @@
 blank_issues_enabled: false
 contact_links:
   - name: Ask a Question
-    url: https://github.com/openkimo/openkimo/discussions
+    url: https://github.com/j0x7c4/OpenKimo/discussions
     about: Have a question or need help using OpenKimo? Start a discussion!
 
   - name: Report a Security Vulnerability
-    url: https://github.com/openkimo/openkimo/security/advisories/new
+    url: https://github.com/j0x7c4/OpenKimo/security/advisories/new
     about: Please report security vulnerabilities privately through GitHub Security Advisories.
 
   - name: Documentation

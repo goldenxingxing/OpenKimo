@@ -31,6 +31,11 @@ __pycache__/
 build/
 develop-eggs/
 dist/
+# The Windows installer output. build_windows.py defaults --output-dir to
+# ../dist-win, i.e. here at the repo root; packaging/.gitignore listed it but
+# a pattern there only matches inside packaging/, so a ~200 MB installer sat
+# untracked at the root after every local Windows build.
+dist-win/
 downloads/
 eggs/
 .eggs/

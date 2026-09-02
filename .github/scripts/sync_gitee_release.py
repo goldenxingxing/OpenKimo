@@ -1,5 +1,18 @@
 #!/usr/bin/env python3
-"""Copy one GitHub Release and all of its assets to Gitee."""
+"""Mirror one GitHub Release to Gitee: metadata plus download links.
+
+Deliberately does NOT upload the binaries. Gitee's community tier caps a
+single attachment at 100 MB and the installers are well past that, so
+``Release.body_with_downloads()`` appends a download section pointing at
+GitHub's own URLs instead (see f34f641 and
+docs/superpowers/specs/2026-07-23-gitee-mirror-and-release-sync-design.md,
+which states the rule and the reason).
+
+``ApiClient.download`` / ``GitHubReleaseSource.download_asset`` are therefore
+not on the sync path. They are kept for the attachment flow that
+``GiteeReleaseTarget.replace_asset`` still implements, for assets small enough
+to host — nothing calls that from ``sync()`` today.
+"""
 
 from __future__ import annotations
 
@@ -31,6 +44,7 @@ class Release:
     name: str
     body: str
     assets: list[Asset]
+    prerelease: bool = False
 
     def body_with_downloads(self) -> str:
         if not self.assets:
@@ -194,6 +208,7 @@ class GitHubReleaseSource:
             tag=payload["tag_name"],
             name=payload.get("name") or payload["tag_name"],
             body=payload.get("body") or "",
+            prerelease=bool(payload.get("prerelease")),
             assets=[
                 Asset(
                     asset["name"],
@@ -248,7 +263,11 @@ class GiteeReleaseTarget:
             "tag_name": release.tag,
             "name": release.name,
             "body": release.body_with_downloads(),
-            "prerelease": "false",
+            # Carried from the source release, not hardcoded. A prerelease tag
+            # (v1.2.0-rc1) matches the workflow's `v*` filter and its
+            # startsWith(…, 'v') gate, so it reaches here — and was then
+            # republished on Gitee as a stable release.
+            "prerelease": "true" if release.prerelease else "false",
         }
         if existing is None:
             fields["target_commitish"] = self.default_branch()

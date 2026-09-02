@@ -16,8 +16,12 @@ on:
     workflows: [Release]
     types: [completed]
 
+permissions:
+  contents: read
+
 jobs:
   mirror:
+    timeout-minutes: 30
     if: github.event_name == 'push' || github.event_name == 'delete'
     concurrency:
       group: gitee-git-mirror
