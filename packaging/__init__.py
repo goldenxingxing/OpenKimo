@@ -21,32 +21,43 @@ interpreter was started with. Without that, anything importing
 where a developer naturally runs things.
 """
 
-import os as _os
-import sys as _sys
-
-
 def _pypi_packaging_dirs():
     """Directories holding the real PyPI ``packaging``, most specific first."""
-    here = _os.path.dirname(_os.path.abspath(__file__))
+    # Imported inside the function, not at module scope. These names must not
+    # survive in this package's namespace — it shadows the PyPI distribution
+    # named `packaging` — and the previous shape (module-level `import os as
+    # _os` plus a trailing `del _os, _sys`) left this function referencing
+    # names the module had already deleted. It worked only because the single
+    # call below happens before the del; ruff reported all eleven references
+    # as undefined names, and any later call would genuinely raise NameError.
+    import os
+    import sys
+
+    here = os.path.dirname(os.path.abspath(__file__))
 
     # The bundled runtime layout: runtime/packaging next to runtime/site-packages.
-    sibling = _os.path.join(_os.path.dirname(here), "site-packages", "packaging")
-    if _os.path.isfile(_os.path.join(sibling, "version.py")):
+    sibling = os.path.join(os.path.dirname(here), "site-packages", "packaging")
+    if os.path.isfile(os.path.join(sibling, "version.py")):
         yield sibling
 
     # Dev: wherever this interpreter would have found it had we not shadowed it.
-    for entry in _sys.path:
+    for entry in sys.path:
         if not entry:
             continue
-        candidate = _os.path.join(entry, "packaging")
-        if _os.path.abspath(candidate) == here:
+        candidate = os.path.join(entry, "packaging")
+        if os.path.abspath(candidate) == here:
             continue
-        if _os.path.isfile(_os.path.join(candidate, "version.py")):
+        if os.path.isfile(os.path.join(candidate, "version.py")):
             yield candidate
 
 
+# Bound before the loop: the generator legitimately yields nothing on an
+# interpreter that has no PyPI `packaging` installed, and `del _found` then
+# raised NameError out of this module — making `import packaging.app_main_win`,
+# i.e. the Windows launcher's entry point, fail outright.
+_found = None
 for _found in _pypi_packaging_dirs():
     if _found not in __path__:
         __path__.append(_found)
 
-del _os, _sys, _found, _pypi_packaging_dirs
+del _found, _pypi_packaging_dirs

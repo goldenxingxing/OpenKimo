@@ -5,12 +5,13 @@ Pipeline:
   1. Parse CLI flags (defaults from ``packaging/brand.toml``).
   2. ``npm install`` + ``npm run build`` under ``kimi-cli/web/`` so the
      bundled UI matches the current kimi-cli. Skip with ``--skip-frontend``.
-  3. Build the kimi-cli wheel via ``uv build --wheel`` (cached under
-     ``packaging/.cache/wheels/``).
+  3. Build the kimi-cli wheel and every workspace member's (carryover,
+     kosong, pykaos, ...) via ``uv build --wheel`` into
+     ``packaging/.cache/wheels/``.
   4. Stage the runtime layout under ``build/runtime-staging/``:
        runtime/
          python/                  — extracted python-build-standalone
-         site-packages/           — pip-installed deps (kimi-cli wheel + win deps)
+         site-packages/           — pip-installed deps (local wheels + win deps)
          kimi_cli/                — kimi_cli source (so ``import kimi_cli`` works)
          packaging/               — packaging/__init__.py + app_main + app_main_win
          playwright-browsers/     — chromium snapshot
@@ -68,7 +69,6 @@ import shutil
 import subprocess
 import sys
 import tarfile
-import tempfile
 import time
 import tomllib
 import urllib.request
@@ -89,6 +89,17 @@ PY_STANDALONE_URL = (
     f"https://github.com/astral-sh/python-build-standalone/releases/download/"
     f"{PY_STANDALONE_TAG}/cpython-{PY_STANDALONE_VERSION}+{PY_STANDALONE_TAG}"
     f"-{PY_STANDALONE_TARGET}.tar.gz"
+)
+# The interpreter that ships inside every Windows installer, so it is pinned
+# the same way BUSYBOX_SHA256 is. It was not, and the difference mattered:
+# release.yml caches packaging/.cache, and an Actions cache is writable by a
+# workflow run on any branch of the repo — so a substituted archive would have
+# been taken from the cache, had its digest printed and compared to nothing,
+# and shipped. Upstream publishes no .sha256 sidecar for this asset; re-derive
+# on a version bump with:
+#   curl -sL "<PY_STANDALONE_URL>" | shasum -a 256
+PY_STANDALONE_SHA256 = (
+    "346dfbcb95171dd6d1275e6f8cb2e656cc15cb054c399ae54db57bfad4b1a60f"
 )
 # Pinned busybox-w32 build, shipped as the fallback shell for machines without
 # Git for Windows. The "w64u" variant is the 64-bit Unicode one — without
@@ -274,16 +285,32 @@ def build_frontend(cfg: BuildConfig) -> None:
 
     node_modules = web_dir / "node_modules"
     package_json = web_dir / "package.json"
+    package_lock = web_dir / "package-lock.json"
     install_marker = node_modules / ".package-lock.json"
+    # Both files, because `npm ci` installs from the lock: comparing only
+    # package.json's mtime meant a lock-only dependency bump — the ordinary
+    # shape of a security update — was judged "fresh" and built against stale
+    # node_modules.
+    newest_input = max(
+        (f.stat().st_mtime for f in (package_json, package_lock) if f.exists()),
+        default=0.0,
+    )
     needs_install = (
         not node_modules.exists()
         or not install_marker.exists()
-        or package_json.stat().st_mtime > install_marker.stat().st_mtime
+        or newest_input > install_marker.stat().st_mtime
     )
     if needs_install:
-        run(["npm", "install"], cwd=str(web_dir))
+        # ci, not install — the same reason build.py:216 gives: install
+        # rewrites package-lock.json to whatever the local npm emits, and an
+        # npm older than the one that wrote the lock silently drops fields it
+        # does not know (npm 10 strips the `libc` entries selecting the musl
+        # vs glibc binary of a native dependency). It also floats within
+        # semver ranges, so the UI in the Windows installer for a tag could be
+        # built from a different dependency set than the DMG for that same tag.
+        run(["npm", "ci"], cwd=str(web_dir))
     else:
-        print(f"  node_modules in {web_dir} looks fresh; skipping npm install.")
+        print(f"  node_modules in {web_dir} looks fresh; skipping npm ci.")
     run(["npm", "run", "build"], cwd=str(web_dir))
 
     dist = web_dir / "dist"
@@ -295,37 +322,152 @@ def build_frontend(cfg: BuildConfig) -> None:
 
 # ---- 2. wheels ------------------------------------------------------------
 
-def build_kimi_wheel(cache_dir: Path) -> Path:
-    """Build the kimi-cli wheel locally via ``uv build``.
+_SUBMODULE_HINT = (
+    "{what} not found. kimi-cli and its workspace members (carryover, kosong, "
+    "...) are git submodules; run `git submodule update --init --recursive` "
+    "before building."
+)
 
-    Returns the path to the produced wheel. Cached: if a wheel matching
-    the current kimi-cli version is already in ``cache_dir``, we reuse it.
+
+def workspace_dirs() -> tuple[Path, ...]:
+    """Every workspace member, read from the file that declares them.
+
+    Same source of truth as the macOS build: a member added to kimi-cli's
+    pyproject has to reach both installers, and reading the list beats
+    transcribing it. kimi-cli is appended last, so its own wheel is built
+    after the members it depends on.
+
+    Read on demand rather than at import. As a module-level constant this
+    opened kimi-cli/pyproject.toml when the module was imported, so a clone
+    without the submodules raised a bare FileNotFoundError before any of the
+    build's own error handling ran — and took the whole packaging test module
+    down at collection time with it.
+
+    Entries are taken literally. uv also allows globs in ``members`` with a
+    sibling ``exclude``; kimi-cli declares concrete directories today and the
+    macOS build reads them the same literal way, so if that ever changes both
+    builds need the expansion, not just this one.
     """
-    section("Building kimi-cli wheel (uv build)")
-    cache_dir.mkdir(parents=True, exist_ok=True)
-    version = _kimi_version()
-    # Wheel name normalises hyphen -> underscore.
-    existing = sorted(cache_dir.glob(f"kimi_cli-{version}*.whl"))
-    if existing:
-        wheel = existing[-1]
-        print(f"  reusing cached wheel: {wheel.name}")
-        return wheel
+    pyproject = KIMI_CLI / "pyproject.toml"
+    if not pyproject.exists():
+        raise RuntimeError(_SUBMODULE_HINT.format(what=pyproject))
+    try:
+        with pyproject.open("rb") as f:
+            members = tomllib.load(f)["tool"]["uv"]["workspace"]["members"]
+    except (tomllib.TOMLDecodeError, KeyError) as exc:
+        raise RuntimeError(
+            f"{pyproject} declares no [tool.uv.workspace] members ({exc!r}). "
+            f"That list is what this build installs; without it the installer "
+            f"ships without carryover and friends."
+        ) from exc
+    if not isinstance(members, list) or not all(isinstance(m, str) for m in members):
+        raise RuntimeError(
+            f"{pyproject} declares a malformed [tool.uv.workspace] members "
+            f"list: {members!r}"
+        )
+    if not members:
+        raise RuntimeError(
+            f"{pyproject} declares no [tool.uv.workspace] members. An empty "
+            f"list would build kimi-cli alone and ship without carryover — the "
+            f"exact failure this reads the list to prevent."
+        )
+    globbed = [m for m in members if any(c in m for c in "*?[")]
+    if globbed:
+        raise RuntimeError(
+            f"{pyproject} declares glob workspace members ({', '.join(globbed)}), "
+            f"which this build reads literally. Expand them here and in the "
+            f"macOS build's _workspace_dirs(), which reads them the same way."
+        )
+    return tuple(KIMI_CLI / m for m in members) + (KIMI_CLI,)
 
+
+def workspace_modules() -> tuple[str, ...]:
+    """Top-level module each workspace member installs, from its ``src/``.
+
+    Used after the pip install to prove the member actually landed. carryover
+    shipped as a vendored copy inside kimi_cli once, so copy_kimi_cli_source()
+    carried it for free; as a workspace member it has to be installed, and the
+    build had no way of noticing it was not.
+
+    A member this cannot read is an error, not a skip. Returning nothing for it
+    would drop it from verify_workspace_members() silently, which is the exact
+    shape of the bug the check exists to catch — the build would go on to
+    report everything present while shipping the member that was never looked
+    for.
+    """
+    mods: list[str] = []
+    for src in workspace_dirs():
+        if not (src / "pyproject.toml").exists():
+            raise RuntimeError(_SUBMODULE_HINT.format(what=f"workspace member {src}"))
+        found = _top_level_modules(src / "src")
+        if not found:
+            raise RuntimeError(
+                f"no importable module found under {src / 'src'}; "
+                f"{src.name} would go unverified. Teach _top_level_modules() "
+                f"about its layout rather than letting it ship unchecked."
+            )
+        mods += found
+    return tuple(mods)
+
+
+def _top_level_modules(src: Path) -> list[str]:
+    """Importable names a ``src/`` layout installs: packages and lone modules."""
+    if not src.is_dir():
+        return []
+    names = [p.name for p in src.iterdir() if (p / "__init__.py").is_file()]
+    names += [p.stem for p in src.iterdir() if p.is_file() and p.suffix == ".py"]
+    return sorted(names)
+
+
+def build_local_wheels(wheels_dir: Path) -> list[Path]:
+    """Build the kimi-cli wheel *and* every workspace member's, via ``uv build``.
+
+    Order is the workspace's own, which is not a dependency order — kimi-code
+    depends on kimi-cli and is declared before it. That is fine here and only
+    here: every wheel goes into a single pip resolve, where argument order
+    carries no meaning. The macOS build, which feeds venvstacks a sequential
+    requirements list, is the one that has to care.
+
+    Deliberately not cached. Workspace members keep their version across source
+    changes (carryover has been 0.1.0 throughout), so a wheel cached by version
+    is a wheel that ships stale forever — the macOS build hit exactly that and
+    it surfaced only as a missing attribute at runtime. These are small pure-
+    Python packages; rebuilding them costs seconds.
+    """
+    section("Building kimi-cli + workspace wheels (uv build)")
     if shutil.which("uv") is None:
         raise RuntimeError(
             "uv not found on PATH. Install via https://github.com/astral-sh/uv "
             "or `brew install uv`."
         )
-    run(["uv", "build", "--wheel",
-         "--out-dir", str(cache_dir),
-         str(KIMI_CLI)])
-    produced = sorted(cache_dir.glob(f"kimi_cli-{version}*.whl"))
-    if not produced:
-        raise RuntimeError(
-            f"uv build completed but no kimi_cli-{version} wheel landed in "
-            f"{cache_dir}. Check the output above."
-        )
-    return produced[-1]
+    # Checked before the wipe: a bad checkout should not also cost the cache
+    # the release runner would otherwise re-upload. `src.exists()` is the wrong
+    # question — git leaves the directory of an uninitialised submodule behind,
+    # empty, and packages/carryover is exactly that kind of submodule. Whether
+    # uv has anything to build from is the question.
+    members = workspace_dirs()
+    for src in members:
+        if not (src / "pyproject.toml").exists():
+            raise RuntimeError(_SUBMODULE_HINT.format(what=f"workspace member {src}"))
+
+    if wheels_dir.exists():
+        shutil.rmtree(wheels_dir)
+    wheels_dir.mkdir(parents=True)
+
+    wheels: list[Path] = []
+    for src in members:
+        before = set(wheels_dir.glob("*.whl"))
+        run(["uv", "build", "--wheel", "--out-dir", str(wheels_dir), str(src)])
+        produced = sorted(set(wheels_dir.glob("*.whl")) - before)
+        if not produced:
+            raise RuntimeError(
+                f"uv build produced no wheel for {src.name} in {wheels_dir}. "
+                f"Check the output above."
+            )
+        wheels += produced
+    for w in wheels:
+        print(f"  {w.name}")
+    return wheels
 
 
 # ---- 3. python-build-standalone -----------------------------------------
@@ -383,7 +525,18 @@ def fetch_python_runtime(cache_dir: Path, dest_root: Path) -> Path:
     else:
         print(f"  cached: {tar_path} ({tar_path.stat().st_size / (1 << 20):.1f} MiB)")
 
-    print(f"  sha256({tar_name}) = {_sha256(tar_path)}")
+    digest = _sha256(tar_path)
+    if digest != PY_STANDALONE_SHA256:
+        # Drop it: leaving a rejected archive in the cache means the next run
+        # takes the `tar_path.exists()` branch and fails on the same bytes.
+        tar_path.unlink(missing_ok=True)
+        raise RuntimeError(
+            f"sha256 mismatch for {tar_name}: expected {PY_STANDALONE_SHA256}, "
+            f"got {digest}. The cached copy has been removed. If this followed "
+            f"a deliberate PY_STANDALONE_TAG/VERSION bump, update "
+            f"PY_STANDALONE_SHA256 too."
+        )
+    print(f"  sha256({tar_name}) = {digest} (matches pin)")
 
     python_dir = dest_root / "python"
     if python_dir.exists():
@@ -391,7 +544,10 @@ def fetch_python_runtime(cache_dir: Path, dest_root: Path) -> Path:
     dest_root.mkdir(parents=True, exist_ok=True)
     with tarfile.open(tar_path, "r:gz") as tar:
         # python-build-standalone archives root at "python/"; extract straight.
-        tar.extractall(dest_root)
+        # filter="data" refuses absolute paths, "..", and special files, so a
+        # crafted archive cannot write outside dest_root. Verified against the
+        # pinned archive: 3358 members, none absolute or traversing.
+        tar.extractall(dest_root, filter="data")
     if not python_dir.exists():
         raise RuntimeError(
             f"expected {python_dir} after extraction; archive layout may have "
@@ -406,10 +562,10 @@ def install_site_packages(
     python_exe: Path,
     site_packages: Path,
     requirements_file: Path,
-    kimi_wheel: Path,
+    local_wheels: list[Path],
     pip_log: Path,
 ) -> None:
-    """``pip install --target=site_packages`` for the win deps + kimi wheel.
+    """``pip install --target=site_packages`` for the win deps + local wheels.
 
     On macOS we can't actually invoke the Windows ``python.exe``. To still
     produce a meaningful layout for inspection, we fall back to the host's
@@ -457,25 +613,106 @@ def install_site_packages(
                        + PY_STANDALONE_VERSION.split(".", 2)[1],
         ]
 
-    # 1) Install the kimi-cli wheel (no-deps first; we'll resolve deps via
-    #    the requirements file so version pins stay consistent).
-    rc = run_ok(pip_cmd_base + common_flags + [str(kimi_wheel)])
-    if rc != 0:
-        print(
-            f"  ! pip install of kimi-cli wheel returned {rc}; continuing "
-            f"so the rest of the layout is inspectable. Inspect {pip_log}."
-        )
-
-    # 2) Install windows-specific deps from requirements.
+    # Everything goes into ONE pip resolve: the local wheels and the
+    # Windows-only deps from requirements-windows.txt.
+    #
+    # The wheels have to share a command because kimi-cli depends on carryover,
+    # which exists only in this workspace — a resolve that sees just the
+    # kimi-cli wheel goes looking for it on PyPI and 404s, which is how the
+    # Windows build shipped without it. As direct requirements the local wheels
+    # satisfy those pins and the rest of the tree still comes from PyPI.
+    #
+    # requirements-windows.txt joins them for the mirror-image reason. As a
+    # second `--upgrade` install into the same --target it is a second resolve,
+    # and for any package both touch the later write wins: it asks for
+    # `Pillow>=10.0` while kimi-cli pins `pillow==12.2.0`, so the day a newer
+    # Pillow ships it would quietly replace the pinned one and leave
+    # kimi_cli-1.49.0.dist-info declaring a version that is not installed.
+    resolve = [str(w) for w in local_wheels]
     if requirements_file.exists():
-        rc = run_ok(pip_cmd_base + common_flags + ["-r", str(requirements_file)])
-        if rc != 0:
-            print(
-                f"  ! pip install of {requirements_file.name} returned {rc}; "
-                f"continuing. Inspect {pip_log}."
-            )
+        resolve += ["-r", str(requirements_file)]
+    elif is_windows():
+        raise RuntimeError(
+            f"{requirements_file} is missing. It carries pystray, pywebview, "
+            f"Pillow and playwright — without them the installed app cannot "
+            f"start."
+        )
     else:
-        print(f"  ! {requirements_file} missing; skipping deps install.")
+        print(f"  ! {requirements_file} missing; skipping the Windows deps.")
+
+    # Fatal on Windows, where this tree is the one that ships. The wheels pin
+    # each other (kimi-code wants kimi-cli==1.49.0, kimi-cli wants
+    # kosong[contrib]==0.55.0 and pykaos==0.9.0), so one stale pin makes the
+    # resolve unsatisfiable and installs nothing; carrying on from that only
+    # reaches verify_workspace_members(), which would report every member
+    # missing instead of the conflict pip actually printed.
+    rc = run_ok(pip_cmd_base + common_flags + resolve)
+    if rc != 0:
+        message = (
+            f"pip install failed (exit {rc}). The resolve covers kimi-cli, "
+            f"every workspace member and {requirements_file.name}; its error "
+            f"is at the end of {pip_log}."
+        )
+        if is_windows():
+            raise RuntimeError(message)
+        print(f"  ! {message}\n    Continuing so the rest of the layout is inspectable.")
+
+    verify_workspace_members(site_packages)
+
+
+def _is_installed(site_packages: Path, module: str) -> bool:
+    """Both shapes _top_level_modules() reports: a package dir and a lone .py.
+
+    Checking only for a directory would report every single-file module as
+    missing, turning the guard into a build that cannot succeed.
+    """
+    return (site_packages / module).is_dir() or (site_packages / f"{module}.py").is_file()
+
+
+def verify_workspace_members(site_packages: Path) -> None:
+    """Fail the build if a workspace member did not land in site-packages.
+
+    The backstop for a pip run that reports success without installing what we
+    need — a member dropped from a requirement, a resolve that quietly took a
+    different path. An outright resolve failure is already fatal on Windows
+    above; this catches the quiet cases, which is the shape the carryover bug
+    had: pip warned, the build carried on, and the installer launched into
+    ``ModuleNotFoundError: No module named 'carryover'``.
+
+    It asserts the module is importable by name, nothing more. It would not
+    catch a same-named package from PyPI standing in for a workspace member;
+    proving provenance would mean checking the dist-info against the wheel just
+    built. That hole is closed upstream instead — the local wheels are direct
+    requirements, so pip has nothing to substitute.
+
+    Fatal on Windows, where the tree we produce is the one that ships. Off
+    Windows the install is layout-only, so it stays a warning.
+    """
+    section("Verifying workspace members landed in site-packages")
+    modules = workspace_modules()
+    missing = [m for m in modules if not _is_installed(site_packages, m)]
+    if not missing:
+        print(f"  all present: {', '.join(modules)}")
+        return
+    missing_list = ", ".join(missing)
+    if is_windows():
+        raise RuntimeError(
+            f"workspace member(s) absent from {site_packages}: {missing_list}. "
+            f"The installed app would raise ModuleNotFoundError on launch."
+        )
+    # Off Windows this is the expected outcome, not a warning worth acting on:
+    # the layout-only install adds `--only-binary :all:`, and kimi-cli requires
+    # ripgrepy==2.2.0, which PyPI publishes as an sdist only. The resolve
+    # therefore installs nothing and every member reads as missing. The macOS
+    # build pre-builds those wheels itself (THIRD_PARTY_SDIST_SPECS in
+    # build.py); until this one does the same, the dev layout stays partial and
+    # the guard is only meaningful on the Windows runner.
+    print(
+        f"  ! absent from {site_packages}: {missing_list}\n"
+        f"    Expected off Windows: the layout-only install is --only-binary, "
+        f"which cannot satisfy kimi-cli's sdist-only deps (ripgrepy). Not fatal "
+        f"here; the same result on Windows is."
+    )
 
 
 # ---- 5. playwright browsers ---------------------------------------------
@@ -973,7 +1210,8 @@ def main(argv: list[str]) -> int:
     cache_python = cache_dir / "python-standalone"
     pip_log = build_dir / "pip.log"
 
-    # Clean staging from a previous run, but keep the cache.
+    # Clean staging from a previous run. The python-standalone half of the
+    # cache survives; build_local_wheels() rebuilds the wheels half every run.
     if staging.exists():
         shutil.rmtree(staging)
     staging.mkdir(parents=True)
@@ -985,8 +1223,8 @@ def main(argv: list[str]) -> int:
     else:
         build_frontend(cfg)
 
-    # 2. kimi-cli wheel
-    kimi_wheel = build_kimi_wheel(cache_wheels)
+    # 2. kimi-cli + workspace member wheels
+    local_wheels = build_local_wheels(cache_wheels)
 
     # 3. Python runtime
     if cfg.skip_python_runtime and (runtime / "python").exists():
@@ -1002,7 +1240,7 @@ def main(argv: list[str]) -> int:
         python_exe=python_exe,
         site_packages=site_packages,
         requirements_file=ROOT / "requirements-windows.txt",
-        kimi_wheel=kimi_wheel,
+        local_wheels=local_wheels,
         pip_log=pip_log,
     )
 
@@ -1051,6 +1289,24 @@ def main(argv: list[str]) -> int:
         )
 
     print_summary(cfg, staging, launcher_exe, installer_exe, started_at)
+
+    # Exit non-zero when the thing this script exists to produce was not
+    # produced. build_launcher_exe() and run_inno_setup() both return None on
+    # failure (missing pyinstaller, missing or failing iscc), and both were
+    # only printed as warnings — so a release build whose Inno Setup install
+    # had partly failed exited 0, and the workflow noticed two steps later, in
+    # an ad-hoc `Get-ChildItem dist-win/*.exe` check, if at all. The macOS
+    # build raises on every equivalent failure.
+    #
+    # Only enforced on Windows: off it, PyInstaller and Inno Setup are skipped
+    # by design and the staging tree is the deliverable.
+    if is_windows():
+        if launcher_exe is None:
+            print("\n  ! launcher .exe was not produced.")
+            return 1
+        if not cfg.skip_installer and installer_exe is None:
+            print("\n  ! installer .exe was not produced.")
+            return 1
     return 0
 
 

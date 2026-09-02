@@ -4,10 +4,13 @@ import base64
 import hashlib
 import importlib.util
 import json
+import re
 import sqlite3
 import sys
 import types
 from pathlib import Path
+
+import pytest
 from types import SimpleNamespace
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -595,3 +598,253 @@ class TestOnlyOneKimiCli:
             "the version is read from here at import time"
         )
         assert (packages / "fastapi").exists(), "dependencies are why the wheel is installed"
+
+
+class TestWorkspaceMembersReachTheInstaller:
+    """carryover has to be installed, not inherited.
+
+    It used to be a vendored copy inside `src/kimi_cli/`, so
+    copy_kimi_cli_source() carried it into the runtime for free. As a workspace
+    member it lives in `kimi-cli/packages/carryover/` and is published nowhere,
+    so a pip resolve that sees only the kimi-cli wheel goes looking for it on
+    PyPI, gets a 404, and installs nothing — and the build only warned. The
+    shipped installer launched to `ModuleNotFoundError: No module named
+    'carryover'` on the first import of `kimi_cli.utils.string`.
+    """
+
+    def test_every_workspace_member_is_built(self) -> None:
+        """The list comes from the file that declares it, not from a copy here.
+
+        Deliberately not an ordering assertion. The workspace order is not a
+        dependency order — kimi-code depends on kimi-cli and is declared before
+        it — and pinning one here would enshrine a property the build does not
+        have and does not need: every wheel goes into a single pip resolve.
+        """
+        members = [d.name for d in build_windows.workspace_dirs()]
+
+        assert "carryover" in members, "the member that PyPI cannot supply"
+        assert "kimi-cli" in members
+        assert build_windows.workspace_modules().count("carryover") == 1
+
+    def test_the_wheels_all_go_into_one_pip_resolve(self, monkeypatch, tmp_path) -> None:
+        """Separate commands cannot satisfy a local pin from a local wheel.
+
+        pip only resolves `carryover` from the workspace when that wheel is a
+        direct requirement of the same command as the kimi-cli wheel that
+        depends on it. Split across two invocations, the first goes to PyPI and
+        404s — the bug this whole path exists to prevent.
+        """
+        commands: list[list[str]] = []
+
+        def record(cmd: list[str], **kwargs: object) -> int:
+            commands.append(list(cmd))
+            return 0
+
+        monkeypatch.setattr(build_windows, "is_windows", lambda: True)
+        monkeypatch.setattr(build_windows, "run_ok", record)
+        monkeypatch.setattr(build_windows, "verify_workspace_members", lambda sp: None)
+        wheels = [
+            tmp_path / "carryover-0.1.0-py3-none-any.whl",
+            tmp_path / "kimi_cli-1.49.0-py3-none-any.whl",
+        ]
+        requirements = tmp_path / "requirements-windows.txt"
+        requirements.write_text("", encoding="utf-8")
+
+        build_windows.install_site_packages(
+            python_exe=tmp_path / "python.exe",
+            site_packages=tmp_path / "site-packages",
+            requirements_file=requirements,
+            local_wheels=wheels,
+            pip_log=tmp_path / "pip.log",
+        )
+
+        carrying = [c for c in commands if any(str(w) in c for w in wheels)]
+        assert len(carrying) == 1, "one resolve, or the local pins cannot be met"
+        assert all(str(w) in carrying[0] for w in wheels)
+        assert str(requirements) in carrying[0], (
+            "the Windows deps share the resolve: a second --upgrade install "
+            "into the same --target lets Pillow>=10.0 overwrite kimi-cli's "
+            "pinned pillow==12.2.0"
+        )
+        assert len(commands) == 1, "one pip invocation, so nothing resolves twice"
+
+    def test_a_missing_member_fails_the_windows_build(self, monkeypatch, tmp_path) -> None:
+        site_packages = tmp_path / "site-packages"
+        site_packages.mkdir()
+        for module in build_windows.workspace_modules():
+            if module != "carryover":
+                (site_packages / module).mkdir()
+        monkeypatch.setattr(build_windows, "is_windows", lambda: True)
+
+        with pytest.raises(RuntimeError, match="carryover"):
+            build_windows.verify_workspace_members(site_packages)
+
+    def test_a_complete_install_passes(self, monkeypatch, tmp_path) -> None:
+        site_packages = tmp_path / "site-packages"
+        for module in build_windows.workspace_modules():
+            (site_packages / module).mkdir(parents=True)
+        monkeypatch.setattr(build_windows, "is_windows", lambda: True)
+
+        build_windows.verify_workspace_members(site_packages)
+
+    def test_a_missing_submodule_says_so(self, monkeypatch, tmp_path) -> None:
+        """The hint has to be reachable, which means reading the list lazily.
+
+        As a module-level constant this read ran at import, so a clone without
+        submodules raised a bare FileNotFoundError before any of the build's
+        own error handling — and took this test module down at collection.
+        """
+        monkeypatch.setattr(build_windows, "KIMI_CLI", tmp_path / "kimi-cli")
+
+        with pytest.raises(RuntimeError, match="git submodule update"):
+            build_windows.workspace_dirs()
+
+    def test_missing_win_deps_fail_the_windows_build(self, monkeypatch, tmp_path) -> None:
+        """requirements-windows.txt carries what the app needs to even start.
+
+        verify_workspace_members() cannot cover for it: it inspects workspace
+        members only, so losing pywebview still leaves it reporting "all
+        present", the installer builds green, and the app dies on launch with
+        ModuleNotFoundError: No module named 'webview'.
+        """
+        monkeypatch.setattr(build_windows, "is_windows", lambda: True)
+        monkeypatch.setattr(build_windows, "run_ok", lambda cmd, **kw: 0)
+
+        with pytest.raises(RuntimeError, match="pywebview"):
+            build_windows.install_site_packages(
+                python_exe=tmp_path / "python.exe",
+                site_packages=tmp_path / "site-packages",
+                requirements_file=tmp_path / "requirements-windows.txt",
+                local_wheels=[tmp_path / "carryover-0.1.0-py3-none-any.whl"],
+                pip_log=tmp_path / "pip.log",
+            )
+
+    def test_a_glob_member_is_not_blamed_on_submodules(self, monkeypatch, tmp_path) -> None:
+        """uv allows `members = ["packages/*"]`; this build reads them literally.
+
+        Left alone, the glob becomes a path that never exists and the build
+        tells the developer to re-init submodules that are already there.
+        """
+        kimi = tmp_path / "kimi-cli"
+        kimi.mkdir()
+        (kimi / "pyproject.toml").write_text(
+            '[tool.uv.workspace]\nmembers = ["packages/*"]\n', encoding="utf-8"
+        )
+        monkeypatch.setattr(build_windows, "KIMI_CLI", kimi)
+
+        with pytest.raises(RuntimeError, match="glob workspace members"):
+            build_windows.workspace_dirs()
+
+    def test_a_failed_resolve_fails_the_windows_build(self, monkeypatch, tmp_path) -> None:
+        """pip's own error must surface, not six members reported missing.
+
+        The wheels pin each other, so one stale pin makes the resolve
+        unsatisfiable and installs nothing. Carrying on from there reaches
+        verify_workspace_members(), whose message describes the symptom and
+        loses the conflict pip actually printed.
+        """
+        monkeypatch.setattr(build_windows, "is_windows", lambda: True)
+        monkeypatch.setattr(build_windows, "run_ok", lambda cmd, **kw: 1)
+        pip_log = tmp_path / "pip.log"
+        # Present so the assertion can only be about the failed resolve, not
+        # about which input install_site_packages happens to validate first.
+        requirements = tmp_path / "requirements-windows.txt"
+        requirements.write_text("", encoding="utf-8")
+
+        with pytest.raises(RuntimeError, match=re.escape(str(pip_log))):
+            build_windows.install_site_packages(
+                python_exe=tmp_path / "python.exe",
+                site_packages=tmp_path / "site-packages",
+                requirements_file=requirements,
+                local_wheels=[tmp_path / "carryover-0.1.0-py3-none-any.whl"],
+                pip_log=pip_log,
+            )
+
+
+class TestBundledInterpreterIsPinned:
+    """The interpreter inside every installer must be verified, like busybox.
+
+    release.yml caches packaging/.cache, and a GitHub Actions cache is writable
+    by a workflow run on any branch of the repo. Before this, a substituted
+    archive was taken from the cache, had its digest printed and compared to
+    nothing, and was unpacked with an unfiltered extractall.
+    """
+
+    def test_the_archive_has_a_pinned_digest(self) -> None:
+        assert len(build_windows.PY_STANDALONE_SHA256) == 64
+        assert set(build_windows.PY_STANDALONE_SHA256) <= set("0123456789abcdef")
+
+    def test_a_mismatched_archive_is_rejected_and_evicted(self, monkeypatch, tmp_path) -> None:
+        """A bad archive must fail the build and not survive in the cache.
+
+        Leaving it behind would make the next run take the `tar_path.exists()`
+        branch and fail on the same bytes forever.
+        """
+        cache = tmp_path / "cache"
+        cache.mkdir()
+        tar_name = (
+            f"cpython-{build_windows.PY_STANDALONE_VERSION}"
+            f"+{build_windows.PY_STANDALONE_TAG}"
+            f"-{build_windows.PY_STANDALONE_TARGET}.tar.gz"
+        )
+        impostor = cache / tar_name
+        impostor.write_bytes(b"not the interpreter you pinned")
+
+        with pytest.raises(RuntimeError, match="sha256 mismatch"):
+            build_windows.fetch_python_runtime(cache, tmp_path / "runtime")
+
+        assert not impostor.exists(), "a rejected archive must not stay cached"
+
+    def test_extraction_refuses_a_traversing_member(self, monkeypatch, tmp_path) -> None:
+        """filter='data' is what stops a crafted archive writing outside dest."""
+        import tarfile
+
+        cache = tmp_path / "cache"
+        cache.mkdir()
+        tar_name = (
+            f"cpython-{build_windows.PY_STANDALONE_VERSION}"
+            f"+{build_windows.PY_STANDALONE_TAG}"
+            f"-{build_windows.PY_STANDALONE_TARGET}.tar.gz"
+        )
+        payload = tmp_path / "payload"
+        payload.write_bytes(b"pwned")
+        with tarfile.open(cache / tar_name, "w:gz") as tar:
+            tar.add(payload, arcname="../escaped.txt")
+        # Skip the digest gate; this test is about the extraction step.
+        monkeypatch.setattr(
+            build_windows, "_sha256", lambda p: build_windows.PY_STANDALONE_SHA256
+        )
+
+        with pytest.raises(tarfile.OutsideDestinationError):
+            build_windows.fetch_python_runtime(cache, tmp_path / "runtime")
+
+        assert not (tmp_path / "escaped.txt").exists()
+
+
+class TestAFailedBuildExitsNonZero:
+    """A build that produced no installer must not report success.
+
+    build_launcher_exe() and run_inno_setup() return None on failure — missing
+    pyinstaller, missing or failing iscc — and both were only warned about, so
+    `python build_windows.py` exited 0 with nothing in dist-win/. The release
+    workflow only caught it later, in an ad-hoc Get-ChildItem check.
+    """
+
+    def test_a_missing_installer_is_a_failure_on_windows(self) -> None:
+        import inspect
+
+        source = inspect.getsource(build_windows.main)
+        tail = source[source.index("print_summary(cfg, staging"):]
+
+        assert "return 1" in tail, "main must fail when no installer was produced"
+        assert "installer_exe is None" in tail
+        assert "launcher_exe is None" in tail
+
+    def test_the_check_is_scoped_to_windows(self) -> None:
+        """Off Windows those steps are skipped by design; the tree is the output."""
+        import inspect
+
+        source = inspect.getsource(build_windows.main)
+        tail = source[source.index("print_summary(cfg, staging"):]
+
+        assert "if is_windows():" in tail
