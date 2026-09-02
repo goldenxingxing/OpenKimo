@@ -251,17 +251,34 @@ onboard_env() {
 
   # ---- Sandbox Resources ----
   section "Sandbox 资源限制 (回车使用默认)"
+  # 只问真正会被执行的三项。SANDBOX_DISK_LIMIT / MAX_SESSION_CONTAINERS /
+  # SANDBOX_TIMEOUT_SECONDS 在 kimi-cli/src、kimi-cli/packages、app/ 和
+  # packaging/ 里都没有任何消费者（container.py 只施加 --cpus / --memory /
+  # --pids-limit，既没有容器数量上限，也没有 --storage-opt，更没有闲置回收）。
+  # 问了却不生效比不问更糟：运维会以为自己设了 50 个容器的上限和 1 小时的
+  # 空闲回收，然后被 200 个永不回收的容器把宿主机内存吃光。
   ask SANDBOX_CPU_LIMIT       "每个 session 容器的 CPU 核数" "2"
   ask SANDBOX_MEMORY_LIMIT    "每个 session 容器的内存限制" "4g"
-  ask SANDBOX_DISK_LIMIT      "每个 session 容器的磁盘限制" "10g"
-  ask MAX_SESSION_CONTAINERS  "最大同时运行的 session 容器数" "50"
-  ask SANDBOX_TIMEOUT_SECONDS "容器自动销毁超时 (秒)"        "86400"
+  ask SANDBOX_PID_LIMIT       "每个 session 容器的进程数上限" "1000"
 
   # ---- Optional Mounts ----
   section "可选挂载 (留空跳过)"
   ask CUSTOM_SKILLS_HOST_PATH "自定义 Skill 目录绝对路径" ""
   ask HF_CACHE_HOST_PATH      "HuggingFace 缓存目录绝对路径" ""
   ask KIMI_SESSION_DATA_DIR   "Session 数据持久化目录" "$PROJECT_ROOT/data/sessions"
+
+# Single-quote a value for a .env file that is BOTH `source`d by
+# scripts/start.sh and parsed by `docker compose --env-file`. Both understand
+# single quotes; neither understands a bare value containing a space.
+#
+# Unquoted, a checkout under "~/My Projects/OpenKimo" wrote
+#   KIMI_SESSION_DATA_DIR=/Users/x/My Projects/OpenKimo/data/sessions
+# and start.sh's `source` parsed that as an assignment plus the command
+# `Projects/OpenKimo/data/sessions`, dying under `set -e` before starting
+# anything.
+envq() {
+  printf "'%s'" "$(printf '%s' "$1" | sed "s/'/'\\\\''/g")"
+}
 
   # ---- Write .env ----
   section "写入 .env"
@@ -270,39 +287,36 @@ onboard_env() {
 # 重新运行 ./scripts/deploy.sh 可重新生成
 
 # ---------------- LLM Providers ----------------
-LLM_PROVIDER=$LLM_PROVIDER
-LLM_THINKING=$LLM_THINKING
-LLM_TEMPERATURE=$LLM_TEMPERATURE
+LLM_PROVIDER=$(envq "$LLM_PROVIDER")
+LLM_THINKING=$(envq "$LLM_THINKING")
+LLM_TEMPERATURE=$(envq "$LLM_TEMPERATURE")
 
-KIMI_API_KEY=$KIMI_API_KEY
-KIMI_BASE_URL=$KIMI_BASE_URL
-KIMI_MODEL_NAME=$KIMI_MODEL_NAME
-KIMI_MODEL_MAX_CONTEXT_SIZE=$KIMI_MODEL_MAX_CONTEXT_SIZE
+KIMI_API_KEY=$(envq "$KIMI_API_KEY")
+KIMI_BASE_URL=$(envq "$KIMI_BASE_URL")
+KIMI_MODEL_NAME=$(envq "$KIMI_MODEL_NAME")
+KIMI_MODEL_MAX_CONTEXT_SIZE=$(envq "$KIMI_MODEL_MAX_CONTEXT_SIZE")
 
-OPENAI_API_KEY=$OPENAI_API_KEY
-OPENAI_BASE_URL=$OPENAI_BASE_URL
+OPENAI_API_KEY=$(envq "$OPENAI_API_KEY")
+OPENAI_BASE_URL=$(envq "$OPENAI_BASE_URL")
 
-ANTHROPIC_API_KEY=$ANTHROPIC_API_KEY
-ANTHROPIC_BASE_URL=$ANTHROPIC_BASE_URL
+ANTHROPIC_API_KEY=$(envq "$ANTHROPIC_API_KEY")
+ANTHROPIC_BASE_URL=$(envq "$ANTHROPIC_BASE_URL")
 
 # ---------------- Web Server ----------------
-KIMI_WEB_PORT=$KIMI_WEB_PORT
-KIMI_WEB_SESSION_TOKEN=$KIMI_WEB_SESSION_TOKEN
+KIMI_WEB_PORT=$(envq "$KIMI_WEB_PORT")
+KIMI_WEB_SESSION_TOKEN=$(envq "$KIMI_WEB_SESSION_TOKEN")
 KIMI_WEB_ALLOWED_ORIGINS=*
 KIMI_WEB_ENFORCE_ORIGIN=false
-KIMI_WEB_RESTRICT_SENSITIVE_APIS=$KIMI_WEB_RESTRICT_SENSITIVE_APIS
+KIMI_WEB_RESTRICT_SENSITIVE_APIS=$(envq "$KIMI_WEB_RESTRICT_SENSITIVE_APIS")
 KIMI_WEB_MAX_PUBLIC_PATH_DEPTH=6
-KIMI_WEB_LAN_ONLY=$KIMI_WEB_LAN_ONLY
+KIMI_WEB_LAN_ONLY=$(envq "$KIMI_WEB_LAN_ONLY")
 
 # ---------------- Sandbox ----------------
-SANDBOX_IMAGE=kimi-agent-sandbox:latest
+SANDBOX_IMAGE=ghcr.io/goldenxingxing/kimi-agent-sandbox:latest
 SANDBOX_WORK_DIR=/app
-MAX_SESSION_CONTAINERS=$MAX_SESSION_CONTAINERS
-SANDBOX_CPU_LIMIT=$SANDBOX_CPU_LIMIT
-SANDBOX_MEMORY_LIMIT=$SANDBOX_MEMORY_LIMIT
-SANDBOX_DISK_LIMIT=$SANDBOX_DISK_LIMIT
-SANDBOX_PID_LIMIT=1000
-SANDBOX_TIMEOUT_SECONDS=$SANDBOX_TIMEOUT_SECONDS
+SANDBOX_CPU_LIMIT=$(envq "$SANDBOX_CPU_LIMIT")
+SANDBOX_MEMORY_LIMIT=$(envq "$SANDBOX_MEMORY_LIMIT")
+SANDBOX_PID_LIMIT=$(envq "$SANDBOX_PID_LIMIT")
 
 # ---------------- Feature Flags ----------------
 ENABLE_BROWSER=true
@@ -311,9 +325,9 @@ ENABLE_SHELL_SANDBOX=true
 BLOCK_DANGEROUS_COMMANDS=true
 
 # ---------------- Optional Mounts ----------------
-CUSTOM_SKILLS_HOST_PATH=$CUSTOM_SKILLS_HOST_PATH
-HF_CACHE_HOST_PATH=$HF_CACHE_HOST_PATH
-KIMI_SESSION_DATA_DIR=$KIMI_SESSION_DATA_DIR
+CUSTOM_SKILLS_HOST_PATH=$(envq "$CUSTOM_SKILLS_HOST_PATH")
+HF_CACHE_HOST_PATH=$(envq "$HF_CACHE_HOST_PATH")
+KIMI_SESSION_DATA_DIR=$(envq "$KIMI_SESSION_DATA_DIR")
 EOF
   chmod 600 "$ENV_FILE"
   ok "已写入 $ENV_FILE (权限 600)"
@@ -330,7 +344,7 @@ build_and_up() {
   section "获取镜像与启动"
 
   local _use_prebuilt _up
-  ask_yn _use_prebuilt "使用预构建镜像（从 ghcr.io 拉取，无需本地编译）？${C_DIM} 选 N 则本地构建${C_RESET}" "y"
+  ask_yn _use_prebuilt "使用预构建镜像（从 ghcr.io 拉取，无需本地编译）？ 选 N 则本地构建" "y"
 
   if [ "$_use_prebuilt" = "true" ]; then
     info "拉取预构建镜像…"
@@ -342,7 +356,7 @@ build_and_up() {
     ok "镜像构建完成"
   fi
 
-  ask_yn _up "现在执行 ${C_BOLD}$COMPOSE_CMD up -d${C_RESET}？" "y"
+  ask_yn _up "现在执行 $COMPOSE_CMD up -d？" "y"
   if [ "$_up" = "true" ]; then
     $COMPOSE_CMD --env-file "$ENV_FILE" -f "$COMPOSE_FILE" up -d
     ok "容器已启动"
@@ -355,8 +369,16 @@ build_and_up() {
 # ---------------- Summary ----------------
 print_summary() {
   local port token
-  port="$(grep -E '^KIMI_WEB_PORT=' "$ENV_FILE" | cut -d= -f2)"
-  token="$(grep -E '^KIMI_WEB_SESSION_TOKEN=' "$ENV_FILE" | cut -d= -f2)"
+  # -f2- keeps a value containing '=' (base64 padding is the common case);
+  # `|| true` because a grep miss is exit 1 and, under `set -euo pipefail`,
+  # that killed the script here — after `up -d` had already succeeded, so a
+  # working deploy printed no URL and looked failed.
+  # The tr strips the surrounding single quotes envq() writes.
+  read_env_value() {
+    grep -E "^$1=" "$ENV_FILE" | head -1 | cut -d= -f2- | sed "s/^'//; s/'$//" || true
+  }
+  port="$(read_env_value KIMI_WEB_PORT)"
+  token="$(read_env_value KIMI_WEB_SESSION_TOKEN)"
 
   section "部署完成 🎉"
   printf "  Web UI:    ${C_CYAN}http://localhost:%s${C_RESET}\n" "${port:-5494}"

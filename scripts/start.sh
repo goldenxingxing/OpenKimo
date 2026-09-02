@@ -132,8 +132,12 @@ start_local() {
     # Validate kimi_cli is importable; add repo src to PYTHONPATH if needed
     if ! "$PYTHON" -c "import kimi_cli" &>/dev/null 2>&1; then
         KIMI_SRC="$PROJECT_DIR/kimi-cli/src"
-        if [ -d "$KIMI_SRC" ] && PYTHONPATH="$KIMI_SRC:${PYTHONPATH}" "$PYTHON" -c "import kimi_cli" &>/dev/null 2>&1; then
-            export PYTHONPATH="$KIMI_SRC:${PYTHONPATH}"
+        # ${PYTHONPATH:+:...}: with PYTHONPATH unset, "$KIMI_SRC:" ends in a
+        # colon, and an empty path entry means the current directory — here
+        # whatever directory the user ran this script from, so a stray
+        # types.py or queue.py there would shadow the stdlib.
+        if [ -d "$KIMI_SRC" ] && PYTHONPATH="$KIMI_SRC${PYTHONPATH:+:$PYTHONPATH}" "$PYTHON" -c "import kimi_cli" &>/dev/null 2>&1; then
+            export PYTHONPATH="$KIMI_SRC${PYTHONPATH:+:$PYTHONPATH}"
             echo "Using kimi_cli from $KIMI_SRC"
         else
             echo "ERROR: kimi_cli package not found."

@@ -1,8 +1,6 @@
-version: "3.9"
-
 services:
   gateway:
-    image: ghcr.io/j0x7c4/kimi-agent-gateway:${KIMI_IMAGE_TAG:-latest}
+    image: ghcr.io/goldenxingxing/kimi-agent-gateway:${KIMI_IMAGE_TAG:-latest}
     pull_policy: if_not_present
     build:
       context: .
@@ -40,7 +38,7 @@ services:
 
       # Container Orchestration
       - DOCKER_NETWORK=kimi-agent-network
-      - SANDBOX_IMAGE=${SANDBOX_IMAGE:-ghcr.io/j0x7c4/kimi-agent-sandbox:latest}
+      - SANDBOX_IMAGE=${SANDBOX_IMAGE:-ghcr.io/goldenxingxing/kimi-agent-sandbox:latest}
       - SANDBOX_WORK_DIR=${SANDBOX_WORK_DIR:-/app}
       - MAX_SESSION_CONTAINERS=${MAX_SESSION_CONTAINERS:-50}
 
@@ -62,7 +60,15 @@ services:
       - KIMI_SHARE_DIR=/data/sessions
       # Host-side path for session data, forwarded so container.py can bind-mount
       # the same directory into each sandbox container via the Docker socket.
-      - KIMI_SESSION_DATA_DIR=${KIMI_SESSION_DATA_DIR:-./data/sessions}
+      #
+      # Must be ABSOLUTE. container.py passes this straight to `docker run -v
+      # <this>:/data/sessions`, and the docker CLI resolves a relative source
+      # against the *client's* cwd — which is /app inside this container, not
+      # the host. A relative value therefore mounts a different, empty
+      # directory into every sandbox: the worker silently cannot see the
+      # session and memory files the gateway writes. ${PWD} is substituted by
+      # Compose from the directory holding this file.
+      - KIMI_SESSION_DATA_DIR=${KIMI_SESSION_DATA_DIR:-${PWD}/data/sessions}
 
       # Agent Output Directory (inside sandbox containers)
       - KIMI_OUTPUT_DIR=${KIMI_OUTPUT_DIR:-/app/output}

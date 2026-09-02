@@ -25,7 +25,10 @@ mkdir -p "$KIMI_SESSIONS_DIR"
 export KIMI_WEB_STATIC_DIR="/app/src/kimi_cli/web/static"
 
 # Set Python path to include source
-export PYTHONPATH="/app/src:${PYTHONPATH}"
+# ${PYTHONPATH:+:...} so an unset PYTHONPATH does not leave a trailing
+# colon: an empty path entry means the cwd, putting /app on sys.path,
+# where a stray top-level module would shadow an installed one.
+export PYTHONPATH="/app/src${PYTHONPATH:+:$PYTHONPATH}"
 
 # Determine listen host/port
 HOST="${KIMI_WEB_HOST:-0.0.0.0}"
