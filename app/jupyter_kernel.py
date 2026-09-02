@@ -1,14 +1,17 @@
 import json
 import os
-from datetime import datetime
+import queue
 from typing import List, Optional, Dict, Any
 from pydantic import BaseModel
 import time
 import signal
 import psutil
-import socket
 
 from jupyter_client.manager import KernelManager
+
+#: How long a single iopub read blocks. Short so the loop can
+#: re-check the caller's deadline between reads.
+_IOPUB_POLL_SECONDS = 1.0
 
 
 class ExecutionResult(BaseModel):
@@ -18,28 +21,46 @@ class ExecutionResult(BaseModel):
     images: Optional[List[str]] = None
 
 
-def get_host_ip():
-    try:
-        hostname = socket.gethostname()
-        ip = socket.gethostbyname(hostname)
-        return ip
-    except:
-        return "0.0.0.0"
-
-
 class JupyterKernel:
     def __init__(self):
         self.km = None
         self.kc = None
         self.connection_file = None
+        self._starting = False
         self._start_kernel()
 
     def _start_kernel(self):
+        # _start_kernel() ends by running init_code through execute(), and
+        # execute() calls _ensure_kernel_alive(), which calls _start_kernel()
+        # again on any failure. With no guard that is unbounded mutual
+        # recursion: a kernel that reliably fails its init — the font-cache
+        # rebuild in init_code outrunning the timeout on a cold container, say
+        # — respawned a kernel process per level and ended in RecursionError,
+        # while kernel_server's lifespan never yielded and the container never
+        # passed its healthcheck.
+        if self._starting:
+            raise RuntimeError("kernel start already in progress; refusing to recurse")
+        self._starting = True
+        try:
+            self._start_kernel_locked()
+        finally:
+            self._starting = False
+
+    def _start_kernel_locked(self):
         try:
             if self.km:
                 self.shutdown()
 
-            self.km = KernelManager(ip=get_host_ip())
+            # Loopback, which is jupyter_client's own default. This used to
+            # bind the container's routable bridge IP (and "0.0.0.0" whenever
+            # the lookup raised), which puts all five kernel sockets on
+            # kimi-agent-network: any other sandbox could read this kernel's
+            # connection file — HMAC key included — off the unauthenticated
+            # /kernel/connection endpoint and sign its own execute_request
+            # into another user's session. jupyter_client documents the hazard
+            # on the ip argument itself. Everything that legitimately talks to
+            # this kernel (the worker, kernel_server) runs in this container.
+            self.km = KernelManager()
             self.km.start_kernel()
             self.connection_file = self.km.connection_file
             self.kc = self.km.client()
@@ -123,11 +144,15 @@ plt.rcParams['axes.unicode_minus'] = False
             if not self.km.is_alive():
                 raise Exception("Kernel is not alive")
 
-            # 检查 kernel 是否响应
-            try:
-                self.kc.kernel_info()
-            except Exception:
-                raise Exception("Kernel is not responding")
+            # 检查 kernel 是否响应。
+            # 这里原本调 self.kc.kernel_info()，但那是 send-only 的
+            # (jupyter_client 8.10 KernelClient.kernel_info: 发一条
+            # kernel_info_request 就返回 msg_id，不等回复)，所以它几乎不会抛，
+            # 这个「响应性检查」从来没生效过，只是每次调用都往队列里堆一条没人
+            # 读的回复。心跳通道才是真正的存活信号。
+            hb = getattr(self.kc, "hb_channel", None)
+            if hb is not None and not hb.is_beating():
+                raise Exception("Kernel is not responding (heartbeat stopped)")
 
         except Exception as e:
             print(f"Kernel check failed: {str(e)}")
@@ -149,20 +174,41 @@ plt.rcParams['axes.unicode_minus'] = False
             error = None
             images = []
             start_time = time.time()
-            removed_prefix = False
 
             while True:
-                try:
-                    if time.time() - start_time > timeout:
-                        return ExecutionResult(
-                            success=False,
-                            output="",
-                            error=f"Executing code timed out, timeout: {timeout} seconds",
-                            images=[],
-                        )
+                if time.time() - start_time > timeout:
+                    return ExecutionResult(
+                        success=False,
+                        output="",
+                        error=f"Executing code timed out, timeout: {timeout} seconds",
+                        images=[],
+                    )
 
-                    msg = self.kc.get_iopub_msg(timeout=timeout + 1)
+                try:
+                    # Poll in short slices. The read used to block for
+                    # `timeout + 1`, i.e. past the deadline checked above, so
+                    # the clean timeout return was unreachable: the read
+                    # outlived the budget and the loop only ever left through
+                    # the exception path.
+                    msg = self.kc.get_iopub_msg(timeout=_IOPUB_POLL_SECONDS)
+                except queue.Empty:
+                    # A quiet interval, not a failure. The old test was
+                    # `str(e) == "Timeout waiting for message"`, which can never
+                    # be true — get_iopub_msg raises queue.Empty, whose str()
+                    # is "" — so every quiet interval was re-raised, the outer
+                    # handler restarted the kernel, and the user's state was
+                    # wiped mid-execution.
+                    continue
+
+                try:
                     msg_type = msg["header"]["msg_type"]
+
+                    # Only this execution's output. Nothing filtered by parent
+                    # before, so leftover messages from an abandoned earlier
+                    # run — a cell that timed out and kept printing — were
+                    # attributed to whatever ran next.
+                    if msg.get("parent_header", {}).get("msg_id") != msg_id:
+                        continue
 
                     if msg_type == "stream":
                         # 直接添加 stream 输出，不需要清理
@@ -189,15 +235,14 @@ plt.rcParams['axes.unicode_minus'] = False
                                 output.append(text)
 
                     if (
-                        msg["parent_header"]["msg_id"] == msg_id
-                        and msg_type == "status"
+                        msg_type == "status"
                         and msg["content"]["execution_state"] == "idle"
                     ):
                         break
-                except Exception as e:
-                    if str(e) == "Timeout waiting for message":
-                        continue
-                    raise e
+                except (KeyError, TypeError):
+                    # A message shaped unlike anything handled above is not a
+                    # reason to tear down the kernel; skip it.
+                    continue
 
             # 合并输出，保持换行符
             final_output = "".join(output).strip()
@@ -269,14 +314,26 @@ plt.rcParams['axes.unicode_minus'] = False
                 except Exception as e:
                     print(f"Error sending signal to kernel process: {str(e)}")
 
-            # 也可以通过 jupyter client 发送中断
+            # 也可以通过 jupyter client 发送中断。
+            # `except (AttributeError, Exception)` 等价于 `except Exception`，
+            # 而且把失败直接丢掉：控制通道已死时这里静默失败，接口却仍然回
+            # "Kernel interrupted successfully"，调用方以为正在运行的 cell 已被
+            # 中断。现在把失败记录下来并反映到响应里。
+            client_error: str | None = None
             try:
                 if self.kc and hasattr(self.kc, "interrupt"):
                     self.kc.interrupt()  # type: ignore
-            except (AttributeError, Exception):
-                # 某些版本的 client 可能没有 interrupt 方法或者方法调用失败
-                pass
+            except Exception as exc:
+                client_error = str(exc)
+                print(f"Error interrupting via jupyter client: {client_error}")
 
+            if kernel_id is None and client_error is not None:
+                # Neither route worked: no PID to signal and the client raised.
+                return {
+                    "success": False,
+                    "message": f"Failed to interrupt kernel: {client_error}",
+                    "kernel_pid": None,
+                }
             return {
                 "success": True,
                 "message": "Kernel interrupted successfully",
@@ -446,10 +503,15 @@ plt.rcParams['axes.unicode_minus'] = False
 
             if self.kc:
                 try:
-                    # 尝试获取 kernel 信息来检查连接状态
-                    self.kc.kernel_info()
-                    status["client_connected"] = True
-                except:
+                    # 心跳，而不是 kernel_info()：后者是 send-only 的，永远不
+                    # 抛，所以 client_connected 恒为 True —— 一个死 kernel 也
+                    # 报「已连接」，而且每次查询都堆一条没人读的回复。
+                    hb = getattr(self.kc, "hb_channel", None)
+                    status["client_connected"] = bool(hb is not None and hb.is_beating())
+                except Exception:
+                    # Not a bare `except:` — that also swallowed
+                    # KeyboardInterrupt and SystemExit, so a SIGINT delivered
+                    # while this ran was absorbed and the shutdown lost.
                     status["client_connected"] = False
 
             return {"success": True, **status}
@@ -474,4 +536,9 @@ plt.rcParams['axes.unicode_minus'] = False
             self.connection_file = None
 
 
-kernel = JupyterKernel()
+# Deliberately no module-level instance here. `kernel = JupyterKernel()` used
+# to sit at this line: importing this module spawned a kernel subprocess and
+# ran init_code (matplotlib's font-cache rebuild), and nothing ever read the
+# name. kernel_server.py's `from jupyter_kernel import JupyterKernel` executed
+# it, so every sandbox carried two kernels for its whole life and shut down
+# one — and an import could hang or raise for reasons unrelated to the server.

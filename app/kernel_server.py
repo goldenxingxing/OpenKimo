@@ -5,6 +5,7 @@ Jupyter Kernel Management Server
 """
 
 import logging
+import os
 from contextlib import asynccontextmanager
 from typing import Dict, Any, Optional
 
@@ -53,11 +54,13 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
-# 添加 CORS 中间件
+# CORS 中间件。allow_credentials 关闭：浏览器本来就拒绝
+# "allow_origins=* + credentials" 这个组合，所以打开它从未生效过，只是让这个
+# 无鉴权 API 看起来比实际更开放。本服务只监听回环，也没有浏览器端调用方。
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
-    allow_credentials=True,
+    allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -112,9 +115,13 @@ async def health_check():
         raise HTTPException(status_code=503, detail="Kernel not initialized")
 
     status = kernel_instance.get_kernel_status()
-    return JSONResponse(
-        status_code=200 if status.get("success") else 503, content=status
-    )
+    # `success` only reports that the status *query* worked — get_kernel_status
+    # returns success=True with kernel_alive=False for a kernel that has died.
+    # Gating on it alone made a dead kernel read as healthy to every probe,
+    # including Dockerfile.sandbox's HEALTHCHECK, so the container stayed
+    # "healthy" while no code could run in it.
+    healthy = bool(status.get("success")) and bool(status.get("kernel_alive"))
+    return JSONResponse(status_code=200 if healthy else 503, content=status)
 
 
 @app.post("/kernel/reset", response_model=ApiResponse)
@@ -143,8 +150,13 @@ async def reset_kernel():
             raise HTTPException(
                 status_code=500, detail=result.get("message", "Failed to reset kernel")
             )
+    except HTTPException:
+        # The failure branch above raises this deliberately; catching it here
+        # rewrapped the specific message as "Internal server error: 500: ..."
+        # and discarded the original traceback.
+        raise
     except Exception as e:
-        logger.error(f"重置 kernel 时发生错误: {str(e)}")
+        logger.exception("重置 kernel 时发生错误")
         raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
 
 
@@ -172,9 +184,30 @@ async def interrupt_kernel():
                 status_code=500,
                 detail=result.get("message", "Failed to interrupt kernel"),
             )
+    except HTTPException:
+        raise
     except Exception as e:
-        logger.error(f"中断 kernel 时发生错误: {str(e)}")
+        logger.exception("中断 kernel 时发生错误")
         raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
+
+
+#: Fields of the Jupyter connection file that are enough to authenticate to
+#: the kernel. `key` signs every message on the shell channel, so handing it
+#: out is handing out code execution.
+_CONNECTION_SECRET_FIELDS = frozenset({"key"})
+
+
+def _redact_connection_info(info: Dict[str, Any]) -> Dict[str, Any]:
+    """Drop the HMAC signing key from a connection-info payload.
+
+    The ports and transport are useful for diagnosing a wedged kernel; the key
+    is not, and anything entitled to it can read the connection file off disk
+    in this container.
+    """
+    return {
+        k: ("<redacted>" if k in _CONNECTION_SECRET_FIELDS else v)
+        for k, v in (info or {}).items()
+    }
 
 
 @app.get("/kernel/connection", response_model=ConnectionInfoResponse)
@@ -192,7 +225,9 @@ async def get_connection_info():
             return ConnectionInfoResponse(
                 success=True,
                 connection_file=result.get("connection_file"),
-                connection_info=result.get("connection_info", {}),
+                connection_info=_redact_connection_info(
+                    result.get("connection_info", {})
+                ),
                 kernel_alive=result.get("kernel_alive", False),
                 kernel_pid=result.get("kernel_pid"),
             )
@@ -203,8 +238,10 @@ async def get_connection_info():
                 message=result.get("message", "Failed to get connection info"),
                 kernel_alive=False,
             )
+    except HTTPException:
+        raise
     except Exception as e:
-        logger.error(f"获取连接信息时发生错误: {str(e)}")
+        logger.exception("获取连接信息时发生错误")
         raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
 
 
@@ -232,8 +269,10 @@ async def get_kernel_status():
                 status_code=500,
                 detail=result.get("message", "Failed to get kernel status"),
             )
+    except HTTPException:
+        raise
     except Exception as e:
-        logger.error(f"获取 kernel 状态时发生错误: {str(e)}")
+        logger.exception("获取 kernel 状态时发生错误")
         raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
 
 
@@ -259,15 +298,24 @@ async def get_connection_file_path():
                 status_code=500,
                 detail=result.get("message", "Failed to get connection file"),
             )
+    except HTTPException:
+        raise
     except Exception as e:
-        logger.error(f"获取连接文件路径时发生错误: {str(e)}")
+        logger.exception("获取连接文件路径时发生错误")
         raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
 
 
 @app.get("/kernel/debug")
 async def debug_kernel():
-    """调试 kernel 管理器状态（开发用）"""
+    """调试 kernel 管理器状态（开发用）。
+
+    默认关闭：它返回 kernel manager 的原始内部状态（路径、连接细节），
+    docstring 一直写着「开发用」，但此前是无条件注册的。设
+    ``KERNEL_SERVER_DEBUG=1`` 才启用。
+    """
     global kernel_instance
+    if os.environ.get("KERNEL_SERVER_DEBUG", "").lower() not in ("1", "true", "yes"):
+        raise HTTPException(status_code=404, detail="Not Found")
     if not kernel_instance:
         raise HTTPException(status_code=503, detail="Kernel not initialized")
 
@@ -283,7 +331,11 @@ if __name__ == "__main__":
     import argparse
 
     parser = argparse.ArgumentParser(description="Jupyter Kernel Management Server")
-    parser.add_argument("--host", default="0.0.0.0", help="Host to bind to")
+    # Loopback by default. Everything that talks to this server — the worker,
+    # the container healthcheck — runs inside this container; binding
+    # 0.0.0.0 published an unauthenticated kernel-management API to every
+    # other sandbox on kimi-agent-network.
+    parser.add_argument("--host", default="127.0.0.1", help="Host to bind to")
     parser.add_argument("--port", type=int, default=8888, help="Port to bind to")
     parser.add_argument("--reload", action="store_true", help="Enable auto-reload")
     parser.add_argument("--log-level", default="info", help="Log level")
