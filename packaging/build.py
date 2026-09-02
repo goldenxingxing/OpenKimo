@@ -717,6 +717,7 @@ def copy_runtimes(export_dir: Path, runtimes: Path) -> None:
     _drop_layered_kimi_cli(runtimes)
     _run_layer_postinstall(runtimes)
     make_layers_relocatable(runtimes)
+    make_wrappers_portable(runtimes)
 
 
 def _drop_layered_kimi_cli(runtimes: Path) -> None:
@@ -785,6 +786,65 @@ def _run_layer_postinstall(runtimes: Path) -> None:
         script = layer / "postinstall.py"
         if script.exists():
             run([str(py), str(script)], cwd=str(layer))
+
+
+#: The line venvstacks writes into every layer's bin/python wrapper. Its own
+#: comment states the constraint: "`readlink -f` ... is available on macOS 12.3
+#: and later".
+_READLINK_F_LINE = (
+    'script_dir="$(cd "$(dirname "$(readlink -f "$0")")" '
+    '1> /dev/null 2>&1 && pwd)"'
+)
+
+#: Portable replacement: resolve symlinks with a loop, the way
+#: cli-wrapper.sh.template already does. Same result on every macOS this app
+#: claims to support.
+_PORTABLE_SCRIPT_DIR = """\
+# Portable script_dir. venvstacks emits `readlink -f "$0"` here, which BSD
+# readlink only learned in macOS 12.3 — before that it prints "illegal option
+# -- f" to stderr and nothing to stdout, so dirname sees "", cd lands on the
+# process's cwd, and the test below fails with "Invalid wrapper script path:
+# <cwd>/python". The server is spawned with cwd=~/Library/Application Support/
+# <App>, which is exactly the path users saw. brand.toml advertises macOS 11.0
+# and tests/test_macos_deployment_target.py pins that floor deliberately so
+# Intel Macs are not shut out, so the app installs there and then cannot start
+# its server.
+_wrapper_target="$0"
+while [ -h "$_wrapper_target" ]; do
+    _wrapper_link="$(readlink "$_wrapper_target")"
+    case "$_wrapper_link" in
+        /*) _wrapper_target="$_wrapper_link" ;;
+        *)  _wrapper_target="$(dirname "$_wrapper_target")/$_wrapper_link" ;;
+    esac
+done
+script_dir="$(cd "$(dirname "$_wrapper_target")" 1> /dev/null 2>&1 && pwd)"\
+"""
+
+
+def make_wrappers_portable(runtimes: Path) -> None:
+    """Replace `readlink -f` in venvstacks' bin/python wrappers.
+
+    Every layer gets one, and each is the entry point for that layer's
+    interpreter — including the one app_main/server.py execs to start uvicorn.
+    """
+    section("Making layer wrappers portable (readlink -f)")
+    patched = 0
+    for wrapper in sorted(runtimes.glob("*/bin/python")):
+        if wrapper.is_symlink() or not wrapper.is_file():
+            continue
+        text = wrapper.read_text(encoding="utf-8")
+        if _READLINK_F_LINE not in text:
+            continue
+        mode = wrapper.stat().st_mode
+        wrapper.write_text(text.replace(_READLINK_F_LINE, _PORTABLE_SCRIPT_DIR), encoding="utf-8")
+        wrapper.chmod(mode)
+        patched += 1
+        print(f"  patched {wrapper.relative_to(runtimes)}")
+    if not patched:
+        # Not fatal: a venvstacks version that already resolves this portably
+        # is the good outcome. But say so, because silence here would also be
+        # what a renamed wrapper looks like.
+        print("  no wrapper used `readlink -f`; nothing to patch")
 
 
 def make_layers_relocatable(runtimes: Path) -> None:
