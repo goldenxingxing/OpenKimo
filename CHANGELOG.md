@@ -6,6 +6,34 @@ this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [v0.1.42] — 2026-09-02
+
+### Fixed
+
+- **macOS 12.3 以下的机器装上后服务器起不来**。表现是托盘一直 CRASHED，日志里：
+
+  ```
+  readlink: illegal option -- f
+  usage: readlink [-n] [file ...]
+  Invalid wrapper script path: /Users/<user>/Library/Application Support/OpenKimo/python
+  ```
+
+  venvstacks 为每个 layer 生成一个 `bin/python` wrapper，它自己的注释就写明了这个前提：
+
+  ```sh
+  # Note: `readlink -f` ... is available on macOS 12.3 and later
+  script_dir="$(cd "$(dirname "$(readlink -f "$0")")" 1> /dev/null 2>&1 && pwd)"
+  ```
+
+  12.3 以下的 BSD `readlink` 没有 `-f`：stderr 打一行 illegal option、stdout 为空，于是 `dirname ""` 得 `.`，`cd` 落到**进程的 cwd**，两行之后的 `test -f "$script_dir/python"` 失败。而 `app_main/server.py` 正是以 `cwd=~/Library/Application Support/<App>` 启动 uvicorn 的——这正是报错里那个路径。wrapper exit 1，服务器从未启动。
+
+  **不是架构问题，是系统版本问题。** 它看起来只发生在 Intel 机器上，只因为那些机器才是还停在 12.3 以下的；一台还在 11.x 的 Apple Silicon 同样会中。而这与应用自己的承诺冲突：`brand.toml` 写着 `min_macos_version = 11.0`，`tests/test_macos_deployment_target.py` 特意把这个下限压低并注明「要求更高会把停在 Monterey 的 Intel 机器全部挡在门外」——于是应用装得上，服务器却起不来。
+
+  构建新增 `make_wrappers_portable()`，把那一行换成 `cli-wrapper.sh.template` 里本来就在用的符号链接解析循环。已用真实产物加一个模拟 12.3 之前行为的 `readlink` 三向验证：修补前复现原报错，修补后在新旧两种 `readlink` 下都正常启动。回归测试会执行改写后的 wrapper，所以 venvstacks 升级重新引入 `readlink -f` 时会在 CI 就失败，而不是在用户机器上。
+
+  **影响 v0.1.41 及更早的所有 macOS 版本**；如果你的 macOS 在 12.3 以下，请升级到本版。
+
+
 ## [v0.1.41] — 2026-09-02
 
 一次全项目审查后的修复集。60 个首方文件、约 14.3k 行，由三条互相独立的路径各审一遍（内置 code review、OpenCodeReview、以及一批无上下文的独立 agent），取交叉命中和逐条复现后的结果。
