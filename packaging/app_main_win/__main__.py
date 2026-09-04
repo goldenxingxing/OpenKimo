@@ -32,7 +32,12 @@ import pystray
 from PIL import Image
 
 from . import dotenv_io, paths as paths_mod, seed_branding, single_instance, userenv
-from .server import ServerState, UvicornSupervisor, _resolve_port
+from .server import (
+    ServerState,
+    UvicornSupervisor,
+    _resolve_port,
+    request_config_reload,
+)
 
 log = logging.getLogger(__name__)
 
@@ -335,10 +340,14 @@ class OpenKimoApp:
             log.info("Settings requested restart; respawning uvicorn")
             threading.Thread(target=self.supervisor.restart, daemon=True).start()
         elif rc == 4:
-            # "Save without restart" — the supervisor doesn't need a kick,
-            # but if it's stopped (first-run flow), start it now.
+            # Saved. A running server applies it without being restarted --
+            # idle sessions at once, busy ones when their prompt finishes -- so
+            # nothing here has to end a session to deliver a setting. A stopped
+            # server (first-run flow) reads everything fresh when it starts.
             if self.supervisor.state in (ServerState.STOPPED, ServerState.CRASHED):
                 threading.Thread(target=self.supervisor.start, daemon=True).start()
+            else:
+                request_config_reload(self.paths)
 
     def _on_about(self, _icon, _item) -> None:
         # No native About panel on Windows; fall back to opening brand.json

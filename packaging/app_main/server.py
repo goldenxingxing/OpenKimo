@@ -132,6 +132,10 @@ def _build_env(p: AppPaths) -> dict[str, str]:
     env["OPENKIMO_SKILL_DIR"] = str(p.skill_dir)
     env["OPENKIMO_APP_DATA_DIR"] = str(p.app_support)
     env["OPENKIMO_WIKI_ROOT"] = str(p.wiki_dir)
+    # The server's own environment is frozen at spawn, and Settings can change
+    # what belongs in it. Telling it where the file is lets it re-read the file
+    # rather than be restarted for a changed API key.
+    env["OPENKIMO_ENV_FILE"] = str(p.env_file)
 
     # 3b. Our own stdio is UTF-8, whatever the host codepage says: the worker's
     # stderr is read back with .decode("utf-8"), and a model response containing
@@ -193,6 +197,32 @@ def _write_atomic(path: Path, text: str) -> None:
             tmp.unlink()
         except FileNotFoundError:
             pass
+
+
+#: Touched by Settings, polled by the server. A file rather than a signal so
+#: macOS and Windows use the same mechanism, and separate from `config.toml` so
+#: the server's own writes to that file cannot look like a request.
+RELOAD_SIGNAL_NAME = "reload.signal"
+
+
+def request_config_reload(p: AppPaths) -> bool:
+    """Ask a running server to apply the settings just written.
+
+    Idle sessions pick the change up at once and busy ones when their prompt
+    finishes, so nothing the user is waiting on is interrupted. Returns whether
+    the request was left where the server will find it; a server that is not
+    running does not need one, since it reads everything fresh at startup.
+    """
+    try:
+        path = p.app_support / RELOAD_SIGNAL_NAME
+        path.parent.mkdir(parents=True, exist_ok=True)
+        # The content is the timestamp so that two saves in the same second are
+        # still two distinct requests.
+        path.write_text(f"{time.time():.6f}\n", encoding="utf-8")
+    except OSError:
+        log.exception("could not write the config reload request")
+        return False
+    return True
 
 
 def _resolve_port(env: dict[str, str]) -> int:

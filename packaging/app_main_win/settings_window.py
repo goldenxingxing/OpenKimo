@@ -111,22 +111,14 @@ class Api:
                 continue
             clean[k] = "" if v is None else str(v)
 
-        # LLM settings only reach a session worker when it (re)starts, so a
-        # plain Save would leave every live session on the old provider
-        # config indefinitely. Promote to restart when an LLM key changed.
-        if not restart:
-            try:
-                current = dotenv_io.read_env(self.paths.env_file)
-                restart = any(
-                    (clean.get(k) or "") != (current.get(k) or "")
-                    for k in clean
-                    if k.startswith(("LLM_", "KIMI_API", "KIMI_BASE", "KIMI_MODEL",
-                                     "OPENAI_", "ANTHROPIC_"))
-                )
-                if restart:
-                    log.info("LLM config changed; promoting Save to Save & Restart")
-            except Exception:
-                log.exception("failed to diff LLM keys; leaving restart flag as-is")
+        # There used to be a rule here promoting Save to Save & Restart when any
+        # LLM key moved, because a setting could not otherwise reach a live
+        # session. The cost was that changing an API key -- or merely adding a
+        # provider -- restarted the server and killed whatever session was
+        # mid-turn. The running server applies a saved change itself now: idle
+        # sessions immediately, busy ones when their prompt finishes. `restart`
+        # arrives True only for the port, which no reload can deliver, and only
+        # after the user was asked.
 
         try:
             dotenv_io.write_env(self.paths.env_file, clean)

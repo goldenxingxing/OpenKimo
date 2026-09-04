@@ -15,6 +15,7 @@ from packaging.app_main.server import (  # noqa: F401
     ServerState,
     UvicornSupervisor,
     _resolve_port,
+    request_config_reload,
 )
 
 __all__ = [
@@ -25,4 +26,5 @@ __all__ = [
     "ServerState",
     "UvicornSupervisor",
     "_resolve_port",
+    "request_config_reload",
 ]

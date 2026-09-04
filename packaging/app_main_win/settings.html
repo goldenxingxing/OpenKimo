@@ -179,7 +179,7 @@
 <body>
   <div class="wrap">
     <h1>OpenKimo Settings</h1>
-    <p class="sub">Edits to your local <code>.env</code>. Save &amp; Restart applies changes immediately.</p>
+    <p class="sub">Edits to your local <code>.env</code>. Saving applies changes to idle sessions at once; a session that is working picks them up when it finishes.</p>
 
     <div class="panel">
       <h2>LLM</h2>
@@ -236,8 +236,7 @@
     <div class="actions">
       <button id="cancel">Cancel</button>
       <div class="right">
-        <button id="save">Save</button>
-        <button id="save_restart" class="primary">Save &amp; Restart Server</button>
+        <button id="save" class="primary">Save</button>
       </div>
     </div>
   </div>
@@ -269,6 +268,7 @@
     // the first provider. hasExplicitDefault gates the first-item fallback:
     // it is only allowed when neither config.toml nor .env names a default.
     let initialDefault = "";
+    let initialPort = "";
     let hasExplicitDefault = false;
 
     function providerCard(entry) {
@@ -425,6 +425,7 @@
         $("temperature").value = isNaN(temp) ? 0 : temp;
         syncTemperatureLabel();
         $("web_port").value = data.KIMI_WEB_PORT || "5494";
+        initialPort = $("web_port").value;
         $("session_token").value = data.KIMI_WEB_SESSION_TOKEN || "";
         $("lan_only").checked = (data.KIMI_WEB_LAN_ONLY || "").toLowerCase() === "true";
       } catch (e) {
@@ -487,7 +488,7 @@
       return updates;
     }
 
-    async function save(restart) {
+    async function save() {
       setError("");
       let updates;
       try {
@@ -496,8 +497,21 @@
         setError(e.message || String(e));
         return;
       }
+      // Everything else is applied to the running server without restarting
+      // it. The port cannot be: the socket is already bound. Restarting ends
+      // any session that is currently working, so it is offered, never taken.
+      let restart = false;
+      if ((updates.KIMI_WEB_PORT || "") !== (initialPort || "")) {
+        restart = window.confirm(
+          "Restart the server to use the new port?\n\n" +
+          "Everything else you changed is already in effect. The port (" +
+          (initialPort || "default") + " \u2192 " + updates.KIMI_WEB_PORT +
+          ") only changes when the server restarts, which ends any session " +
+          "that is currently working."
+        );
+      }
       try {
-        await window.pywebview.api.save_env(updates, !!restart);
+        await window.pywebview.api.save_env(updates, restart);
       } catch (e) {
         setError("Failed to save: " + e);
       }
@@ -528,8 +542,7 @@
       }
     });
 
-    $("save").addEventListener("click", () => save(false));
-    $("save_restart").addEventListener("click", () => save(true));
+    $("save").addEventListener("click", () => save());
     $("cancel").addEventListener("click", () => window.pywebview.api.cancel());
     window.addEventListener("pywebviewready", load);
   </script>

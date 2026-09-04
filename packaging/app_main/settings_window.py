@@ -2,7 +2,7 @@
 
 Layout: a vertical NSScrollView holds three sections (LLM / Web Server /
 Paths) separated by horizontal dividers. A sticky button bar at the bottom
-of the window provides Cancel / Save / Save & Restart Server.
+of the window provides Cancel / Save.
 
 All layout uses plain ``NSView`` + explicit Auto Layout edge anchors. We
 intentionally avoid ``NSStackView``, ``NSGridView`` and ``NSBox`` because
@@ -513,6 +513,14 @@ def _legacy_entries(values: dict[str, str]) -> list[dict[str, Any]]:
     return out
 
 
+def _read_bytes(path) -> bytes:  # noqa: ANN001
+    """Contents, or empty when there is no file yet. Never raises."""
+    try:
+        return path.read_bytes()
+    except OSError:
+        return b""
+
+
 # ---- controller ---------------------------------------------------------
 
 class SettingsController(NSWindowController):
@@ -557,34 +565,41 @@ class SettingsController(NSWindowController):
         self.window().performClose_(None)
 
     def onSave_(self, _sender):  # noqa: N802
-        self._save(False)
-
-    def onSaveRestart_(self, _sender):  # noqa: N802
-        self._save(True)
+        self._save()
 
     @objc.python_method
-    def _save(self, restart):
+    def _save(self):
+        """Save, and let the running server apply it without being restarted.
+
+        There used to be a second button, and a rule that promoted Save to
+        Save & Restart whenever any LLM key moved. Both existed because a
+        setting could not otherwise reach a live session -- and the cost was
+        that changing an API key, or merely adding a provider, killed whatever
+        session was mid-turn. The server applies a saved change on its own now:
+        idle sessions immediately, busy ones when their prompt finishes.
+
+        One setting is left that no reload can deliver, because the socket is
+        already bound: the port.
+        """
         try:
             updates = self._collect_updates()
         except ValueError as e:
             self._error(str(e))
             return
-        # LLM settings only reach a session worker when it (re)starts, so a
-        # plain Save would leave every live session on the old provider
-        # config indefinitely. Promote to restart when an LLM key changed.
-        if not restart:
-            try:
-                current = dotenv_io.read_env(self.paths_ref.env_file)
-                llm_keys = ("LLM_PROVIDERS", "LLM_DEFAULT_PROVIDER", *_LEGACY_LLM_KEYS)
-                restart = any(
-                    (updates.get(k) or "") != (current.get(k) or "")
-                    for k in llm_keys
-                    if k in updates
-                )
-                if restart:
-                    log.info("LLM config changed; promoting Save to Save & Restart")
-            except Exception:
-                log.exception("failed to diff LLM keys; leaving restart flag as-is")
+        try:
+            current = dotenv_io.read_env(self.paths_ref.env_file)
+        except Exception:
+            log.exception("failed to read .env; assuming the port is unchanged")
+            current = {}
+        port_changed = "KIMI_WEB_PORT" in updates and (updates.get("KIMI_WEB_PORT") or "") != (
+            current.get("KIMI_WEB_PORT") or ""
+        )
+        env_changed = any(
+            (value or "") != (current.get(key) or "") for key, value in updates.items()
+        )
+        toml_path = self.paths_ref.sessions_dir / "config.toml"
+        toml_before = _read_bytes(toml_path)
+        restart = False
         try:
             dotenv_io.write_env(self.paths_ref.env_file, updates)
         except Exception as e:
@@ -617,7 +632,6 @@ class SettingsController(NSWindowController):
                 default_keep = (updates.get("LLM_DEFAULT_PROVIDER") or "").strip()
                 if default_keep:
                     keep_names.add(default_keep)
-                toml_path = self.paths_ref.sessions_dir / "config.toml"
                 configtoml.prune(toml_path, keep_names, allow_empty=True)
                 configtoml.update_providers(toml_path, parsed)
                 configtoml.update_models(toml_path, parsed)
@@ -654,6 +668,17 @@ class SettingsController(NSWindowController):
             except Exception:
                 log.exception("failed to save the auto-compaction ratio")
 
+        # A save that wrote nothing new must do nothing: a reload restarts the
+        # idle workers, and doing that because someone opened Settings and
+        # pressed Save is churn the user did not ask for.
+        changed = env_changed or _read_bytes(toml_path) != toml_before
+        if port_changed:
+            restart = self._ask_restart_for_port(
+                current.get("KIMI_WEB_PORT") or "", updates.get("KIMI_WEB_PORT") or ""
+            )
+        if not (changed or restart):
+            self.window().performClose_(None)
+            return
         if self.on_save:
             try:
                 self.on_save(restart)
@@ -864,6 +889,27 @@ class SettingsController(NSWindowController):
         a.setMessageText_("Settings")
         a.setInformativeText_(msg)
         a.runModal()
+
+    @objc.python_method
+    def _ask_restart_for_port(self, old_port, new_port):
+        """Offer the restart a port change needs, rather than taking it.
+
+        Restarting is the one action here that interrupts a session mid-turn,
+        so it is never done on the user's behalf. Saying nothing is not an
+        option either: the server would keep serving the old port with no
+        indication why the new one is unreachable.
+        """
+        a = NSAlert.alloc().init()
+        a.setMessageText_("Restart the server to use the new port?")
+        a.setInformativeText_(
+            f"Everything else you changed is already in effect. The port "
+            f"({old_port or 'default'} \u2192 {new_port}) only changes when the "
+            f"server restarts, which ends any session that is currently working."
+        )
+        a.addButtonWithTitle_("Restart Server")
+        a.addButtonWithTitle_("Later")
+        # NSAlertFirstButtonReturn
+        return a.runModal() == 1000
 
 
 # ---- builders ----------------------------------------------------------
@@ -1487,16 +1533,17 @@ def build_controller(
     button_bar = _v()
     cancel = _button("Cancel", controller, "onCancel:")
     save = _button("Save", controller, "onSave:")
-    save_restart = _button("Save & Restart Server", controller, "onSaveRestart:")
-    save_restart.setKeyEquivalent_("\r")  # default action
+    # Return saves. It used to restart the server, which is the one action in
+    # this window that can interrupt a session mid-turn -- the wrong thing to
+    # put under the key people press without reading.
+    save.setKeyEquivalent_("\r")  # default action
 
     sep_top = _divider()
     button_bar.addSubview_(sep_top)
     button_bar.addSubview_(cancel)
     button_bar.addSubview_(save)
-    button_bar.addSubview_(save_restart)
 
-    for btn in (cancel, save, save_restart):
+    for btn in (cancel, save):
         btn.setContentHuggingPriority_forOrientation_(752, 0)
 
     NSLayoutConstraint.activateConstraints_([
@@ -1509,12 +1556,8 @@ def build_controller(
             button_bar.leadingAnchor(), BUTTONBAR_HMARGIN),
         cancel.centerYAnchor().constraintEqualToAnchor_(button_bar.centerYAnchor()),
 
-        save_restart.trailingAnchor().constraintEqualToAnchor_constant_(
-            button_bar.trailingAnchor(), -BUTTONBAR_HMARGIN),
-        save_restart.centerYAnchor().constraintEqualToAnchor_(button_bar.centerYAnchor()),
-
         save.trailingAnchor().constraintEqualToAnchor_constant_(
-            save_restart.leadingAnchor(), -8.0),
+            button_bar.trailingAnchor(), -BUTTONBAR_HMARGIN),
         save.centerYAnchor().constraintEqualToAnchor_(button_bar.centerYAnchor()),
     ])
 

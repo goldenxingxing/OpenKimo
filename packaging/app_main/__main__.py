@@ -25,7 +25,7 @@ from pathlib import Path
 import rumps
 
 from . import dotenv_io, paths as paths_mod, runtime_repair, seed_branding, userenv
-from .server import ServerState, UvicornSupervisor
+from .server import ServerState, UvicornSupervisor, request_config_reload
 
 log = logging.getLogger(__name__)
 
@@ -375,8 +375,17 @@ class OpenKimoApp(rumps.App):
             )
 
     def _on_settings_saved(self, restart: bool) -> None:
+        """Apply what was saved. Restart only when the user asked for one.
+
+        The reload path is why Settings no longer has to end a session to
+        change a setting: the running server re-reads what changed, applies it
+        to the sessions that are idle, and hands it to the busy ones when their
+        prompt finishes.
+        """
         if restart:
             threading.Thread(target=self.supervisor.restart, daemon=True).start()
+            return
+        request_config_reload(self.paths)
 
     def _on_about(self, _):
         try:
