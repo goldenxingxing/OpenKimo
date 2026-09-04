@@ -6,6 +6,75 @@ this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [v0.2.0] — 2026-09-05
+
+### Changed
+
+- **改配置不再重启服务，也不再打断正在工作的会话。** 以前 LLM 设置只有在 worker
+  重启时才会生效，所以桌面版 Settings 里有一条规则：只要任何一个 LLM 键变了，就把
+  普通的 Save 悄悄升级成 Save & Restart。代价是**新增一个 provider**——一个正在跑的
+  会话根本引用不到的东西——会重启整个服务，把 mid-turn 的对话直接杀掉，Web 端同时弹出
+  「暂时无法连接本地服务，服务可能正在重启」。那句提示是准确的，只是毫无帮助。
+
+  现在服务端自己应用改动，规则只有一条：**绝不打断繁忙会话**。
+
+  - 桌面端把一个请求文件放在服务端会去看的位置；`OPENKIMO_ENV_FILE` 告诉服务端该重读
+    哪个文件——它自己的环境在 spawn 时就冻住了。
+  - 服务进程重读 env。这一步是**删除 provider 能真正删掉**的前提：
+    `_build_global_config` 每个请求都会把「环境里有、config.toml 里没有」的 provider
+    补回文件，而每个 worker 又继承 `os.environ`。只刷新白名单内的键；端口刻意不在内。
+  - 空闲会话的 worker 立即重启，繁忙的记账，在它下一次 busy → idle 时结清。以前只是
+    「跳过」，于是一个没人重启的会话会永远停在旧配置上。
+  - 令牌和 LAN Only 改成每请求读 `app.state`，因此也无需重启即可生效。
+
+- **Settings 收敛成单个 Save 按钮。** 回车键从「Save & Restart Server」挪到「Save」——
+  重启是这个窗口里唯一会打断会话的动作，不该挂在人不看就按的键上。什么都没改的保存
+  现在什么都不做，而不是把所有空闲 worker 重启一遍。
+
+  端口是唯一一个 reload 送不到的设置（socket 已经 bind）。改端口会**询问**是否重启，
+  并说明其他改动都已生效、重启会中断正在工作的会话——只提供，不代做。
+
+  Windows 托盘版同步：`settings.html` 单个 Save，去掉 LLM 键 diff，退出码 4 现在会请求
+  一次 reload 而不是什么都不做。
+
+### Fixed
+
+- **对话消息区频繁闪烁。** 建立连接时会先清空消息列表，而 `ChatConversation` 在
+  `messages` 为空且状态为 submitted 时会把整个列表换成一个 spinner。对切换会话来说这是
+  对的，但**重连**走的是同一段代码：读者眼看着对话消失、转圈、再随历史重放整个重建。
+  于是任何一次抖动都会重绘整个消息区——而重连并不罕见（异常关闭会重试、流式静默 45 秒
+  触发 watchdog、`history_complete` 后 15 秒内没等到 `session_status` 会定时重连）。
+
+  现在清空推迟到替代内容真正开始到达时，与追加发生在同一个 tick，React 批处理，空列表
+  那一帧永远不会被画出来；历史确实为空的会话由 `history_complete` 负责清空。
+
+  这不改变重连的**频率**，只改变一次重连对读者的代价——那才是它可见的原因。
+
+- **未发送的输入会跟着人跑到别的会话里。** 输入框的文本和附件由 session 切换之上的
+  单个 provider 持有，所以是全局一份：在 A 会话里写半句，切到 B，那半句就出现在一个
+  它从不属于的对话里。现在按 session 分别保存；切换时的交接在 render 阶段完成，
+  不会闪过上一个会话的草稿，附件的 object URL 也是移交而非 revoke。
+
+  排队消息以前是切换时**直接丢弃**（为了避免发错会话）。现在同样按 session 存放，
+  切走的队列留在原地等你回来，删除会话时才连同队列一起忘掉。
+
+- **Wiki 写入几乎必然失败。** checkpoint-backed 的 remember 要求模型自己写出 `sources`，
+  而一条 `SourceRef` 需要 `workspace_id` 和精确的 sha256——模型算不出哈希。于是每一次
+  诚实的尝试都会拿到同一句无信息量的「not admissible」，只能再猜一遍。有个 session 为此
+  连试六次、耗掉四分钟，最后把刚产出的结论丢弃了。
+
+  现在 provenance 由 runtime 提供，`sources` 变成可选，工具描述、checkpoint block、系统
+  提示词都明确要求**不要**自己写。拒绝信息按五种原因分开，each 说清下一步。此外：
+  `explicit_user_durable` 类型的 checkpoint 以前**无解**（唯一凭据是本轮对话文本的哈希），
+  现在由 runtime 交回；中文里的 `O(1)/点` 被绝对路径检测误判为 POSIX 路径而整页被拒的
+  问题也修了。
+
+- **macOS 打包偶发产出无法迁移的 bundle。** 一次构建的两个 venv layer 的
+  `pyvenv.cfg` / `sitecustomize.py` 回到了绝对路径形式，指向构建机。成因未定位（追踪过
+  一次完整构建，顺序完全正确、未能复现），但这个不变量重述一次的代价是毫秒级：现在在
+  校验前再跑一次幂等的 relocatable 处理，任何迟到的写入者都不可能再让这样的包通过。
+  校验失败时会一并打出每个文件的写入时刻。
+
 ## [v0.1.42] — 2026-09-02
 
 ### Fixed
