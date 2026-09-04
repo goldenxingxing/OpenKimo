@@ -986,7 +986,15 @@ def verify_relocatable(bundle: Path) -> None:
         if any(needle in text for needle in needles):
             offenders.append(path)
     if offenders:
-        listed = "\n  ".join(str(p.relative_to(bundle)) for p in offenders[:10])
+        # The modification time is the diagnosis: written while the bundle was
+        # being assembled is one bug, written after it was finished is a
+        # different one, and reconstructing which from the outside afterwards
+        # costs far more than printing it here.
+        listed = "\n  ".join(
+            f"{p.relative_to(bundle)} "
+            f"(written {dt.datetime.fromtimestamp(p.stat().st_mtime):%H:%M:%S})"
+            for p in offenders[:10]
+        )
         raise RuntimeError(
             "these files pin the bundle to the build tree, so the installed app "
             f"breaks when it moves:\n  {listed}"
@@ -1339,6 +1347,14 @@ def main(argv: list[str]) -> int:
     bundle = create_app_bundle(cfg, export_dir)
     verify_min_macos(cfg, bundle)
     verify_bundle_matches_source(bundle)
+    # Re-assert immediately before the check rather than trusting the copy step
+    # to be the last writer. One build had both layers' generated files back in
+    # absolute form 34 seconds after `copy_runtimes` returned, while
+    # `verify_min_macos` was still walking the bundle — the content only
+    # `postinstall.py` writes, from an execution nothing here made. That was not
+    # reproducible, and the invariant is cheap to state twice: this pass is
+    # idempotent and takes milliseconds, so no late writer can strand a bundle.
+    make_layers_relocatable(bundle / "Contents" / "Resources" / "runtimes")
     verify_relocatable(bundle)
     sign_app(cfg, bundle)
     dmg = create_dmg(cfg, bundle)
