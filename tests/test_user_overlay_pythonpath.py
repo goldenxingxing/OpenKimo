@@ -22,12 +22,14 @@ from app_main import userenv  # noqa: E402
 
 
 def _paths(userbase: Path) -> SimpleNamespace:
-    """Only the four attributes env_overlay reads."""
+    """Only the attributes env_overlay reads."""
+    runtime = userbase.parent / "runtimes" / "cpython-3.12"
     return SimpleNamespace(
         userbase=userbase,
         userbase_bin=userbase / "bin",
         pip_conf=userbase.parent / "pip.conf",
-        bundled_python_bin=userbase.parent / "runtimes" / "cpython-3.12" / "bin",
+        bundled_python_root=runtime,
+        bundled_python_bin=runtime / "bin",
     )
 
 
@@ -59,4 +61,23 @@ def test_the_callers_own_pythonpath_is_kept(tmp_path, monkeypatch) -> None:
     assert env["PYTHONPATH"].split(os.pathsep) == [
         str(site_packages),
         "/somewhere/else",
+    ]
+
+
+def test_another_python_version_in_the_userbase_is_left_out(tmp_path) -> None:
+    """A userbase can hold more than one; only the bundled one may be used.
+
+    A dev run with a different interpreter leaves its own directory there, and
+    putting 3.14's site-packages on the 3.12 interpreter's path is worse than
+    leaving the overlay off — a C extension built for the other version raises
+    on import rather than simply being absent.
+    """
+    userbase = tmp_path / "userbase"
+    (userbase / "lib" / "python3.12" / "site-packages").mkdir(parents=True)
+    (userbase / "lib" / "python3.14" / "site-packages").mkdir(parents=True)
+
+    env = userenv.env_overlay(_paths(userbase))
+
+    assert env["PYTHONPATH"].split(os.pathsep) == [
+        str(userbase / "lib" / "python3.12" / "site-packages")
     ]

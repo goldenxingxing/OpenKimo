@@ -164,7 +164,7 @@ def setup(p: AppPaths) -> None:
 
 
 def user_site_packages(p: AppPaths) -> list[str]:
-    """The overlay's site-packages directories, spelled out.
+    """The overlay's site-packages directory, spelled out.
 
     PYTHONUSERBASE is only half the story. The server runs the *app-layer*
     interpreter, and that venv is built with ``ENABLE_USER_SITE = False`` — so
@@ -173,11 +173,25 @@ def user_site_packages(p: AppPaths) -> list[str]:
     install requests` therefore reported success, `openkimo python -c "import
     requests"` worked, and the agent inside the server still answered
     ModuleNotFoundError.
+
+    Only the directory matching the bundled interpreter. A userbase can hold
+    several — a dev run with a different Python leaves its own — and putting
+    another version's site-packages on this interpreter's path is worse than
+    leaving the overlay off: a C extension built for 3.14 does not load in
+    3.12, it raises where the import used to simply fail.
     """
-    lib = p.userbase / "lib"
-    if not lib.is_dir():
+    version = _bundled_python_version(p)
+    if version is None:
         return []
-    return [str(d) for d in sorted(lib.glob("python*/site-packages")) if d.is_dir()]
+    site_packages = p.userbase / "lib" / f"python{version}" / "site-packages"
+    return [str(site_packages)] if site_packages.is_dir() else []
+
+
+def _bundled_python_version(p: AppPaths) -> str | None:
+    """``3.12`` from a runtime layer named ``cpython-3.12``."""
+    name = p.bundled_python_root.name
+    _, _, version = name.partition("-")
+    return version or None
 
 
 def env_overlay(p: AppPaths) -> dict[str, str]:
