@@ -588,6 +588,14 @@ def _create_icon(cfg: BuildConfig, dest: Path) -> Path:
 
 def compile_launcher(cfg: BuildConfig, output: Path) -> None:
     section("Compiling C launcher")
+    # The version is baked into the launcher here, but venvstacks.toml names
+    # the runtime layer independently and nothing reconciles the two. With
+    # --py-version 3.13 the build passed every check it has — min-macos,
+    # bundle-matches-source, relocatable — and shipped a DMG whose app dies at
+    # `launcher: failed to dlopen`, looking for
+    # cpython-3.12/lib/libpython3.13.dylib.
+    _assert_runtime_version_matches(cfg.py_version)
+
     output.parent.mkdir(parents=True, exist_ok=True)
     run([
         "cc",
@@ -601,6 +609,26 @@ def compile_launcher(cfg: BuildConfig, output: Path) -> None:
 
 
 # ---- 5. Info.plist + brand.json + Credits + CLI wrapper -------------------
+
+def _assert_runtime_version_matches(py_version: str) -> None:
+    """Fail the build when venvstacks.toml ships a different Python.
+
+    They are two independent declarations of the same fact: the launcher gets
+    -DCPYTHON_PREFIX from --py-version / brand.toml, and venvstacks.toml names
+    the runtime layer it actually builds. A mismatch is only discovered by
+    launching the shipped app.
+    """
+    toml_path = ROOT / "venvstacks.toml"
+    text = toml_path.read_text(encoding="utf-8")
+    expected_layer = f'name = "cpython-{py_version}"'
+    expected_impl = f'python_implementation = "cpython@{py_version}.'
+    if expected_layer not in text or expected_impl not in text:
+        raise RuntimeError(
+            f"--py-version is {py_version} but {toml_path.name} does not build "
+            f"cpython-{py_version}; update the runtime layer there (name, "
+            f"python_implementation and the layers' `runtime =`) or drop the flag."
+        )
+
 
 def _data_url(path: Path, max_bytes: int) -> str:
     raw = path.read_bytes()
@@ -1039,6 +1067,15 @@ def create_app_bundle(cfg: BuildConfig, export_dir: Path) -> Path:
     elif export_dir and export_dir.exists():
         # When skipping venv, reuse whatever is on disk if available.
         copy_runtimes(export_dir, runtimes)
+    else:
+        # Nothing to reuse: --skip-venv on a tree that has never produced an
+        # export assembled a bundle with an empty runtimes/, then
+        # verify_min_macos cheerfully reported "0 Mach-O file(s) checked" and
+        # the build only fell over much later, on "no site-packages inside".
+        raise RuntimeError(
+            f"--skip-venv was passed but there is no venvstacks export at "
+            f"{export_dir}; run a full build once first, or drop --skip-venv."
+        )
 
     # A freshly built Vite dist always wins over the committed pre-built
     # artefact. Otherwise the version-string baked into the committed copy

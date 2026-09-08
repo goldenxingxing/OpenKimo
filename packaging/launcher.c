@@ -69,10 +69,16 @@ static char *resolve_runtimes_dir(void) {
     }
     char real_exe[MAXPATHLEN];
     if (realpath(exe_path, real_exe) == NULL) {
-        strncpy(real_exe, exe_path, MAXPATHLEN);
+        // strncpy stops at the buffer size without writing a terminator, and
+        // dirname() then reads past the end of the buffer. The source is
+        // shorter than MAXPATHLEN in practice; terminating explicitly is what
+        // makes that a fact rather than an assumption.
+        strncpy(real_exe, exe_path, MAXPATHLEN - 1);
+        real_exe[MAXPATHLEN - 1] = '\0';
     }
     char dir_buf[MAXPATHLEN];
-    strncpy(dir_buf, real_exe, MAXPATHLEN);
+    strncpy(dir_buf, real_exe, MAXPATHLEN - 1);
+    dir_buf[MAXPATHLEN - 1] = '\0';
     char *dir = dirname(dir_buf);   // .../Contents/MacOS
 
     char *out = malloc(MAXPATHLEN);

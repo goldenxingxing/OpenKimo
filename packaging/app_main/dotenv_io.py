@@ -183,7 +183,15 @@ def write_env(path: Path, updates: dict[str, str]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     fd, tmp = tempfile.mkstemp(prefix=".env.", dir=str(path.parent))
     try:
-        with os.fdopen(fd, "w", encoding="utf-8") as f:
+        # fdopen takes ownership of the descriptor, but only once it succeeds:
+        # if it raises, the `with` is never entered and the raw fd stays open
+        # for the life of the process. Settings can be saved many times.
+        try:
+            handle = os.fdopen(fd, "w", encoding="utf-8")
+        except Exception:
+            os.close(fd)
+            raise
+        with handle as f:
             f.write(text)
         os.replace(tmp, path)
     except Exception:

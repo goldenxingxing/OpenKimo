@@ -55,7 +55,21 @@ log = logging.getLogger(__name__)
 
 # Provider types accepted by the runtime. Keep in sync with
 # ``kimi_cli.config.LLMProvider``.
-_PROVIDER_TYPES: tuple[str, ...] = ("kimi", "openai_legacy", "anthropic")
+#: The provider types a user can pick, mirroring kimi_cli.llm.ProviderType
+#: minus its underscore-prefixed test providers. It used to list three of
+#: them, and a provider whose stored type was not on the list came back from
+#: Settings as "kimi": the popup silently stayed on its first item and Save
+#: wrote that. Opening Settings and pressing Save converted a Gemini provider
+#: into a Kimi one.
+_PROVIDER_TYPES: tuple[str, ...] = (
+    "kimi",
+    "openai_legacy",
+    "openai_responses",
+    "anthropic",
+    "gemini",
+    "google_genai",
+    "vertexai",
+)
 
 # Default max context used when the user leaves the field blank (matches the
 # placeholder shown in the Settings UI and kimi-cli's documented default).
@@ -538,6 +552,7 @@ class SettingsController(NSWindowController):
     # LLM section state
     provider_rows = None              # type: list[_ProviderRow] | None
     initial_default = ""              # default model resolved at window open
+    initial_port = ""                 # port as the form rendered it, not as .env holds it
     providers_container = None        # type: NSView | None
     providers_chain_constraints = None  # type: list | None
     providers_bottom_pin = None       # type: Any | None
@@ -591,9 +606,9 @@ class SettingsController(NSWindowController):
         except Exception:
             log.exception("failed to read .env; assuming the port is unchanged")
             current = {}
-        port_changed = "KIMI_WEB_PORT" in updates and (updates.get("KIMI_WEB_PORT") or "") != (
-            current.get("KIMI_WEB_PORT") or ""
-        )
+        port_changed = "KIMI_WEB_PORT" in updates and (
+            updates.get("KIMI_WEB_PORT") or ""
+        ) != (self.initial_port or "")
         env_changed = any(
             (value or "") != (current.get(key) or "") for key, value in updates.items()
         )
@@ -621,7 +636,12 @@ class SettingsController(NSWindowController):
             try:
                 from . import configtoml
                 parsed = [
-                    p for p in json.loads(providers_json)
+                    # `or "[]"`: deleting every provider writes LLM_PROVIDERS as
+                    # an empty string, not "[]" — json.loads("") raises, the
+                    # broad except below swallows it, and the prune this block
+                    # exists for never ran. The empty list is the answer here,
+                    # not a parse failure.
+                    p for p in json.loads(providers_json or "[]")
                     if isinstance(p, dict) and p.get("name")
                 ]
                 keep_names = {str(p["name"]) for p in parsed}
@@ -695,19 +715,38 @@ class SettingsController(NSWindowController):
                     continue
                 out[row.key] = self._read_control(row)
 
+        raw_port = (out.get("KIMI_WEB_PORT") or "").strip()
+        if raw_port and not (raw_port.isdigit() and 1024 <= int(raw_port) <= 65535):
+            # Handed straight to uvicorn otherwise, which fails after the app
+            # has already said the settings were saved. Windows rejects it in
+            # the form; this is the same rule.
+            raise ValueError(
+                f"Port must be a number between 1024 and 65535 (got {raw_port!r})."
+            )
+
         seen_names: set[str] = set()
         provider_list: list[dict[str, Any]] = []
         default_name = ""
         for prow in (self.provider_rows or []):
             name = prow.get_name()
-            if not name or not prow.has_api_key():
+            if not name:
+                continue
+            entry = prow.to_dict()
+            # A key is not what makes a provider real — a local endpoint
+            # (Ollama, LM Studio, vLLM) needs none. Requiring one dropped that
+            # provider from LLM_PROVIDERS, and prune then deleted its
+            # [providers.X] / [models.X] from config.toml as well: opening
+            # Settings and pressing Save destroyed a working configuration
+            # nobody had touched. A row carrying nothing but a name is still
+            # skipped — that is the half-filled new row this guard is for.
+            if not (entry.get("api_key") or entry.get("base_url") or entry.get("model")):
                 continue
             if name.lower() in seen_names:
                 raise ValueError(
                     f"Duplicate provider name: {name!r}. Names must be unique."
                 )
             seen_names.add(name.lower())
-            provider_list.append(prow.to_dict())
+            provider_list.append(entry)
             if prow.is_default():
                 default_name = name
 
@@ -727,6 +766,14 @@ class SettingsController(NSWindowController):
         else:
             out["LLM_PROVIDERS"] = ""
             out["LLM_DEFAULT_PROVIDER"] = ""
+            # The same clearing the populated branch does. Left behind, a
+            # legacy KIMI_API_KEY that was migrated into the provider the user
+            # has just deleted is picked up by _build_global_config's legacy
+            # branch — which runs precisely *because* LLM_PROVIDERS is now
+            # empty — and re-materialises the provider they thought they
+            # removed, still using the key they thought they removed with it.
+            for key in _LEGACY_LLM_KEYS:
+                out[key] = ""
         return out
 
     @staticmethod
@@ -944,7 +991,13 @@ def _build_provider_row(controller, entry: dict[str, Any] | None = None) -> _Pro
     for t in _PROVIDER_TYPES:
         type_popup.addItemWithTitle_(t)
     type_value = str(entry.get("type", _PROVIDER_TYPES[0]))
-    if type_value in _PROVIDER_TYPES:
+    if type_value and type_value not in _PROVIDER_TYPES:
+        # Whatever is already configured stays configured. A type this build
+        # does not know about — a newer kimi-cli, a hand-edited config — must
+        # not be quietly rewritten to the first item in the menu just because
+        # the user opened Settings.
+        type_popup.addItemWithTitle_(type_value)
+    if type_value:
         type_popup.selectItemWithTitle_(type_value)
 
     api_key = _text(str(entry.get("api_key", "")), secure=True, placeholder="API key")
@@ -1346,6 +1399,11 @@ def _build_web_section(
     rows: list[_Row] = []
 
     port = _text(values.get("KIMI_WEB_PORT", "5494") or "5494")
+    # Snapshot what the field actually shows, which on a fresh install is the
+    # literal fallback rather than anything from .env. Comparing the form
+    # against .env made "" != "5494" true and the very first Save offered to
+    # restart the server for a port nobody had touched.
+    controller.initial_port = str(port.stringValue())
     fr_port = _form_row(_label("Port"), port, fixed_width=100.0)
     rows.append(_Row("KIMI_WEB_PORT", _label("Port"), port))
 

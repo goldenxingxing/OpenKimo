@@ -151,6 +151,18 @@ def _build_env(p: AppPaths) -> dict[str, str]:
     # thread, taking the whole worker with it.
     env["PYTHONIOENCODING"] = "utf-8"
 
+    # 3b. Playwright's browsers live inside the install, not in the user's
+    # profile. The Windows build downloads chromium into
+    # runtime/playwright-browsers and sets PLAYWRIGHT_BROWSERS_PATH for that
+    # download only — nothing set it at runtime, so the fetch tool looked in
+    # the empty default under %USERPROFILE% and reported "Executable doesn't
+    # exist" while ~150 MB of chromium sat unread in the install directory.
+    runtime_root = getattr(p, "runtime_root", None)
+    if runtime_root is not None:
+        browsers = runtime_root / "playwright-browsers"
+        if browsers.is_dir():
+            env["PLAYWRIGHT_BROWSERS_PATH"] = str(browsers)
+
     # 4. User-overlay Python (so kimi-cli's shell tool can pip install).
     env.update(userenv.env_overlay(p))
 
@@ -534,33 +546,39 @@ class UvicornSupervisor:
 
         self.paths.logs.mkdir(parents=True, exist_ok=True)
         log_fp = self.paths.server_log.open("ab", buffering=0)
+        try:
+            # Written on every spawn, so two instances racing here can leave a
+            # reader seeing a truncated file — uvicorn then dies parsing its own
+            # log config. Swap it in atomically instead.
+            log_config_path = self.paths.app_support / "uvicorn-log.json"
+            _write_atomic(log_config_path, json.dumps(_UVICORN_LOG_CONFIG))
 
-        # Written on every spawn, so two instances racing here can leave a
-        # reader seeing a truncated file — uvicorn then dies parsing its own
-        # log config. Swap it in atomically instead.
-        log_config_path = self.paths.app_support / "uvicorn-log.json"
-        _write_atomic(log_config_path, json.dumps(_UVICORN_LOG_CONFIG))
-
-        cmd = [
-            str(self.paths.app_layer_python),
-            "-m", "uvicorn",
-            "kimi_cli.web.app:create_app",
-            "--factory",
-            "--host", host,
-            "--port", str(self._port),
-            "--log-level", "info",
-            "--log-config", str(log_config_path),
-            "--timeout-graceful-shutdown", "3",
-        ]
-        log.info("spawning uvicorn: %s", " ".join(cmd))
-        self._proc = subprocess.Popen(  # noqa: S603 - args are well-known
-            cmd,
-            env=env,
-            stdout=log_fp,
-            stderr=subprocess.STDOUT,
-            cwd=str(self.paths.app_support),
-            **_POPEN_NEW_GROUP_KWARGS,
-        )
+            cmd = [
+                str(self.paths.app_layer_python),
+                "-m", "uvicorn",
+                "kimi_cli.web.app:create_app",
+                "--factory",
+                "--host", host,
+                "--port", str(self._port),
+                "--log-level", "info",
+                "--log-config", str(log_config_path),
+                "--timeout-graceful-shutdown", "3",
+            ]
+            log.info("spawning uvicorn: %s", " ".join(cmd))
+            self._proc = subprocess.Popen(  # noqa: S603 - args are well-known
+                cmd,
+                env=env,
+                stdout=log_fp,
+                stderr=subprocess.STDOUT,
+                cwd=str(self.paths.app_support),
+                **_POPEN_NEW_GROUP_KWARGS,
+            )
+        finally:
+            # The child gets its own descriptor; the parent's copy has no
+            # reader. Leaving it to the collector meant one more open handle
+            # per spawn that raised — and a raising spawn is exactly what this
+            # method anticipates (app_layer_python missing after a bad build).
+            log_fp.close()
         self._healthcheck_deadline = time.monotonic() + HEALTHCHECK_DEADLINE
         self._set_state(ServerState.STARTING)
         self._ensure_watcher()
@@ -670,8 +688,19 @@ class UvicornSupervisor:
                     elif time.monotonic() > self._healthcheck_deadline:
                         # Took too long; treat as crashed.
                         with self._lock:
+                            if self._proc is not proc:
+                                # Replaced while we were waiting on it; the
+                                # newcomer's health is not this pass's to judge.
+                                continue
                             self._terminate_locked()
-                        self._handle_exit(rc=-1, proc=proc)
+                        # _terminate_locked() has already cleared the handle, so
+                        # passing `proc` here would trip _handle_exit's
+                        # superseded-child guard and skip the crash accounting
+                        # altogether: no restart attempt, no reason, and the
+                        # next pass of this loop wrote STOPPED over the
+                        # diagnosis. "Treated as crashed" has to go through the
+                        # crash path to mean anything.
+                        self._handle_exit(rc=-1, proc=None)
                         continue
                 time.sleep(1.0)
                 continue

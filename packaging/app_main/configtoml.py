@@ -216,8 +216,11 @@ def update_models(path: Path, models: list[dict[str, Any]]) -> None:
     Mirror of ``update_providers``: kimi-cli's ``_build_global_config`` only
     seeds ``config.models[name]`` when ``name`` is absent, so edits to an
     existing model's ``max_context_size`` / ``capabilities`` via the Settings
-    UI never reach the toml. We write the env-managed fields in place,
-    leaving ``display_name`` and any other hand-edited keys intact.
+    UI never reach the toml. We write the env-managed fields in place, leaving
+    hand-edited keys intact. ``display_name`` is one of those keys until an env
+    entry names it: the Settings UI does not write one, so a hand-edited
+    display name survives, but a display_name spelled out in ``LLM_PROVIDERS``
+    is an instruction and is honoured.
 
     Each entry uses the provider's ``name`` as the model key (matches kimi-cli
     line ``config.models[name] = LLMModel(provider=name, ...)``).

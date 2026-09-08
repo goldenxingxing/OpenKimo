@@ -245,7 +245,10 @@
     const $ = (id) => document.getElementById(id);
 
     // Mirrors packaging/app_main/settings_window.py constants.
-    const PROVIDER_TYPES = ["kimi", "openai_legacy", "anthropic"];
+    const PROVIDER_TYPES = [
+      "kimi", "openai_legacy", "openai_responses",
+      "anthropic", "gemini", "google_genai", "vertexai",
+    ];
     const CAPABILITIES = ["image_in", "video_in", "thinking", "always_thinking"];
     const DEFAULT_MAX_CONTEXT = 1000000;
     const LEGACY_LLM_KEYS = [
@@ -281,8 +284,16 @@
         ? new Set(entry.capabilities.map(String))
         : new Set(CAPABILITIES);
 
-      const typeOptions = PROVIDER_TYPES.map((t) => {
-        const sel = (entry.type || PROVIDER_TYPES[0]) === t ? " selected" : "";
+      // Whatever is already configured stays configured: a type this build
+      // does not list — a newer kimi-cli, a hand-edited config — is added to
+      // the menu rather than silently rewritten to the first entry the next
+      // time somebody opens Settings and presses Save.
+      const entryType = String(entry.type || "");
+      const typeChoices = PROVIDER_TYPES.includes(entryType) || !entryType
+        ? PROVIDER_TYPES
+        : PROVIDER_TYPES.concat([entryType]);
+      const typeOptions = typeChoices.map((t) => {
+        const sel = (entryType || PROVIDER_TYPES[0]) === t ? " selected" : "";
         return `<option value="${t}"${sel}>${t}</option>`;
       }).join("");
 
@@ -407,12 +418,24 @@
         // CONFIG_TOML_DEFAULT_MODEL), so prefer it; fall back to .env only
         // when the toml has no default, and to the first entry only when
         // neither names one.
+        // Two values, deliberately — the same split macOS makes
+        // (settings_window.py: default_original vs default_value). The
+        // lower-cased one only ever matches a radio button; the original
+        // spelling is what gets written back.
+        //
+        // Held as one lower-cased string, a save with no radio checked wrote
+        // that lower-cased name to LLM_DEFAULT_PROVIDER. _save then puts it in
+        // keep_names, configtoml.prune compares case-sensitively, and a
+        // hand-added [models.MyLocal] / [providers.MyLocal] was deleted while
+        // default_model became "mylocal" — after which Config.validate_model
+        // raises on every load_config() and the server stops starting.
         const explicitDefault = (data.CONFIG_TOML_DEFAULT_MODEL ||
-          data.LLM_DEFAULT_PROVIDER || data.LLM_PROVIDER || "").trim().toLowerCase();
+          data.LLM_DEFAULT_PROVIDER || data.LLM_PROVIDER || "").trim();
         hasExplicitDefault = explicitDefault !== "";
-        const defaultName = explicitDefault ||
-          ((entries[0] && entries[0].name) || "").trim().toLowerCase();
-        initialDefault = defaultName;
+        const defaultOriginal = explicitDefault ||
+          ((entries[0] && entries[0].name) || "").trim();
+        const defaultName = defaultOriginal.toLowerCase();
+        initialDefault = defaultOriginal;
 
         $("providers").innerHTML = "";
         entries.forEach((entry) => {
@@ -442,7 +465,14 @@
       document.querySelectorAll("#providers .provider").forEach((card) => {
         const name = card.querySelector(".p-name").value.trim();
         const apiKey = card.querySelector(".p-apikey").value.trim();
-        if (!name || !apiKey) return;  // mirrors macOS: skip incomplete rows
+        const baseUrl = card.querySelector(".p-baseurl").value.trim();
+        const modelId = card.querySelector(".p-model").value.trim();
+        // A key is not what makes a provider real — a local endpoint (Ollama,
+        // LM Studio, vLLM) needs none, and requiring one dropped it from
+        // LLM_PROVIDERS while prune deleted its config.toml sections too. A
+        // row with nothing but a name is still skipped: that is the
+        // half-filled new row this guard is for. (Mirrors macOS.)
+        if (!name || (!apiKey && !baseUrl && !modelId)) return;
         if (seen.has(name.toLowerCase())) {
           throw new Error(`Duplicate provider name: "${name}". Names must be unique.`);
         }
@@ -453,8 +483,8 @@
           name,
           type: card.querySelector(".p-type").value,
           api_key: apiKey,
-          base_url: card.querySelector(".p-baseurl").value.trim(),
-          model: card.querySelector(".p-model").value.trim(),
+          base_url: baseUrl,
+          model: modelId,
           max_context_size: ctx,
         };
         const caps = Array.from(card.querySelectorAll(".cap:checked")).map((c) => c.value);
@@ -467,10 +497,17 @@
 
     function gather() {
       const { list, defaultName } = collectProviders();
+      // min/max on a number input is advisory: typed text goes through
+      // untouched, and an empty or out-of-range port was offered a restart it
+      // could only fail — the server cannot bind it.
+      const port = $("web_port").value.trim();
+      if (!/^\d+$/.test(port) || Number(port) < 1024 || Number(port) > 65535) {
+        throw new Error(`Port must be a number between 1024 and 65535 (got "${port}").`);
+      }
       const updates = {
         LLM_THINKING: $("thinking").checked ? "true" : "false",
         LLM_TEMPERATURE: parseFloat($("temperature").value || "0").toFixed(2),
-        KIMI_WEB_PORT: $("web_port").value.trim(),
+        KIMI_WEB_PORT: port,
         KIMI_WEB_SESSION_TOKEN: $("session_token").value,
         KIMI_WEB_LAN_ONLY: $("lan_only").checked ? "true" : "false",
       };
@@ -478,12 +515,20 @@
         updates.LLM_PROVIDERS = JSON.stringify(list);
         // Never silently swap the user's default: when no radio is checked,
         // keep the default that was in effect at window open instead of
-        // clobbering it with the first provider.
+        // clobbering it with the first provider. It may well name something
+        // that is not in this list — a model picked in the web selector, or a
+        // hand-added [models.X] — and that is the case this exists for; _save
+        // adds it to keep_names so prune leaves its toml sections alone.
         updates.LLM_DEFAULT_PROVIDER = defaultName || initialDefault || list[0].name;
         LEGACY_LLM_KEYS.forEach((k) => { updates[k] = ""; });
       } else {
         updates.LLM_PROVIDERS = "";
         updates.LLM_DEFAULT_PROVIDER = "";
+        // The same clearing as the branch above. Left behind, a legacy
+        // KIMI_API_KEY that was migrated into a provider row the user has just
+        // deleted still configures a provider, and it outranks the empty
+        // LLM_PROVIDERS we are writing.
+        LEGACY_LLM_KEYS.forEach((k) => { updates[k] = ""; });
       }
       return updates;
     }

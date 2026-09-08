@@ -361,10 +361,22 @@ class OpenKimoApp(rumps.App):
         # Imported lazily; PyObjC Cocoa imports only when actually needed.
         try:
             from . import settings_window
-            if not hasattr(self, "_settings_ctrl"):
-                self._settings_ctrl = settings_window.build_controller(
-                    self.paths, on_save=self._on_settings_saved
-                )
+
+            ctrl = getattr(self, "_settings_ctrl", None)
+            window = ctrl.window() if ctrl is not None else None
+            if window is not None and window.isVisible():
+                # Already on screen: bring it forward rather than stack a
+                # second copy of the same window.
+                ctrl.show()
+                return
+            # Otherwise rebuild it. The controller snapshots .env and
+            # config.toml when it is built, so a cached one keeps showing what
+            # was true the first time Settings was opened this launch — and a
+            # Save writes that stale snapshot back, including initial_default,
+            # which reverts a model the user picked in the web UI meanwhile.
+            self._settings_ctrl = settings_window.build_controller(
+                self.paths, on_save=self._on_settings_saved
+            )
             self._settings_ctrl.show()
         except Exception as e:
             log.exception("Settings window failed to open")
@@ -384,6 +396,14 @@ class OpenKimoApp(rumps.App):
         """
         if restart:
             threading.Thread(target=self.supervisor.restart, daemon=True).start()
+            return
+        # A server that is not running cannot re-read anything. The first-run
+        # path returns before supervisor.start(), so the very first Save had
+        # nothing to hand the settings to: it wrote a reload signal into a file
+        # nobody was polling and the menu bar sat at "Stopped" forever. Windows
+        # already starts the server here.
+        if self.supervisor.state in (ServerState.STOPPED, ServerState.CRASHED):
+            threading.Thread(target=self.supervisor.start, daemon=True).start()
             return
         request_config_reload(self.paths)
 

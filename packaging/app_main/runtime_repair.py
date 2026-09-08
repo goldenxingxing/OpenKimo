@@ -62,10 +62,15 @@ def _regenerate_layer(layer: Path, script: Path) -> None:
     spec.loader.exec_module(module)
 
     config = module.load_layer_config(layer)
+    # Generate both before writing either. These two files are read together at
+    # interpreter startup, so a failure between them leaves a new pyvenv.cfg
+    # against a stale sitecustomize.py — a mixture that was never shipped and
+    # is worse than the stale pair the repair was trying to fix. Generation is
+    # the part that can fail on its own; the writes are atomic replaces.
     venv_config = module.generate_pyvenv_cfg(config["base_python_path"], config["py_version"])
-    _write_atomic(layer / "pyvenv.cfg", venv_config)
-
     sc_contents = module.generate_sitecustomize(config["pylib_paths"], config["dynlib_paths"])
+
+    _write_atomic(layer / "pyvenv.cfg", venv_config)
     if sc_contents is not None:
         _write_atomic(config["site_path"] / "sitecustomize.py", sc_contents)
 

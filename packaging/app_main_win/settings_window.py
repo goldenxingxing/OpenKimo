@@ -129,11 +129,21 @@ class Api:
         # Mirror macOS: keep config.toml in sync with the multi-provider blob
         # so edits to base_url / api_key / type / capabilities / default
         # actually take effect in new sessions.
-        providers_json = clean.get("LLM_PROVIDERS", "")
-        if providers_json:
+        # `is not None`, not truthiness: an empty list is the answer when the
+        # user deleted every provider, and that still has to reach config.toml.
+        # The macOS port was fixed for exactly this — skipping the block left
+        # [providers.X] / [models.X] / default_model behind, still showing up
+        # in the model selector, after .env had already been cleared.
+        providers_json = clean.get("LLM_PROVIDERS")
+        if providers_json is not None:
             try:
                 parsed = [
-                    p for p in json.loads(providers_json)
+                    # `or "[]"`: deleting every provider writes LLM_PROVIDERS as
+                    # an empty string, not "[]" — json.loads("") raises, the
+                    # broad except below swallows it, and the prune this block
+                    # exists for never ran. The empty list is the answer here,
+                    # not a parse failure.
+                    p for p in json.loads(providers_json or "[]")
                     if isinstance(p, dict) and p.get("name")
                 ]
                 keep_names = {str(p["name"]) for p in parsed}
@@ -145,13 +155,12 @@ class Api:
                 if default_keep:
                     keep_names.add(default_keep)
                 toml_path = self.paths.sessions_dir / "config.toml"
-                if keep_names:
-                    configtoml.prune(toml_path, keep_names)
-                    configtoml.update_providers(toml_path, parsed)
-                    configtoml.update_models(toml_path, parsed)
-                    configtoml.set_default_model(
-                        toml_path, clean.get("LLM_DEFAULT_PROVIDER", "")
-                    )
+                configtoml.prune(toml_path, keep_names, allow_empty=True)
+                configtoml.update_providers(toml_path, parsed)
+                configtoml.update_models(toml_path, parsed)
+                configtoml.set_default_model(
+                    toml_path, clean.get("LLM_DEFAULT_PROVIDER", "")
+                )
             except Exception:
                 log.exception("config.toml sync failed; continuing")
 

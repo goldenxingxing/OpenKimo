@@ -17,7 +17,7 @@ from types import SimpleNamespace
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "packaging"))
 
-from app_main.server import request_config_reload  # noqa: E402
+from app_main.server import RELOAD_SIGNAL_NAME, request_config_reload  # noqa: E402
 
 MAC_SETTINGS = (ROOT / "packaging" / "app_main" / "settings_window.py").read_text(encoding="utf-8")
 WIN_SETTINGS = (ROOT / "packaging" / "app_main_win" / "settings_window.py").read_text(
@@ -47,10 +47,13 @@ def test_two_saves_in_the_same_second_are_two_requests(tmp_path) -> None:
     """Detection is by content as well as mtime, which has one-second grain."""
     paths = SimpleNamespace(app_support=tmp_path)
     request_config_reload(paths)
-    first = (tmp_path / "reload.signal").read_text(encoding="utf-8")
+    # The writer owns the name; spelling it out here means a rename passes
+    # this test while settings quietly stop taking effect.
+    signal = tmp_path / RELOAD_SIGNAL_NAME
+    first = signal.read_text(encoding="utf-8")
     request_config_reload(paths)
 
-    assert (tmp_path / "reload.signal").read_text(encoding="utf-8") != first
+    assert signal.read_text(encoding="utf-8") != first
 
 
 def test_the_server_is_told_which_env_file_to_re_read() -> None:

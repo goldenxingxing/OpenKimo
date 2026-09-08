@@ -61,6 +61,15 @@ Name: "english"; MessagesFile: "compiler:Default.isl"
 Name: "desktopicon"; Description: "Create a desktop shortcut"; GroupDescription: "Additional shortcuts:"
 Name: "purgeuserdata"; Description: "Also remove user data (%AppData%\{#AppName}) on uninstall"; GroupDescription: "Uninstall behaviour:"; Flags: unchecked
 
+[InstallDelete]
+; Inno Setup only adds and overwrites. A file the previous version shipped and
+; this one renamed away survives beside its replacement -- two
+; kimi_cli-*.dist-info directories, say, after which
+; importlib.metadata.version("kimi-cli") picks between them non-deterministically.
+; build.py carries _evict_dropped_local_packages for exactly this on macOS.
+; Only shipped files live here; user data is under %AppData%.
+Type: filesandordirs; Name: "{app}\runtime"
+
 [Files]
 Source: "{#StagingDir}\runtime\*"; DestDir: "{app}\runtime"; Flags: recursesubdirs createallsubdirs ignoreversion
 Source: "{#StagingDir}\OpenKimo.exe"; DestDir: "{app}"; Flags: ignoreversion

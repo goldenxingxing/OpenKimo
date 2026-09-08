@@ -90,19 +90,39 @@ def _find_bundle_root() -> Path:
 
 def _read_brand(resources: Path) -> tuple[str, dict]:
     brand_json = resources / "brand.json"
+    data: dict = {}
     if brand_json.exists():
-        data = json.loads(brand_json.read_text(encoding="utf-8"))
-        return data.get("app_name", "OpenKimo"), data
+        try:
+            # UnicodeDecodeError too: this is read from app_paths(), which runs
+            # at start-up before any logging exists, so a hand-edited or
+            # truncated brand.json took the app down with nothing on screen and
+            # nothing in the log. The Windows port already guards this.
+            parsed = json.loads(brand_json.read_text(encoding="utf-8"))
+        except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+            parsed = None
+        # A JSON document whose root is a list or a string parses fine and then
+        # blows up on .get().
+        if isinstance(parsed, dict):
+            data = parsed
+            name = data.get("app_name")
+            if isinstance(name, str) and name:
+                return name, data
+    # brand.json told us nothing usable, but the bundle still knows its own
+    # name — and on a white-label build that name is not "OpenKimo". Every
+    # user-state path is derived from it, so guessing scatters the user's data
+    # under a directory that belongs to another product.
     info_plist = resources.parent / "Info.plist"
     if info_plist.exists():
         try:
             import plistlib
             with info_plist.open("rb") as f:
                 pl = plistlib.load(f)
-            return pl.get("CFBundleName", "OpenKimo"), {}
+            name = pl.get("CFBundleName")
+            if isinstance(name, str) and name:
+                return name, data
         except Exception:
             pass
-    return "OpenKimo", {}
+    return "OpenKimo", data
 
 
 @lru_cache(maxsize=1)

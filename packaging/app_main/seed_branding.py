@@ -193,7 +193,10 @@ def reset_to_packaged(p: AppPaths) -> None:
     db = _db_path(p)
     try:
         conn = _connect(db)
-    except sqlite3.Error:
+    except (sqlite3.Error, OSError):
+        # OSError as well: _connect() creates the parent directory, so a
+        # read-only volume or an unwritable KIMI_SHARE_DIR fails here and used
+        # to propagate unlogged, past the one message that says what broke.
         log.exception("branding reset failed opening %s", db)
         raise
     try:
