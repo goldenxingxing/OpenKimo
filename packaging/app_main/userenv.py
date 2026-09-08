@@ -181,16 +181,33 @@ def user_site_packages(p: AppPaths) -> list[str]:
     3.12, it raises where the import used to simply fail.
     """
     version = _bundled_python_version(p)
-    if version is None:
-        return []
-    site_packages = p.userbase / "lib" / f"python{version}" / "site-packages"
-    return [str(site_packages)] if site_packages.is_dir() else []
+    if version is not None:
+        site_packages = p.userbase / "lib" / f"python{version}" / "site-packages"
+        return [str(site_packages)] if site_packages.is_dir() else []
+
+    # No version in the layer name — the Windows runtime is just `python`, and
+    # its userbase is laid out as `PythonXY/site-packages`. Take it only when
+    # there is exactly one: more than one means the same ambiguity this
+    # function exists to refuse, and guessing is what breaks the import.
+    candidates = sorted(
+        d
+        for pattern in ("lib/python*/site-packages", "Python*/site-packages")
+        for d in p.userbase.glob(pattern)
+        if d.is_dir()
+    )
+    return [str(candidates[0])] if len(candidates) == 1 else []
 
 
 def _bundled_python_version(p: AppPaths) -> str | None:
-    """``3.12`` from a runtime layer named ``cpython-3.12``."""
-    name = p.bundled_python_root.name
-    _, _, version = name.partition("-")
+    """``3.12`` from a runtime layer named ``cpython-3.12``.
+
+    None when the name carries no version, which is the Windows layout — its
+    runtime directory is simply ``python``.
+    """
+    name = getattr(p, "bundled_python_root", None)
+    if name is None:
+        return None
+    _, _, version = name.name.partition("-")
     return version or None
 
 

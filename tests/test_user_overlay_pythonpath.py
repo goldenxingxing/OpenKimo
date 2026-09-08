@@ -81,3 +81,29 @@ def test_another_python_version_in_the_userbase_is_left_out(tmp_path) -> None:
     assert env["PYTHONPATH"].split(os.pathsep) == [
         str(userbase / "lib" / "python3.12" / "site-packages")
     ]
+
+
+def test_the_windows_layout_is_found_when_it_is_unambiguous(tmp_path) -> None:
+    """The Windows runtime directory is just `python`, with no version in it."""
+    userbase = tmp_path / "userbase"
+    site_packages = userbase / "Python312" / "site-packages"
+    site_packages.mkdir(parents=True)
+    paths = _paths(userbase)
+    paths.bundled_python_root = tmp_path / "runtime" / "python"
+
+    env = userenv.env_overlay(paths)
+
+    assert env["PYTHONPATH"].split(os.pathsep) == [str(site_packages)]
+
+
+def test_an_ambiguous_windows_userbase_is_refused(tmp_path) -> None:
+    """Two of them and no version to choose by: guessing is what breaks it."""
+    userbase = tmp_path / "userbase"
+    (userbase / "Python312" / "site-packages").mkdir(parents=True)
+    (userbase / "Python314" / "site-packages").mkdir(parents=True)
+    paths = _paths(userbase)
+    paths.bundled_python_root = tmp_path / "runtime" / "python"
+
+    env = userenv.env_overlay(paths)
+
+    assert "PYTHONPATH" not in env

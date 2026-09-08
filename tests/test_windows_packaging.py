@@ -229,6 +229,7 @@ def _fake_paths(tmp_path: Path) -> SimpleNamespace:
         env_file=tmp_path / ".env",
         userbase=tmp_path / "userbase",
         userbase_bin=tmp_path / "userbase" / "bin",
+        bundled_python_root=tmp_path / "runtime" / "python",
         pip_conf=tmp_path / "pip.conf",
         bundled_python_bin=tmp_path / "python" / "bin",
     )
