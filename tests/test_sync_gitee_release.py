@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import importlib.util
+import io
 import sys
 import tempfile
 import unittest
@@ -226,6 +227,98 @@ class ApiClientTests(unittest.TestCase):
         self.assertIn("HTTP 403", message)
         self.assertNotIn("gitee-secret", message)
         self.assertNotIn("github-secret", message)
+
+
+    def test_rate_limit_waits_as_long_as_the_server_asked(self):
+        """1, 2, 3 seconds is not a rate-limit window; the header says what is."""
+        delays: list[float] = []
+        attempts = {"n": 0}
+
+        def opener(_request):
+            attempts["n"] += 1
+            if attempts["n"] == 1:
+                raise sync.urllib.error.HTTPError(
+                    "https://example.invalid",
+                    429,
+                    "slow down",
+                    {"Retry-After": "42"},
+                    None,
+                )
+            return io.BytesIO(b"{}")
+
+        client = sync.ApiClient(
+            "https://example.invalid",
+            token="t",
+            token_style="query",
+            opener=opener,
+            sleeper=delays.append,
+        )
+
+        client.request_json("GET", "/release")
+
+        self.assertEqual(delays, [42])
+
+    def test_an_absurd_retry_after_is_capped(self):
+        delays: list[float] = []
+        attempts = {"n": 0}
+
+        def opener(_request):
+            attempts["n"] += 1
+            if attempts["n"] == 1:
+                raise sync.urllib.error.HTTPError(
+                    "https://example.invalid",
+                    429,
+                    "slow down",
+                    {"Retry-After": "86400"},
+                    None,
+                )
+            return io.BytesIO(b"{}")
+
+        client = sync.ApiClient(
+            "https://example.invalid",
+            token="t",
+            token_style="query",
+            opener=opener,
+            sleeper=delays.append,
+        )
+
+        client.request_json("GET", "/release")
+
+        self.assertEqual(delays, [sync.MAX_RETRY_AFTER_SECONDS])
+
+
+    def test_a_rate_limited_403_is_retried_but_a_plain_403_is_not(self):
+        """GitHub answers a secondary rate limit with 403, and says so."""
+        for headers, expect_retry in (
+            ({"Retry-After": "5"}, True),
+            ({"X-RateLimit-Remaining": "0"}, True),
+            ({}, False),
+        ):
+            attempts = {"n": 0}
+
+            def opener(_request, headers=headers, attempts=attempts):
+                attempts["n"] += 1
+                if attempts["n"] == 1:
+                    raise sync.urllib.error.HTTPError(
+                        "https://example.invalid", 403, "no", headers, None
+                    )
+                return io.BytesIO(b"{}")
+
+            client = sync.ApiClient(
+                "https://example.invalid",
+                token="t",
+                token_style="query",
+                opener=opener,
+                sleeper=lambda _d: None,
+            )
+
+            if expect_retry:
+                client.request_json("GET", "/release")
+                self.assertEqual(attempts["n"], 2, headers)
+            else:
+                with self.assertRaises(sync.ApiError):
+                    client.request_json("GET", "/release")
+                self.assertEqual(attempts["n"], 1, headers)
 
 
 if __name__ == "__main__":

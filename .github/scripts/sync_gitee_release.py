@@ -64,6 +64,52 @@ class ApiError(RuntimeError):
         self.status = status
 
 
+#: Longest a Retry-After is allowed to hold up a release sync.
+MAX_RETRY_AFTER_SECONDS = 60
+
+
+def _is_rate_limited(headers) -> bool:
+    """Whether a 403 is a rate limit rather than a refusal.
+
+    GitHub uses 403 for its secondary rate limits and marks them, either with
+    Retry-After or with an exhausted x-ratelimit-remaining. Everything else
+    that comes back 403 means the token may not do this, and retrying it three
+    times only makes the failure slower.
+    """
+    if headers is None:
+        return False
+    try:
+        if headers.get("Retry-After"):
+            return True
+        remaining = headers.get("X-RateLimit-Remaining")
+    except AttributeError:
+        return False
+    return str(remaining).strip() == "0"
+
+
+def _retry_after_seconds(headers) -> int:
+    """Seconds the server asked us to wait, 0 when it did not say.
+
+    Only the delta-seconds form is read. The HTTP-date form is legal and
+    neither Gitee nor GitHub sends it for rate limits; a CI retry is not worth
+    a date parser that could itself throw.
+    """
+    raw = ""
+    if headers is not None:
+        try:
+            raw = headers.get("Retry-After") or ""
+        except AttributeError:
+            raw = ""
+    try:
+        # OverflowError as well: float("inf") parses, and int() of it raises —
+        # out of a helper whose whole job is to survive whatever a rate limiter
+        # puts in the header.
+        seconds = int(float(str(raw).strip()))
+    except (ValueError, OverflowError):
+        return 0
+    return max(0, min(seconds, MAX_RETRY_AFTER_SECONDS))
+
+
 class ApiClient:
     def __init__(
         self,
@@ -101,10 +147,18 @@ class ApiClient:
 
     def _open(self, request: urllib.request.Request):
         for attempt in range(3):
+            delay = attempt + 1
             try:
                 return self.opener(request)
             except urllib.error.HTTPError as error:
-                if error.code != 429 and error.code < 500:
+                # GitHub answers a secondary rate limit with 403, not 429, and
+                # says so in the headers. A plain 403 is still "you may not do
+                # that" and must not be retried — only one carrying a
+                # rate-limit signal is worth waiting out.
+                rate_limited = error.code == 429 or (
+                    error.code == 403 and _is_rate_limited(error.headers)
+                )
+                if not rate_limited and error.code < 500:
                     raise ApiError(
                         error.code, f"request failed with HTTP {error.code}"
                     ) from None
@@ -113,10 +167,16 @@ class ApiClient:
                         error.code,
                         f"request failed after retries with HTTP {error.code}",
                     ) from None
+                if rate_limited:
+                    # A rate limit says how long it wants; 1, 2, 3 seconds is
+                    # almost never it. Ignoring the header spends all three
+                    # attempts inside the same window and fails the sync with
+                    # a rate limit that had already told us how to avoid it.
+                    delay = max(delay, _retry_after_seconds(error.headers))
             except urllib.error.URLError:
                 if attempt == 2:
                     raise ApiError(0, "request failed after retries") from None
-            self.sleeper(attempt + 1)
+            self.sleeper(delay)
         raise AssertionError("unreachable")
 
     def request_json(
