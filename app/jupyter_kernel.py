@@ -13,6 +13,15 @@ from jupyter_client.manager import KernelManager
 #: re-check the caller's deadline between reads.
 _IOPUB_POLL_SECONDS = 1.0
 
+#: How long a timed-out cell is given to actually stop after an interrupt
+#: before the kernel is restarted out from under it.
+_INTERRUPT_GRACE_SECONDS = 2.0
+
+#: Budget for the kernel's own init cell. Longer than a user cell's default:
+#: it rebuilds the matplotlib font cache, which on a cold container takes well
+#: past 30 seconds and used to come back as a silent failure.
+_INIT_TIMEOUT_SECONDS = 180
+
 
 class ExecutionResult(BaseModel):
     success: bool
@@ -128,7 +137,15 @@ else:
 
 plt.rcParams['axes.unicode_minus'] = False
 """
-            self.execute(init_code)
+            # 看一眼结果。execute() 超时不抛异常，只是返回 success=False，
+            # 而 init_code 里那句 fontManager.__init__() 是一次完整的字体缓存
+            # 重建 —— 冷容器上经常越过 30 秒的默认超时。丢掉这个返回值，
+            # lifespan 照样打印「初始化完成」、/health 照样报 kernel_alive，
+            # 而内核要么没有 matplotlib/中文字体配置，要么队首还卡着那条
+            # 没跑完的 init cell。
+            init_result = self.execute(init_code, timeout=_INIT_TIMEOUT_SECONDS)
+            if not init_result.success:
+                print(f"Kernel initialization did not complete: {init_result.error}")
         except Exception as e:
             print(f"Kernel initialization error: {str(e)}")
             self.shutdown()
@@ -158,6 +175,44 @@ plt.rcParams['axes.unicode_minus'] = False
             print(f"Kernel check failed: {str(e)}")
             self._start_kernel()
 
+    def _wait_for_idle(self, msg_id: str, grace: float) -> bool:
+        """True when this execution's kernel status reaches idle within `grace`.
+
+        An interrupt request only reports that it was *sent*: jupyter_client's
+        ``KernelClient.interrupt()`` returns as soon as the message is on the
+        control channel, and a kernel wedged in native code never processes it.
+        The kernel says the cell is actually done by publishing
+        ``status: idle`` for the request that was running — that is the only
+        answer worth acting on.
+        """
+        deadline = time.time() + grace
+        while time.time() < deadline:
+            if self.km is None or not self.km.is_alive():
+                # 内核都没了，谁也不会再发 idle 出来。等满 grace 只是把重启
+                # 往后推了两秒。
+                return False
+            try:
+                msg = self.kc.get_iopub_msg(timeout=_IOPUB_POLL_SECONDS)
+            except queue.Empty:
+                continue
+            except Exception:
+                # 读通道抖一下不算「没停下来」。这里返回 False 的唯一后果是
+                # 上层重启内核、清掉用户的全部变量 —— 那是给「真的等不到
+                # idle」准备的，不是给一次读失败准备的。继续等到期限为止。
+                time.sleep(0.05)
+                continue
+            try:
+                if msg.get("parent_header", {}).get("msg_id") != msg_id:
+                    continue
+                if (
+                    msg["header"]["msg_type"] == "status"
+                    and msg["content"].get("execution_state") == "idle"
+                ):
+                    return True
+            except Exception:
+                continue
+        return False
+
     def execute(self, code: str, timeout: int = 30) -> ExecutionResult:
         try:
             # 确保 kernel 是活跃的
@@ -177,10 +232,38 @@ plt.rcParams['axes.unicode_minus'] = False
 
             while True:
                 if time.time() - start_time > timeout:
+                    # 超时不能只是返回：cell 还在同一个共享 kernel 里跑，
+                    # 继续吃 CPU、继续往 iopub 里灌消息，而下一次 execute()
+                    # 会排在它后面 —— 一个死循环就能让之后每一次执行都超时。
+                    interrupted = self.interrupt_kernel()
+                    recovery = ""
+                    # 以内核自己的 status=idle 为准，而不是中断请求「发出去
+                    # 了」。发出去不等于收到了：卡在原生代码里的内核根本轮不到
+                    # Python 层处理信号。等不到 idle 就重启 —— 那个 cell 还排在
+                    # 队首，之后每一次 execute() 都会撞上它。这也是唯一值得用
+                    # 「清空用户状态」换回一个可用内核的时候。
+                    if not self._wait_for_idle(msg_id, _INTERRUPT_GRACE_SECONDS):
+                        print(
+                            "Interrupt did not stop the cell "
+                            f"({interrupted.get('message')}); restarting the kernel"
+                        )
+                        try:
+                            self._start_kernel()
+                        except Exception as restart_error:
+                            # 说出来。否则调用方收到的是一条普通的超时，而内核
+                            # 其实还卡着上一个 cell，之后每一次执行都会撞上它。
+                            recovery = (
+                                f"; the kernel could not be interrupted or "
+                                f"restarted ({restart_error})"
+                            )
+                            print(f"Failed to restart kernel: {restart_error}")
                     return ExecutionResult(
                         success=False,
                         output="",
-                        error=f"Executing code timed out, timeout: {timeout} seconds",
+                        error=(
+                            f"Executing code timed out, timeout: {timeout} "
+                            f"seconds{recovery}"
+                        ),
                         images=[],
                     )
 
@@ -257,9 +340,12 @@ plt.rcParams['axes.unicode_minus'] = False
 
             traceback.print_exc()
             print(f"Execution error: {e.__class__.__name__} {str(e)}")
-            # 如果执行出错，尝试重启 kernel
+            # 只有内核真的死了才重启。重启会清空用户的全部变量、导入和图，
+            # 而落到这里的异常大多是客户端侧的（一次通道读取抖动、一条没见过
+            # 的消息类型），为这些把会话推倒重来，代价远大于那个错误本身。
             try:
-                self._start_kernel()
+                if self.km is None or not self.km.is_alive():
+                    self._start_kernel()
             except Exception as restart_error:
                 print(f"Failed to restart kernel: {str(restart_error)}")
             raw_error = f"{e.__class__.__name__}: {str(e)}"
@@ -303,36 +389,52 @@ plt.rcParams['axes.unicode_minus'] = False
             # 获取 kernel 进程 ID
             kernel_id = self._get_kernel_pid()
 
-            if kernel_id:
+            # 中断只发一次。SIGINT 和控制通道的 interrupt 各自都会在内核里
+            # 产生一个 KeyboardInterrupt，两个背对背发出去，第二个往往落在
+            # 第一个的异常处理中间 —— 表现为一条莫名其妙的二次异常，或者内核
+            # 停在一个说不清的状态里。控制通道是官方 API，也不需要 PID，
+            # 所以先走它，拿不到再退回信号。
+            #
+            # 失败要报出去：`except (AttributeError, Exception)` 等价于
+            # `except Exception`，而且把失败直接丢掉 —— 控制通道已死时这里
+            # 静默失败，接口却仍然回 "Kernel interrupted successfully"，
+            # 调用方以为正在运行的 cell 已被中断。
+            # interrupt() 抛异常并不能证明「一条都没发出去」：控制通道上可能
+            # 已经躺着一个 interrupt_request 了。这里仍然退回信号 —— 中断彻底
+            # 没送到（内核继续跑那个 cell）比理论上多送一次要糟得多，而多送的
+            # 那次最坏也就是一条多余的 KeyboardInterrupt。
+            client_error: str | None = None
+            interrupted = False
+            try:
+                if self.kc and hasattr(self.kc, "interrupt"):
+                    self.kc.interrupt()  # type: ignore
+                    interrupted = True
+            except Exception as exc:
+                client_error = str(exc)
+                print(f"Error interrupting via jupyter client: {client_error}")
+
+            signal_error: str | None = None
+            if not interrupted and kernel_id:
                 # 发送 SIGINT 信号中断 kernel
                 try:
                     process = psutil.Process(kernel_id)
                     process.send_signal(signal.SIGINT)
                     print(f"Sent SIGINT to kernel process {kernel_id}")
+                    interrupted = True
                 except psutil.NoSuchProcess:
-                    print(f"Kernel process {kernel_id} not found")
+                    signal_error = f"Kernel process {kernel_id} not found"
+                    print(signal_error)
                 except Exception as e:
-                    print(f"Error sending signal to kernel process: {str(e)}")
+                    signal_error = str(e)
+                    print(f"Error sending signal to kernel process: {signal_error}")
 
-            # 也可以通过 jupyter client 发送中断。
-            # `except (AttributeError, Exception)` 等价于 `except Exception`，
-            # 而且把失败直接丢掉：控制通道已死时这里静默失败，接口却仍然回
-            # "Kernel interrupted successfully"，调用方以为正在运行的 cell 已被
-            # 中断。现在把失败记录下来并反映到响应里。
-            client_error: str | None = None
-            try:
-                if self.kc and hasattr(self.kc, "interrupt"):
-                    self.kc.interrupt()  # type: ignore
-            except Exception as exc:
-                client_error = str(exc)
-                print(f"Error interrupting via jupyter client: {client_error}")
-
-            if kernel_id is None and client_error is not None:
-                # Neither route worked: no PID to signal and the client raised.
+            if not interrupted:
+                # 两条路都没走通：控制通道用不了，也没有能发信号的 PID。
+                reason = client_error or signal_error or "no interrupt route available"
                 return {
                     "success": False,
-                    "message": f"Failed to interrupt kernel: {client_error}",
-                    "kernel_pid": None,
+                    "message": f"Failed to interrupt kernel: {reason}",
+                    "kernel_pid": kernel_id,
                 }
             return {
                 "success": True,

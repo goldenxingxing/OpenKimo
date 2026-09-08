@@ -82,7 +82,18 @@ def run_command_background(
     """
     if log_path is not None:
         sink = open(log_path, "ab", buffering=0)  # noqa: SIM115 - owned by the child
-        return subprocess.Popen(command, stdout=sink, stderr=subprocess.STDOUT)
+        try:
+            return subprocess.Popen(command, stdout=sink, stderr=subprocess.STDOUT)
+        except BaseException:
+            # The child owns the handle only once it exists. A command that is
+            # not on PATH raises here, and the descriptor stays open for the
+            # life of the process — this is a relaunch path, so it is opened
+            # again on every retry. BaseException rather than OSError on
+            # purpose: the handle has no owner on *any* way out of this line,
+            # a KeyboardInterrupt during spawn included, and it is re-raised
+            # either way.
+            sink.close()
+            raise
     return subprocess.Popen(
         command, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
     )

@@ -6,6 +6,7 @@ Jupyter Kernel Management Server
 
 import logging
 import os
+import threading
 from contextlib import asynccontextmanager
 from typing import Dict, Any, Optional
 
@@ -107,8 +108,15 @@ async def root():
     }
 
 
+# 下面这些处理函数一律是普通 def，不是 async def。它们做的全是同步阻塞的
+# 活：重启 kernel（杀进程再拉起来，要好几秒）、读连接文件、用
+# psutil.process_iter 扫全系统进程。写成 async def 并不会让它们变成非阻塞，
+# 只会让这些活直接跑在事件循环上，把同一个循环上的其他请求全堵住 —— 比如
+# /kernel/reset 期间，容器的健康探针排在它后面超时，容器被判成 unhealthy，
+# 正是 /health 当初加固要避免的那种误判。普通 def 交给 FastAPI 的线程池，
+# 事件循环就一直是活的。
 @app.get("/health")
-async def health_check():
+def health_check():
     """健康检查接口"""
     global kernel_instance
     if not kernel_instance:
@@ -124,8 +132,18 @@ async def health_check():
     return JSONResponse(status_code=200 if healthy else 503, content=status)
 
 
+#: 串行化会改动内核的那两个接口。
+#
+# 上面的处理函数是普通 def，FastAPI 把它们分发到线程池，于是两个管理请求真的
+# 会并行 —— 之前它们全挤在事件循环上，天然是串行的。jupyter_client 的
+# KernelManager / KernelClient 都没有承诺线程安全，两个 reset 撞在一起就是
+# 一边在拆 km/kc、另一边在重建。读接口不在锁里：它们本来就包在 try 里，拿到
+# 一个正在重置的内核，报 unhealthy 是对的答案。
+_kernel_mutation_lock = threading.Lock()
+
+
 @app.post("/kernel/reset", response_model=ApiResponse)
-async def reset_kernel():
+def reset_kernel():
     """重置 kernel"""
     global kernel_instance
     if not kernel_instance:
@@ -133,7 +151,8 @@ async def reset_kernel():
 
     try:
         logger.info("收到 kernel 重置请求")
-        result = kernel_instance.reset_kernel()
+        with _kernel_mutation_lock:
+            result = kernel_instance.reset_kernel()
 
         if result.get("success"):
             logger.info(f"Kernel 重置成功: {result.get('message')}")
@@ -161,7 +180,7 @@ async def reset_kernel():
 
 
 @app.post("/kernel/interrupt", response_model=ApiResponse)
-async def interrupt_kernel():
+def interrupt_kernel():
     """中断 kernel 执行"""
     global kernel_instance
     if not kernel_instance:
@@ -169,7 +188,8 @@ async def interrupt_kernel():
 
     try:
         logger.info("收到 kernel 中断请求")
-        result = kernel_instance.interrupt_kernel()
+        with _kernel_mutation_lock:
+            result = kernel_instance.interrupt_kernel()
 
         if result.get("success"):
             logger.info(f"Kernel 中断成功: {result.get('message')}")
@@ -211,7 +231,7 @@ def _redact_connection_info(info: Dict[str, Any]) -> Dict[str, Any]:
 
 
 @app.get("/kernel/connection", response_model=ConnectionInfoResponse)
-async def get_connection_info():
+def get_connection_info():
     """获取 kernel 连接信息"""
     global kernel_instance
     if not kernel_instance:
@@ -246,7 +266,7 @@ async def get_connection_info():
 
 
 @app.get("/kernel/status", response_model=KernelStatusResponse)
-async def get_kernel_status():
+def get_kernel_status():
     """获取 kernel 状态"""
     global kernel_instance
     if not kernel_instance:
@@ -278,7 +298,7 @@ async def get_kernel_status():
 
 # 为了兼容性，也提供一个简化的连接文件路径接口
 @app.get("/kernel/connection-file")
-async def get_connection_file_path():
+def get_connection_file_path():
     """获取连接文件路径（简化接口）"""
     global kernel_instance
     if not kernel_instance:
@@ -306,7 +326,7 @@ async def get_connection_file_path():
 
 
 @app.get("/kernel/debug")
-async def debug_kernel():
+def debug_kernel():
     """调试 kernel 管理器状态（开发用）。
 
     默认关闭：它返回 kernel manager 的原始内部状态（路径、连接细节），

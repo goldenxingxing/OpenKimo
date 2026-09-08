@@ -177,15 +177,29 @@ class BrowserGuard:
 
                     logger.info("Browser launched successfully")
                     width, _ = get_screensize()
-                    subprocess.run(
-                        ["xdotool", "mousemove", str(width - 25), "115", "click", "1"],
-                        check=False,
+                    # 放到线程里，并且带超时。xdotool 阻塞在 X socket 上，而
+                    # 「Xvfb 卡住但没死」正是这个守护进程要扛的情况 —— 这里是
+                    # 协程：不带超时等于把事件循环永久按死，带了超时也还会按住
+                    # 5 秒。摆一下鼠标不值得让整个循环停下来等。
+                    await asyncio.to_thread(
+                        _run_xdotool, ["mousemove", str(width - 25), "115", "click", "1"]
                     )
                     # await self.browser.pages[0].reload()
                     await self.browser.pages[0].goto(init_url)
                     break
                 except Exception as browser_error:
                     logger.info(f"Failed to launch browser: {browser_error}")
+                    # 关掉这一轮可能已经起来的那个 context。goto() 的超时也落在
+                    # 这个 except 里：浏览器其实已经跑起来了，只是首页慢。不关的
+                    # 话它继续攥着 chrome_data 的 profile 锁，后面两次重试必然
+                    # 因为锁失败，最后抛「重试 3 次仍失败」—— 而屏幕上明明有一个
+                    # 能用的浏览器。
+                    if self.browser is not None:
+                        try:
+                            await self.browser.close()
+                        except Exception as close_error:
+                            logger.debug(f"Failed to close browser context: {close_error}")
+                        self.browser = None
                     count += 1
 
             if count == 3:
@@ -293,6 +307,28 @@ class BrowserGuard:
             await self.browser.pages[0].set_viewport_size(
                 {"width": width, "height": height}
             )
+
+
+#: xdotool 单次调用的上限。它阻塞在 X socket 上，而这些调用点都在协程里。
+_XDOTOOL_TIMEOUT_SECONDS = 5
+
+
+def _run_xdotool(args: list[str]) -> None:
+    """跑一条 xdotool 命令，失败或超时都只记一笔，不往上抛。
+
+    这些调用是「摆一下鼠标」这种锦上添花的动作，值不上让浏览器启动失败；
+    但没有超时的话，一个卡住的 X server 会把调用它的事件循环一起按死。
+    """
+    try:
+        subprocess.run(
+            ["xdotool", *args],
+            check=False,
+            timeout=_XDOTOOL_TIMEOUT_SECONDS,
+        )
+    except subprocess.TimeoutExpired:
+        logger.warning("xdotool %s 超时（X server 可能卡住了）", " ".join(args))
+    except OSError as exc:
+        logger.warning("xdotool 不可用: %s", exc)
 
 
 def _ws_is_closed(ws) -> bool:
@@ -458,8 +494,11 @@ class BrowserCDPGuard:
                     stderr=subprocess.DEVNULL,
                 )
 
-                # 等待浏览器启动
-                time.sleep(0.5 * ((1.2) ** (count + 1)))
+                # 等待浏览器启动。
+                # await，不是 time.sleep：start() 是协程，而监控循环出错重启时
+                # 就是从事件循环里调用它的 —— 阻塞式 sleep 会把整个循环停住几
+                # 秒，同一个循环上的 set_screen_resolution 之类全部跟着卡死。
+                await asyncio.sleep(0.5 * ((1.2) ** (count + 1)))
 
                 # 检查浏览器是否成功启动
                 if not self._is_browser_running():
@@ -467,13 +506,15 @@ class BrowserCDPGuard:
                     self.browser_process.kill()
                     # wait() 之后进程才真正被回收；不 wait 的话每次重试和每次
                     # 监控循环重启都留下一个僵尸，累积到 SANDBOX_PID_LIMIT。
+                    # 放到线程里等：这是协程，直接 wait() 会把事件循环连同上面
+                    # 那些 await 一起按住最多 5 秒。
                     try:
-                        self.browser_process.wait(timeout=5)
+                        await asyncio.to_thread(self.browser_process.wait, 5)
                     except Exception:
                         pass
                     self.browser_process = None
                     logger.error(f"浏览器启动失败，尝试第 {count} 次")
-                    time.sleep(0.1 * (2**count))
+                    await asyncio.sleep(0.1 * (2**count))
                     continue
                 break
 
@@ -488,9 +529,8 @@ class BrowserCDPGuard:
                 return False
 
             width, _ = get_screensize()
-            subprocess.run(
-                ["xdotool", "mousemove", str(width - 25), "115", "click", "1"],
-                check=False,
+            await asyncio.to_thread(
+                _run_xdotool, ["mousemove", str(width - 25), "115", "click", "1"]
             )
 
             logger.info("Chromium 已启动并连接")
@@ -697,9 +737,23 @@ class BrowserCDPGuard:
                     if self.browser_process:
                         self.browser_process.terminate()
                         self.browser_process.kill()
+                        # 和启动重试那里一样：不 wait() 就没有真正回收，
+                        # 持续的 CDP 故障会让每一轮监控都留下一个僵尸进程，
+                        # 直到撞上 SANDBOX_PID_LIMIT。同样放到线程里等，
+                        # 别在监控循环里把事件循环按住 5 秒。
+                        try:
+                            await asyncio.to_thread(self.browser_process.wait, 5)
+                        except Exception:
+                            pass
+                        self.browser_process = None
                 except Exception as e:
                     logger.error(f"停止浏览器进程失败: {e}")
-                await self.start()
+                # start() 失败时返回 False 而不是抛异常，并且已经把 running
+                # 置回 False —— 忽略返回值就等于悄悄停掉了监控：既没有浏览器
+                # 也没有人再看着它。
+                if not await self.start():
+                    logger.error("重启 Chromium 失败，监控循环退出")
+                    return
 
             await asyncio.sleep(self.check_interval)
 
@@ -771,6 +825,12 @@ class BrowserCDPGuard:
             raise ValueError("没有找到标签页")
         ws_url = tab_info["webSocketDebuggerUrl"]
         ws = self.ws_connections.get(ws_url)
+        # 和 maximize_window 一样先判断连接是不是已经关闭：已关闭的
+        # WebSocketClientProtocol 仍然是真值，`if not ws` 看不出来，死连接会
+        # 被一直复用，之后每条 CDP 命令都只会静静地超时。
+        if ws is not None and _ws_is_closed(ws):
+            self.ws_connections.pop(ws_url, None)
+            ws = None
         if not ws:
             ws = await self._connect_to_tab(ws_url)
             if not ws:
