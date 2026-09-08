@@ -6,6 +6,63 @@ this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [v0.2.1] — 2026-09-08
+
+又一轮全项目审查后的修复集，覆盖上一次没读到的地方：Web 鉴权层、桌面打包、以及两个此前从未被审查过的一方包 `kosong` / `kaos`。方法同 v0.1.41——OpenCodeReview 与内置 code review 各扫一遍取交叉命中，逐条复现后再修，每个修复都配一条在旧代码上会失败的测试。
+
+### Security
+
+- **一个 cookie 只要存在就被当成已登录**。中间件从 cookie 取到值就放行，不检查它是否对应一个真实且未过期的 session。现在必须解析到 session 才算通过，DB 查询移出事件循环。
+
+- **session id 被当成授权凭证**。知道（或猜到）一个 session id 就能读它的内容——HTTP 和 WebSocket 两条路径各写了一份不一致的检查。现在共用同一个 `may_access_session`，且属主过滤发生在分页**之前**：原先先分页再过滤，非属主翻页时会看到空页却拿到正确的总数。
+
+- **SPA fallback 可以读到静态目录之外的文件**。路径未做包含性校验，`../` 能穿出去。
+
+- **`open_in` 的命令注入**。macOS 侧把用户路径裸插进 AppleScript 字符串，Windows 侧交给 `cmd`——`&`、`|`、`^`、`<`、`>`、`"`、`%`、`!` 都能改写命令。两侧分别做了转义与元字符拒绝。
+
+- **密码哈希的回退路径就是生产路径**。passlib 缺席时代码静默降级，而实测环境里 passlib 根本不存在（修复后新加的告警在服务器日志里第一时间就打出来了）。现在 PBKDF2 回退迭代次数有下限、scheme 按 hash 前缀判定而非猜测，改密码会吊销该用户全部 session。
+
+- **配置接口对任何登录用户开放**。`/api/config` 改为 admin-only；`default_model` 的可写性单独判定；配置热重载不得把服务器的绑定范围放宽。
+
+### Fixed
+
+- **Wiki `remember` 每次都失败**。真实会话 `be26b428` 里开了 6 个 checkpoint，6 次全被拒，一条都没写进去，每次都是「文件在读取后被修改了」。而那 6 次调用模型一个 source 都没填——这正是工具自己要求的行为（`WikiCandidate.sources` 写着「留空，runtime 会附上它真正观察到的 provenance」）。于是 runtime 填上自己记录的 source，再重读文件、要求字节完全一致，然后**拒绝了自己刚填进去的东西**——因为这个会话一直在改那些文件，那就是它的工作内容。错误提示让模型「重新读一次以开新 checkpoint」，但 checkpoint 由 runtime 的 trigger 机制开，模型没有这个操作，只能 discard。
+
+  两处重复实现的字节比对都去掉了，保留 `registry.resolve`：source 必须仍是注册工作区内一个可读的文件。鉴权不受影响——`reserve_grant` 依然要求每个 source 都是 runtime 自己 evidence 记录过的（含 hash），伪造的 ref 一样过不去。漂移也没有丢：page 存的是**当初观察到的** hash，`wiki.lint` 会报成 `stale_provenance`。
+
+- **`kosong` 十项**，这个包此前没有被任何一轮审查覆盖过：
+  - Anthropic 流里 `server_tool_use` / `web_search_tool_result` 的 block **start** 被跳过，但它们的 `input_json_delta` 照常到达，而 delta 分支只看类型不看 index——一次 web search 的 query 会被拼到某个真实 tool call 的 arguments 后面，两边都坏。
+  - `deref_json_schema` 遇到自引用 schema 直接爆栈，连带把工具注册干掉。
+  - 未注册的 content part type 以裸 `KeyError` 逃出 `Message.model_validate`；pydantic 只转换 `ValueError`，而 history restore 和 print UI 都只 catch `ValidationError`。
+  - `step()` 只对 `ChatProviderError`/`CancelledError` 清理 tool tasks，其他异常会把任务连同 Bash 子进程留在后台没人 await。
+  - OpenAI 系的流是裸迭代的，取消生成后 HTTP 连接一直挂到 GC。`generate` 现在在 finally 里关流。
+  - Gemini 的 tool_call_id 回退用左 split，`get_weather_12345` 解析成名字 `get`，回传的 FunctionResponse 匹配不上任何调用。
+  - Gemini 用同步 `httpx.get` 在事件循环上下载图片/音频，无超时无大小上限。
+  - `arguments=None` 的 tool call 序列化后整个 key 消失，OpenAI 兼容后端 400。
+  - Responses 流报 output item id、非流式报 response id，`GenerateResult.id` 含义随 `stream=` 而变。
+  - `MockChatProvider` 每次发同一批 part 对象而 `generate` 原地 merge；`ChaosChatProvider.with_thinking` 共享 client 导致注入率复利上升（0.3 → 0.51 → 0.66）。
+
+- **`kaos` SSH 后端三项**，全部因为测试需要真机而从未被覆盖：`readlines` 没有 `keepends`，每行丢了换行符，而 Read 工具用 `"".join()` 拼回去——SSH 后端读文件整个塌成一行；`mkdir(exist_ok=True)` 对已存在目录跳过 raise 却继续调 `sftp.mkdir`，把 no-op 变成 SFTPFailure；`create` 在 `asyncssh.connect` 之后任何一步失败都漏掉连接，而 `cwd` 不存在是最常见的一种。另外 `KaosPath` 只定义了 `__eq__`，`__hash__` 因此变成 `None`，`set[KaosPath]` 直接 TypeError。
+
+- **overlay 装的包服务器 import 不到**。`PYTHONUSERBASE` 只解决了一半：CLI 和「Install Package…」用 **runtime** 解释器安装（认 user-site），服务器跑的是 **app 层**解释器（venv 建时 `ENABLE_USER_SITE = False`）。于是 `openkimo pip install requests` 报成功、`openkimo python -c "import requests"` 能用，服务器里的 agent 照样 ModuleNotFoundError。这个只有装完真机跑才暴露得出来。
+
+- **Thinking 块折叠后对话跳回旧内容**。展开 Thinking、滚动、再折叠，视图会跳到之前的位置。折叠前在捕获阶段记下锚点元素，折叠后按它复位；Radix 的 `useControllableState` 从 `useEffect` 派发 `onChange`（commit 之后），所以测量必须发生在 click 的捕获阶段而不是回调里。
+
+- 另有若干：Windows 设置窗口对 `LLM_PROVIDERS = ""` 走 `json.loads("")` 抛异常；kernel server 的异步互斥；browser guard 与 jupyter kernel 的等待逻辑；`_run_xdotool` 有超时但仍在协程里同步执行。
+
+### Added
+
+- **AskUserQuestion 的选择会留在对话记录里**。以前只回显手输的文本，选中的选项不留痕，事后无从追溯自己选了什么。现在问题与答案一并作为用户消息进入 transcript，两种答案都覆盖。
+
+### 已知未修复
+
+两处需要产品判断、本轮刻意没有动的：
+
+1. `create_session` 接受任意 `work_dir`，已登录的非 admin 用户可借此读取宿主机任意路径。
+2. 中间件鉴权整体挂在 `session_token` 上，纯 cookie 的多用户部署等于没有中间件鉴权。建议的修法是 `run_web_server` 在非 loopback 绑定且未配置 token 时直接拒绝启动——但这会让部分现有部署起不来，需要先确认。
+
+另：Thinking 折叠锚点的修复有单元测试覆盖，但**未在真实浏览器里验证过**（本机 Chrome 扩展未连接）。SSH 后端的三项修复由离线 stub 测试覆盖，未接真实 SSH 主机。
+
 ## [v0.2.0] — 2026-09-05
 
 ### Changed
