@@ -352,7 +352,7 @@ class TestBrandingCRUD:
 # 4. API Endpoint Tests (integration via FastAPI TestClient)
 # =========================================================================
 
-# These tests verify the HTTP layer. They monkeypatch `get_db` to use an
+# These tests verify the HTTP layer. They monkeypatch `db_session` to use an
 # in-memory database and bypass the `require_admin` dependency so that
 # endpoint wiring, serialization, and status codes are exercised without
 # needing real auth infrastructure.
@@ -389,14 +389,15 @@ class TestBrandingEndpoints:
 
         app.dependency_overrides[require_admin] = _fake_admin
 
-        # Patch get_db to return our in-memory connection as a context manager.
+        # Patch db_session to hand out our in-memory connection. The real one
+        # closes what it opens; this one must not, the test owns it.
         from contextlib import contextmanager
 
         @contextmanager
-        def _fake_get_db():
+        def _fake_db_session():
             yield conn
 
-        with patch("kimi_cli.web.api.branding.get_db", _fake_get_db):
+        with patch("kimi_cli.web.api.branding.db_session", _fake_db_session):
             yield TestClient(app)
 
         conn.close()
