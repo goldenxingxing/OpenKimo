@@ -101,6 +101,11 @@ def _make_paths() -> AppPaths:
         work_dir=app_support / "work",
         sessions_dir=app_support / "sessions",
         output_dir=app_support / "output",
+        # Added to AppPaths after this script was written; a frozen dataclass
+        # with a missing field is a TypeError before any window is built, so
+        # the whole visual-regression harness could not produce a screenshot.
+        skill_dir=app_support / "skill",
+        wiki_dir=app_support / "users" / "default" / "wiki",
         logs=logs,
         server_log=logs / "server.log",
         pip_log=logs / "pip.log",
@@ -142,7 +147,13 @@ def main() -> int:
         if not src.is_file():
             print(f"fixture not found: {src}", file=sys.stderr)
             return 4
-        shutil.copyfile(src, paths.env_file)
+        try:
+            shutil.copyfile(src, paths.env_file)
+        except OSError as exc:
+            # Same clean exit as the missing-fixture branch above: a traceback
+            # out of CI says less than one line naming the file that failed.
+            print(f"could not install fixture {src}: {exc}", file=sys.stderr)
+            return 4
     controller = settings_window.build_controller(paths, on_save=lambda r: None)
     controller.show()
 
@@ -176,8 +187,11 @@ def main() -> int:
                     doc.scrollRectToVisible_(NSMakeRect(0.0, h - 1.0, 1.0, 1.0))
                 break
         _spin(0.2)
-    except Exception:
-        pass
+    except Exception as exc:
+        # Not fatal — a screenshot from the wrong scroll offset is still a
+        # screenshot — but silence here produced a regression image that
+        # differed for no visible reason and no way to find out why.
+        print(f"warning: could not reset scroll position: {exc}", file=sys.stderr)
 
     window_id = int(win.windowNumber())
     if window_id <= 0:

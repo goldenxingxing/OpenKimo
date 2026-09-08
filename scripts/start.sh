@@ -38,11 +38,32 @@ Examples:
 EOF
 }
 
+# Remembered separately so load_env cannot overwrite them; see below.
+CLI_MODE=""
+CLI_PORT=""
+CLI_HOST=""
+
 for arg in "$@"; do
     case "$arg" in
-        --mode=*)   MODE="${arg#--mode=}" ;;
-        --port=*)   PORT="${arg#--port=}" ;;
-        --host=*)   HOST="${arg#--host=}" ;;
+        --mode=*)   MODE="${arg#--mode=}"; CLI_MODE="$MODE" ;;
+        --port=*)
+            PORT="${arg#--port=}"
+            # `--port=` and `--port=abc` reached uvicorn as-is and failed there,
+            # after the banner had already said it was starting.
+            if ! [[ "$PORT" =~ ^[0-9]+$ ]] || [ "$PORT" -lt 1 ] || [ "$PORT" -gt 65535 ]; then
+                echo "ERROR: --port must be a number between 1 and 65535 (got '$PORT')."
+                exit 1
+            fi
+            CLI_PORT="$PORT"
+            ;;
+        --host=*)
+            HOST="${arg#--host=}"
+            if [ -z "$HOST" ]; then
+                echo "ERROR: --host requires a value."
+                exit 1
+            fi
+            CLI_HOST="$HOST"
+            ;;
         -h|--help)  print_help; exit 0 ;;
         *)          echo "Unknown option: $arg"; print_help; exit 1 ;;
     esac
@@ -178,6 +199,18 @@ start_local() {
     LISTEN_PORT="${PORT:-${KIMI_WEB_PORT:-5494}}"
     LISTEN_HOST="${HOST:-${KIMI_WEB_HOST:-0.0.0.0}}"
 
+    # Checked on the resolved value, not just on --port: KIMI_WEB_PORT comes
+    # out of .env, which nobody validates, and an unusable port there failed
+    # inside uvicorn after the banner had already announced the address.
+    if ! [[ "$LISTEN_PORT" =~ ^[0-9]+$ ]] || [ "$LISTEN_PORT" -lt 1 ] || [ "$LISTEN_PORT" -gt 65535 ]; then
+        echo "ERROR: port must be a number between 1 and 65535 (got '$LISTEN_PORT')."
+        exit 1
+    fi
+    if [ -z "$LISTEN_HOST" ]; then
+        echo "ERROR: host must not be empty."
+        exit 1
+    fi
+
     echo ""
     echo "Configuration:"
     echo "  Listen:       ${LISTEN_HOST}:${LISTEN_PORT}"
@@ -202,6 +235,12 @@ start_local() {
 # ============================================================
 
 load_env
+# .env is sourced under `set -o allexport`, so a MODE / PORT / HOST written in
+# it lands on top of what the command line just set — the reverse of the
+# precedence this script's own --help documents. Put the flags back.
+if [ -n "$CLI_MODE" ]; then MODE="$CLI_MODE"; fi
+if [ -n "$CLI_PORT" ]; then PORT="$CLI_PORT"; fi
+if [ -n "$CLI_HOST" ]; then HOST="$CLI_HOST"; fi
 detect_mode
 
 case "$MODE" in

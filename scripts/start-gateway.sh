@@ -20,6 +20,9 @@ fi
 # Configure session storage
 export KIMI_SESSIONS_DIR="/data/sessions"
 mkdir -p "$KIMI_SESSIONS_DIR"
+# 会话目录里放的是 users.db 和会话记录（含 web token 之类的凭据）。mkdir 只
+# 服从 umask，镜像里通常是 022，也就是全局可读的 755。
+chmod 700 "$KIMI_SESSIONS_DIR"
 
 # Web UI static files directory
 export KIMI_WEB_STATIC_DIR="/app/src/kimi_cli/web/static"

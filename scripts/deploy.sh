@@ -69,8 +69,22 @@ ask() {
   else
     printf "${C_BOLD}?${C_RESET} %s: " "$__prompt"
   fi
-  IFS= read -r __input || true
+  # 记下读到 EOF：管道里跑（CI、`yes | ./deploy.sh`）时 read 立刻失败，
+  # 而校验循环会拿着同一个空值一遍遍重问 —— 无限循环，屏幕上只有同一行警告。
+  if IFS= read -r __input; then
+    ASK_EOF=0
+  else
+    ASK_EOF=1
+  fi
   printf -v "$__var" "%s" "${__input:-$__default}"
+}
+
+# Abort a retry loop when there is no one left to answer it.
+ask_eof_guard() {
+  if [ "${ASK_EOF:-0}" = "1" ]; then
+    err "输入已结束（非交互环境？），无法继续询问"
+    exit 1
+  fi
 }
 
 # Read secret (no echo). Usage: ask_secret VAR "Prompt"
@@ -98,7 +112,7 @@ ask_yn() {
     case "$__input" in
       y|Y|yes|YES) printf -v "$__var" "true";  return 0 ;;
       n|N|no|NO)   printf -v "$__var" "false"; return 0 ;;
-      *) warn "请输入 y 或 n" ;;
+      *) ask_eof_guard; warn "请输入 y 或 n" ;;
     esac
   done
 }
@@ -121,9 +135,62 @@ ask_choice() {
       printf -v "$__var" "%s" "${__opts[$((__input-1))]}"
       return 0
     fi
+    ask_eof_guard
     warn "无效选项"
   done
 }
+
+# Read an integer within [min,max], re-prompting until it is one.
+# Usage: ask_int VAR "Prompt" default min max
+ask_int() {
+  local __var="$1"; local __prompt="$2"; local __default="$3"
+  local __min="$4"; local __max="$5"
+  local __value
+  while true; do
+    ask __value "$__prompt" "$__default"
+    if [[ "$__value" =~ ^[0-9]+$ ]] && [ "$__value" -ge "$__min" ] && [ "$__value" -le "$__max" ]; then
+      printf -v "$__var" "%s" "$__value"
+      return 0
+    fi
+    ask_eof_guard
+    warn "请输入 $__min 到 $__max 之间的整数"
+  done
+}
+
+# Read a non-negative decimal within [min,max], where min and max are whole
+# numbers. Usage: ask_float VAR "Prompt" default min max
+#
+# Pure bash on purpose. Delegating the comparison to awk means a host without
+# awk fails every value, including the default — the prompt then loops forever
+# repeating a range the input already satisfies, with nothing on screen saying
+# why.
+ask_float() {
+  local __var="$1"; local __prompt="$2"; local __default="$3"
+  local __min="$4"; local __max="$5"
+  local __value __int __frac
+  while true; do
+    ask __value "$__prompt" "$__default"
+    if [[ "$__value" =~ ^[0-9]+(\.[0-9]+)?$ ]]; then
+      __int="${__value%%.*}"
+      __frac=""
+      case "$__value" in *.*) __frac="${__value#*.}" ;; esac
+      # At the top of the range the fraction has to be zero: 2.5 is not in
+      # [0,2] even though its integer part is.
+      if [ "$((10#$__int))" -ge "$__min" ] \
+         && { [ "$((10#$__int))" -lt "$__max" ] \
+              || { [ "$((10#$__int))" -eq "$__max" ] && [ -z "${__frac//0/}" ]; }; }; then
+        printf -v "$__var" "%s" "$__value"
+        return 0
+      fi
+    fi
+    ask_eof_guard
+    warn "请输入 $__min 到 $__max 之间的数值"
+  done
+}
+
+#: Shortest bearer token the installer will accept when one is typed in.
+#: The generated one is 64 hex characters; this is the floor, not the target.
+MIN_TOKEN_LENGTH=16
 
 random_token() {
   if command -v openssl >/dev/null 2>&1; then
@@ -223,14 +290,28 @@ onboard_env() {
     exit 1
   fi
 
-  ask LLM_TEMPERATURE "采样温度 (0.0 - 2.0)" "0.7"
+  # 上面每个分支都把当前默认 provider 的 key 标成「必填」，却只检查了「至少
+  # 有一个 key」：选 openai 作默认、只填了 Kimi 的 key，一样能过 —— 部署出来
+  # 的服务每一次请求都会失败，而这里什么都没说。
+  local _selected_key=""
+  case "$LLM_PROVIDER" in
+    kimi)      _selected_key="$KIMI_API_KEY" ;;
+    openai)    _selected_key="$OPENAI_API_KEY" ;;
+    anthropic) _selected_key="$ANTHROPIC_API_KEY" ;;
+  esac
+  if [ -z "$_selected_key" ]; then
+    err "默认 provider 是 $LLM_PROVIDER，但它的 API Key 是空的"
+    exit 1
+  fi
+
+  ask_float LLM_TEMPERATURE "采样温度 (0.0 - 2.0)" "0.7" 0 2
   local _thinking
   ask_yn _thinking "启用 thinking 模式？" "n"
   LLM_THINKING="$_thinking"
 
   # ---- Web Server ----
   section "Web 服务配置"
-  ask KIMI_WEB_PORT "Web UI 监听端口" "5494"
+  ask_int KIMI_WEB_PORT "Web UI 监听端口" "5494" 1 65535
 
   local _gen_token
   ask_yn _gen_token "自动生成强随机 Session Token？(推荐)" "y"
@@ -238,7 +319,32 @@ onboard_env() {
     KIMI_WEB_SESSION_TOKEN="$(random_token)"
     ok "已生成 Token: ${KIMI_WEB_SESSION_TOKEN:0:12}…"
   else
-    ask KIMI_WEB_SESSION_TOKEN "自定义 Session Token" "change-me"
+    # 不接受空值，不接受 change-me（.env.example 里就写着的公开占位符），
+    # 也不接受短到可以猜的。摘要里只显示前 12 位，运维会以为自己设过了
+    # Token，而对外暴露的主机上它可能是直接能猜出来的。
+    while true; do
+      ask KIMI_WEB_SESSION_TOKEN "自定义 Session Token (至少 ${MIN_TOKEN_LENGTH} 位)" ""
+      ask_eof_guard
+      case "$KIMI_WEB_SESSION_TOKEN" in
+        "")        warn "Token 不能为空" ;;
+        change-me) warn "change-me 是公开的占位符，请换一个" ;;
+        # 粘贴时捎上的空格不会被悄悄吃掉：它是 Token 的一部分，之后每次
+        # 请求都得一模一样地带着，而复制过去的那一份多半不带。
+        *[[:space:]]*) warn "Token 不能包含空白字符" ;;
+        *)
+          if [ "${#KIMI_WEB_SESSION_TOKEN}" -lt "$MIN_TOKEN_LENGTH" ]; then
+            warn "Token 太短了（至少 ${MIN_TOKEN_LENGTH} 位），或者上一步选 y 自动生成"
+          # 长度挡不住 "aaaaaaaaaaaaaaaa"：够长，也一样是猜得到的。
+          # 引号不能省：${var//pattern/} 里的 pattern 是 glob，首字符是 `*`
+          # 的 Token 会把自己整个匹配掉，然后被当成「同一个字符重复」拒掉。
+          elif [ -z "${KIMI_WEB_SESSION_TOKEN//"${KIMI_WEB_SESSION_TOKEN:0:1}"/}" ]; then
+            warn "Token 不能是同一个字符重复，建议上一步选 y 自动生成"
+          else
+            break
+          fi
+          ;;
+      esac
+    done
   fi
 
   local _lan_only
