@@ -95,7 +95,7 @@ OpenKimo supports three major LLM providers out of the box:
 |----------|---------------------|------------------|------------------|
 | **Kimi / Moonshot** | `KIMI_API_KEY` | `https://api.moonshot.cn/v1` | `kimi-k2`, `kimi-k2.6`, etc. |
 | **OpenAI** | `OPENAI_API_KEY` | `https://api.openai.com/v1` | `gpt-4o`, `gpt-4-turbo`, etc. |
-| **Anthropic Claude** | `ANTHROPIC_API_KEY` | `https://api.anthropic.com` | `claude-3-5-sonnet`, etc. |
+| **Anthropic Claude** | `ANTHROPIC_API_KEY` | `https://api.anthropic.com` | `claude-sonnet-5`, `claude-opus-5`, etc. |
 
 You must configure **at least one** API key in `.env`. You can configure multiple keys and switch between providers using the `LLM_PROVIDER` environment variable.
 

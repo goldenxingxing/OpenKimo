@@ -521,8 +521,8 @@ def _legacy_entries(values: dict[str, str]) -> list[dict[str, Any]]:
             "type": "anthropic",
             "api_key": values.get("ANTHROPIC_API_KEY", ""),
             "base_url": values.get("ANTHROPIC_BASE_URL", "") or "https://api.anthropic.com",
-            "model": "claude-3-5-sonnet-20241022",
-            "max_context_size": 200000,
+            "model": "claude-sonnet-5",
+            "max_context_size": 1000000,
         })
     return out
 
