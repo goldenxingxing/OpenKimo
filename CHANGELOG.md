@@ -6,6 +6,32 @@ this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [v0.2.2] — 2026-09-21
+
+### Changed
+
+- **不再读取其他 agent 的 skills 目录**。自动发现以前按固定顺序遍历 `.kimi/skills`、`.claude/skills`、`.codex/skills`（用户级与项目级各一遍），并且全部合并——没有 `~/.kimi/skills` 的用户，整套 Claude Code 或 Codex 的 skill 目录会被塞进每一次请求。实际观察到一个项目只有 3 个 skill，却发现了 22 个，另外 19 个从未被调用，每轮白白占用上下文。`skip_skill_dirs` 解决不了：它只能减掉用户点名的绝对路径，覆盖不到别人仓库里自带的 `.claude/skills`。现在读哪些由 `skill_brands` 决定，默认只有 `["kimi"]`。顺带修了一个旧 bug：会话中途刷新 skill 列表时，用户配置的 `skip_skill_dirs` 会被悄悄丢掉。
+
+- **用户在消息里点名的文件夹和文件成为可信的 Wiki 证据来源**。以前只有会话工作目录算可信工作区，用户指向别处的仓库（「看一下 /Users/me/acls 里的 v2 loss」）读了也不留证据，相关 checkpoint 只剩 shell 输出作依据，被当成不稳定丢弃。现在用户消息里写出的路径在本会话内可信：文件夹连同其下所有内容，文件单独一个。根目录、home 及其上级、不存在的路径和敏感文件被忽略，符号链接逃逸仍然拒绝。
+
+### Fixed
+
+- **只填了 `ANTHROPIC_API_KEY` 时每个请求都 404**。预设的 `claude-3-5-sonnet-20241022` 已经下线，两个桌面设置界面也带着同一个失效值。现在是 `claude-sonnet-5`，上下文窗口按它实际的 1M 填写（原来写的 200000）。
+
+- **Memory 工具约一半调用报 Invalid arguments**。它只接受 `{"operation": {"op": ...}}`，描述里却写成 `add(kind, scope, content)`，于是 agent 发来的 `{"operation": "search", "query": ...}` 或扁平的 `{"op": ...}` 全部失败。两种形状现在都会被整理成严格格式，描述里给的是真实 JSON。Wiki 页面路径缺 `.md` 时自动补全，错误信息说明实际的路径规则，不再只回显路径或吞成「Wiki operation failed」。
+
+- **基于命令结果的 Wiki checkpoint 永远无法保存**。Shell 结果记为对话来源，runtime 在模型不填 sources 时会附上它；但授权前的预检只接受来自用户本轮输入的对话来源，于是每次都拒绝 runtime 自己附上的 provenance——任何跑过命令的 subagent 结论都存不进去，模型只能 discard。现在 checkpoint 自身证据记录过的对话来源也能通过校验。
+
+- **会话列表的「最后更新时间」在打开会话时就变**。侧栏读的是 context 文件的 mtime，而打开会话会刷新系统提示里的 Wiki 块、重写这个文件——几天没动的会话显示「刚刚更新」。改用只在真正有活动时才变的 wire 文件 mtime。
+
+- **Plan 的修改意见在对话里看不到**。反馈藏在工具结果里，界面只显示「Plan revision requested」。现在和审批反馈、问题回答一样，作为用户消息显示和回放。
+
+- **Cmd+Enter / Ctrl+Enter 既不发送也不换行**。输入框提示说组合键会插入换行，实际只是跳过了发送，而浏览器对 textarea 里的这两个组合键什么也不做。现在 macOS 上 Cmd+Enter、其他平台 Ctrl+Enter 在光标处插入换行（撤销可用）；Enter 仍然发送，Shift+Enter 不变。
+
+### Build
+
+- Release 的构建改到公开仓库 `goldenxingxing/OpenKimo-releases` 里运行：私有仓库的 Actions 额度已经用完（macOS runner 在私有仓库按 10 倍计费），公开仓库的标准 runner 不计费。源码仍然只在临时 runner 上 checkout，不会公开。
+
 ## [v0.2.1] — 2026-09-08
 
 又一轮全项目审查后的修复集，覆盖上一次没读到的地方：Web 鉴权层、桌面打包、以及两个此前从未被审查过的一方包 `kosong` / `kaos`。方法同 v0.1.41——OpenCodeReview 与内置 code review 各扫一遍取交叉命中，逐条复现后再修，每个修复都配一条在旧代码上会失败的测试。
