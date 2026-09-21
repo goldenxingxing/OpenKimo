@@ -37,7 +37,7 @@ Docker 部署时每个会话跑在一个独立容器里；桌面版（.app / .ex
 
 ### 1.3 路线 A：macOS 应用
 
-从 [Releases](https://github.com/j0x7c4/OpenKimo/releases) 下载 `OpenKimo-*.dmg`，打开后把
+从 [Releases](https://github.com/goldenxingxing/OpenKimo-releases/releases) 下载 `OpenKimo-*.dmg`，打开后把
 `OpenKimo.app` 拖进 `Applications`，再从启动台打开。启动后它不占 Dock，只在菜单栏留一个图标。
 
 还没填过 LLM 配置的话要先填一次（见下一节）。填完之后菜单栏状态变成
@@ -57,8 +57,8 @@ Docker 部署时每个会话跑在一个独立容器里；桌面版（.app / .ex
 <summary><b>路线 B：Docker Compose（服务器部署）</b></summary>
 
 ```bash
-curl -O https://raw.githubusercontent.com/j0x7c4/OpenKimo/main/docker-compose.yml
-curl -O https://raw.githubusercontent.com/j0x7c4/OpenKimo/main/.env.example
+curl -O https://raw.githubusercontent.com/goldenxingxing/OpenKimo-releases/main/docker-compose.yml
+curl -O https://raw.githubusercontent.com/goldenxingxing/OpenKimo-releases/main/.env.example
 cp .env.example .env
 # 编辑 .env，至少填一个 API Key，并把 KIMI_WEB_SESSION_TOKEN 改成随机串
 docker compose up -d
@@ -71,7 +71,7 @@ docker compose up -d
 <details>
 <summary><b>路线 C：Windows</b></summary>
 
-从 [Releases](https://github.com/j0x7c4/OpenKimo/releases) 下载 Windows 安装包，装好后注意一点：**Shell 工具需要 Git for Windows**，
+从 [Releases](https://github.com/goldenxingxing/OpenKimo-releases/releases) 下载 Windows 安装包，装好后注意一点：**Shell 工具需要 Git for Windows**，
 没装的话界面顶部会出现一条横幅，点里面的链接装完再刷新即可。
 </details>
 
@@ -124,7 +124,7 @@ LLM 段下面只有一个 `+ Add Provider` 按钮 —— 这时候服务是起�
 |---|---|---|---|---|
 | Kimi / Moonshot | `kimi` | `https://api.moonshot.cn/v1` | `kimi-k2.7` | `262144` |
 | OpenAI 及兼容端点 | `openai_legacy` | `https://api.openai.com/v1` | `gpt-4o` | `128000` |
-| Anthropic | `anthropic` | `https://api.anthropic.com` | `claude-sonnet-4-5` | `200000` |
+| Anthropic | `anthropic` | `https://api.anthropic.com` | `claude-sonnet-5` | `1000000` |
 
 配多个 provider 就再点一次 `+ Add Provider`；右下角的 `Remove` 删掉当前这个。
 
@@ -368,12 +368,28 @@ Web 端提供这 9 条：
 
 ### 4.9 切换模型
 
-点输入区里的模型名（例如 `kimi-k2.7`）：
+点输入区里的模型名（例如 `k3`）：
 
 ![切换模型](images/tutorial/42-model-switcher.png)
 
-这里改的是**全局默认模型**，不是只影响当前会话。面板里还有两个开关：
-「强制重启忙碌会话」（正在跑的会话也一起切）和「重新加载全局配置」。
+模型分**两层**，这个面板两层都能碰，但它们是两件事。
+
+**选一个模型 —— 只影响当前会话。** 打勾的那个就是这个会话正在用的。选中之后
+会话会重启一次（消息区会出现一行 `Session restarted`），别的会话不受影响。
+一个会话从没选过模型，就一直跟着全局默认走 —— 包括全局默认**之后**被改动时。
+
+选择器**在生成回答的过程中会拒绝切换**，并提示「正在生成回答，完成后才能切换模型」。
+这不是保守：模型是在一轮开始时读取的，中途切了也不会生效，与其静默无效不如直接挡住。
+
+会话还没创建时（在新建会话的输入框里）选的模型会**暂存**，等会话建好再套上去。
+
+**「把 xxx 设为全局默认」 —— 面板底部那一行。** 它把当前选中的模型写成全局默认：
+所有**没有自己模型**的会话都跟着变，空闲的会立刻重启用上新模型，正在忙的会被跳过
+并告诉你跳过了几个 —— 这时旁边会多出一个「强制重启忙碌会话」按钮，点了连忙碌的
+一起重启。当前模型已经是全局默认时，这一行显示「已经是全局默认」且不可点。
+
+之所以做成单独一步，是因为它的影响面是整个工作区，而不是你眼前这个会话。
+
 模型从哪来见 [6.3 Models](#63-models)。
 
 ### 4.10 一次完整的来回长什么样
@@ -419,7 +435,7 @@ agent 要做有副作用的事情时，会停下来问你：
 ### 5.2 三道闸门
 
 1. **危险命令拦截**（`BLOCK_DANGEROUS_COMMANDS=true`）—— `rm -rf /`、`mkfs`、`dd` 这类直接挡掉。
-2. **人工审批** —— 就是上面这套卡片；YOLO / afk 会跳过它。
+2. **人工审批** —— 就是上面这套卡片；YOLO / afk 会跳过它。写入 Wiki 是个特例：afk 下仍然会弹卡片等你（见 [6.8](#68-wiki-个人知识库)）。
 3. **容器隔离** —— 仅 Docker 路线：每个会话一个容器，CPU、内存、磁盘、进程数都有硬上限，
    超时自动销毁（默认 24 小时）。
 
@@ -536,8 +552,20 @@ UI 插件把自定义 React 组件挂到 agent 生命周期事件上（`thinking
 
 ![知识索引](images/tutorial/62-knowledge.png)
 
-一份**目录**，不是知识本身：正文放在 `wiki/` 下的各个页面里，这里只列一张指路清单，
-让 agent 知道有哪些东西、去哪找。写成简短的 Markdown 列表就行。
+一份**你自己手写的目录**：告诉 agent 有哪些东西、去哪找。写成简短的 Markdown 列表就行。
+
+它编辑的是**一个文件**——`<默认工作目录，未设置则为 ~>/.kimi/memory/knowledge/index.md`
+（默认工作目录由 `KIMI_DEFAULT_WORK_DIR` 决定）。这个文件在你第一次保存之前是不存在的。
+
+名字里都有 "knowledge"、容易混起来的其实有三样东西，它们**互不相干**：
+
+| | 存在哪 | 范围 | 谁写 |
+|---|---|---|---|
+| **Admin → Knowledge**（本节） | `<默认工作目录或 ~>/.kimi/memory/knowledge/index.md` | 一份全局索引 | **你手写** |
+| **Memory → Knowledge**（[6.7](#67-memory) 第四个页签） | `<该会话的工作目录>/.kimi/memory/knowledge/` | 绑定工作目录，换个目录就是另一套 | 你和 agent |
+| **Wiki**（[6.8](#68-wiki-个人知识库)） | `<应用数据目录>/users/default/wiki/` | 全局一份，跨会话、跨工作目录 | agent 提议，**你批准** |
+
+三者路径不同、生命周期不同。这一节的索引**不会**自动收录 Wiki 里的内容，反过来也一样。
 
 ### 6.7 Memory
 
@@ -564,6 +592,94 @@ UI 插件把自定义 React 组件挂到 agent 生命周期事件上（`thinking
 ![知识文件](images/tutorial/66-memory-knowledge.png)
 
 这跟顶层的 Knowledge 页签（[6.6](#66-knowledge)）不是一回事：后者是全局的知识索引，前者是某个工作目录里的知识文件。
+
+### 6.8 Wiki 个人知识库
+
+Wiki 是**一份跨会话、跨工作目录的长期知识库**。Memory 记的是"关于你的事"，
+Wiki 记的是"查证过的知识"——一个结论、一份对比、一个实体的来龙去脉。
+
+**它没有网页界面。** Admin Panel 里找不到 Wiki 页签，这是有意的：Wiki 由 agent 读写，
+你在两个地方与它相遇——agent 提议写入时弹出的**审批卡片**，以及磁盘上的 Markdown 文件。
+
+**存在哪。** macOS 应用是 `~/Library/Application Support/OpenKimo/users/default/wiki/`，
+可以用环境变量 `OPENKIMO_WIKI_ROOT` 指到别处。目录结构是固定的六个分类加四个特殊文件：
+
+```
+wiki/
+├── entities/      具体的人、产品、系统
+├── concepts/      概念与机制
+├── comparisons/   对比结论
+├── sources/       来源记录
+├── queries/       查过的问题
+├── lint/          结构问题
+├── index.md       目录
+├── overview.md    总览
+├── log.md         变更流水
+└── schema.md      本 Wiki 的写作规范
+```
+
+全是纯 Markdown，可以直接看、直接备份、直接用 git 管起来。
+
+**agent 怎么用它。** 只有一个工具，六个动作：`search`、`read`（查与读）、
+`remember`、`ingest`（写，需要你批准）、`lint`、`discard`。**只有主 agent 能用**——
+子 agent 调它会被拒绝，理由是子 agent 的输出没有经过你，不该直接沉淀成长期知识。
+
+**写入前有两道闸门，你只会看到第二道。**
+
+1. **价值闸门（你看不见）。** 候选内容要么伴随**你明确的记录意图**（你说了"记住"
+   "记到知识库"这类话），要么有**可靠来源**，否则直接丢弃，根本不会来问你。所以
+   agent 不会因为聊到什么就攒一堆东西让你审。另外 `ingest` 只接受**当前这一轮的
+   内容**或**已注册工作区里的相对路径文件**——它不能凭空引用别处的文件。
+
+2. **审批卡片（你看得见）。** 和执行命令、修改文件是同一套卡片（见 [5.1](#51-审批卡片)），
+   摘要里列出：要写哪些页面、来源是什么、跳过了哪些重复页。
+
+> **这里有一个和别处不同的地方，值得记住：afk 不会自动放行 Wiki 写入，YOLO 会。**
+> [5.2](#52-三道闸门) 说人工审批会被 YOLO / afk 跳过。Wiki 写入用的是只在本会话生效的
+> 审批策略，所以 afk 那种"没人在场就一路放行"对它无效——卡片照弹，等你回来点。
+> 但显式开 YOLO 是另一回事：那是你亲手表达的"这一程别拦我"，Wiki 写入和别的工具一样
+> 直接放行。「本会话内同意」这种动作级授权同样有效。
+>
+> 所以开 YOLO 之前值得想一下：长期知识库写错一条，影响的是**以后所有会话**。
+
+**拒绝是安全的。** 记录知识是 agent 正在做的事情的副产品，不是那件事本身，
+所以你点「拒绝」不会中断当前这一轮——它记下"这次没记"，然后继续干活。
+
+### 6.9 MCP 服务器
+
+MCP（Model Context Protocol）服务器是给 agent **外接工具**的标准方式——浏览器控制、
+第三方系统的读写接口、公司内部的检索服务，都可以做成一个 MCP 服务器挂上来。
+挂上之后，它提供的工具和 OpenKimo 自带的工具一样，出现在模型的工具列表里。
+
+这个页签编辑的是 `~/.kimi/mcp.json`，**和命令行 `kimi mcp` 是同一份文件**。
+在哪边改都行，改完另一边刷新就能看到。
+
+**一个服务器长什么样。** 两类：
+
+- **远程**（http / sse）—— 填一个 URL，可能再加几个 header 放 API Key。
+- **本地**（stdio）—— 填一条命令，OpenKimo 把它作为子进程拉起来，用标准输入输出说话。
+
+**「Test」按钮是这里最值得用的东西。** 它当场连一次，把服务器提供的工具列出来。
+填错 URL、Key 过期、命令不存在，都在这一步看见，而不是等到某次会话里模型莫名其妙少了工具。
+
+**密钥是掩码显示的。** header 的值、环境变量的值，界面上显示成 `***后四位`。
+**原样提交就是"不改"**，想换就直接输入新的。只有「Edit JSON」那个入口会显示文件原文——
+它是逃生舱，表单表达不了的字段（比如单独的超时设置）在那里改。
+
+**改完什么时候生效。** MCP 服务器是在会话启动时连接的，所以保存之后**空闲会话会自动重启**
+来接上新配置；**正在生成回答的会话会被跳过**，界面会告诉你跳过了几个，它们下次重启时才生效。
+
+**stdio 有一道额外的闸门。** 一条 stdio 配置就是一条在宿主机上执行的命令——
+这意味着能进管理面板的人，就能让服务器跑任意命令。所以：桌面版允许（那本来就是你自己的机器），
+**Docker / 服务器部署默认不允许**，要放行得显式设置环境变量 `KIMI_WEB_ALLOW_STDIO_MCP=1`。
+在宿主机上用 `kimi mcp add` 不受这个限制。
+
+**需要 OAuth 的服务器**目前还得去终端跑一次 `kimi mcp auth <名字>`（会打开浏览器），
+面板只负责告诉你"这个还没授权"。
+
+**会话里能看到什么。** 会话启动连接服务器时，消息区会出现一条「Connecting to MCP servers…」。
+全部连上，它就消失；**有服务器连不上或没授权，它会变成一行说明并点名是谁**——
+因为那台服务器的工具在这个会话接下来的时间里都是缺失的，不说一声你不会知道。
 
 ---
 
@@ -697,7 +813,8 @@ v0.1.37 之前会话是从登录那刻钉死的 24 小时，中途不续期，�
 | Sandbox | 会话专属容器 |
 | Skill | 一段告诉模型"遇到这类活怎么干"的 Markdown |
 | Agent | 一套人格 + 工具集，新建会话时选 |
-| Wiki / Knowledge | 跨会话的知识库，索引在 Admin → Knowledge |
+| Wiki | 跨会话、跨工作目录的长期知识库，存在应用数据目录下，agent 提议写入、你批准（[6.8](#68-wiki-个人知识库)） |
+| Knowledge | 你手写的一份索引，在 Admin → Knowledge；与 Wiki 是两套独立存储（[6.6](#66-knowledge)） |
 | Persistent memory | 已入库的长期记忆 |
 | Candidate / Suggested | 抽取出来、等人批准的记忆提案 |
 | Carryover | 把上一段对话的结论带到下一段的机制 |
