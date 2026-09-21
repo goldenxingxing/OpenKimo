@@ -8,7 +8,17 @@ this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [v0.2.2] — 2026-09-21
 
+### Added
+
+- **在管理面板里管理 MCP 服务器**。以前添加 MCP 服务器只能在宿主机上跑 `kimi mcp add`，Web 用户未必有 shell，界面上也从来看不到 `mcp.json`。管理面板新增 MCP 页签：列出、添加、编辑、删除服务器，测试连接并列出它提供的工具，表单覆盖不到的字段可以直接编辑原始 JSON。读写的就是 CLI 那份 `~/.kimi/mcp.json`，写入是原子的。凭据显示为掩码，原样提交掩码表示保留原值。保存后重启空闲会话，并点名跳过的忙碌会话。
+
+  stdio 条目是宿主机要执行的命令，所以 Web 端只在桌面版或设置了 `KIMI_WEB_ALLOW_STDIO_MCP=1` 时接受；开启 `KIMI_WEB_RESTRICT_SENSITIVE_APIS` 的部署拒绝全部 MCP 接口。发布前审查修掉了几处问题：原始 JSON 去掉 `mcpServers` 这层包装就能绕过 stdio 限制（fastmcp 会把顶层对象当成服务器照样启动）；清空原始 JSON 保存会写出一个 CLI 解析不了的文件，连 `kimi` 都起不来；用表单编辑一个服务器会把带空格的路径和参数拆碎，还会丢掉表单没显示的 `cwd`、`timeout` 等字段；对未授权的 OAuth 服务器点「测试」会在服务器主机上发起登录。
+
+- **MCP 服务器没连上时会说出来**。会话以前显示「Connecting to MCP servers…」然后直接消失，不管是全部连上还是一个都没连上——某个服务器失败或需要授权时，它的工具在整个会话里都悄悄缺失。现在这条占位消息会变成一行说明，点名失败或需要授权的服务器，并给出对应的 `kimi mcp auth <name>`；全部连上时不出声。
+
 ### Changed
+
+- **LLM 请求的临时失败按服务器的节奏重试**。可重试的状态码以前是手写的五个，529 过载、408、409，以及 Cloudflare 后面源站不可达时返回的 520–527 都会在第一次失败时直接结束这一轮。现在整个 5xx 除 501/505 外都重试，另加 408/409/429 和传输层错误。限流时遵守 `Retry-After`（最长 1 分钟），否则从 0.5 秒退避到 30 秒；`max_retries_per_step` 默认从 3 改为 5。请求因超出上下文窗口被拒时，会压缩一次再重试——识别的报错文案覆盖 Kimi、Anthropic、Gemini 和 OpenAI 两种接口，而不只是 OpenAI chat completions 一家。
 
 - **不再读取其他 agent 的 skills 目录**。自动发现以前按固定顺序遍历 `.kimi/skills`、`.claude/skills`、`.codex/skills`（用户级与项目级各一遍），并且全部合并——没有 `~/.kimi/skills` 的用户，整套 Claude Code 或 Codex 的 skill 目录会被塞进每一次请求。实际观察到一个项目只有 3 个 skill，却发现了 22 个，另外 19 个从未被调用，每轮白白占用上下文。`skip_skill_dirs` 解决不了：它只能减掉用户点名的绝对路径，覆盖不到别人仓库里自带的 `.claude/skills`。现在读哪些由 `skill_brands` 决定，默认只有 `["kimi"]`。顺带修了一个旧 bug：会话中途刷新 skill 列表时，用户配置的 `skip_skill_dirs` 会被悄悄丢掉。
 
