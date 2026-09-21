@@ -1,9 +1,12 @@
 name: Release
 
+# Releases are built by goldenxingxing/OpenKimo-releases/.github/workflows/
+# release.yml, where standard runners cost no Actions minutes (this private
+# repo bills macOS at 10x and ran out of quota). Kept as a manual fallback
+# only — a tag push would otherwise build and push every image twice:
+#   gh workflow run release.yml -R goldenxingxing/OpenKimo --ref v0.2.2
 on:
-  push:
-    tags:
-      - 'v*'
+  workflow_dispatch:
 
 env:
   GATEWAY_IMAGE: ghcr.io/goldenxingxing/kimi-agent-gateway
