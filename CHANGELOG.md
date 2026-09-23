@@ -6,6 +6,12 @@ this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed
+
+- **会话重启后就再也问不了问题了**。重启会换掉 worker 进程，但浏览器的 WebSocket 不断开，而浏览器只在建立连接时发一次 `initialize`——新 worker 因此一无所知，退回默认值：AskUserQuestion 在这个会话剩下的时间里一律返回「连接的客户端不支持交互式提问」，Plan 模式不可用，客户端注册过的外部工具和 hook 也全丢了。切换会话模型就会触发重启，所以切一次模型就足以让它坏掉。现在新 worker 在报告自己空闲之前，会先收到重放的 `initialize`。
+
+- **历史记录里的上传文件分不清是哪个**。以前每个文件都是同一个回形针方块，文件名只在悬停提示里。现在按文件类型显示图标，并直接显示文件名和扩展名。
+
 ## [v0.2.2] — 2026-09-21
 
 ### Added
