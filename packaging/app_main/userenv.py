@@ -11,11 +11,14 @@ on first run.
 
 from __future__ import annotations
 
+import functools
 import logging
 import os
 import shlex
 import shutil
 import stat
+import subprocess
+import sys
 from pathlib import Path
 
 from .paths import AppPaths
@@ -211,6 +214,61 @@ def _bundled_python_version(p: AppPaths) -> str | None:
     return version or None
 
 
+_PATH_BEGIN = "__OPENKIMO_PATH_BEGIN__"
+_PATH_END = "__OPENKIMO_PATH_END__"
+
+
+@functools.cache
+def login_shell_path() -> str:
+    """The PATH the user's own login shell sets up, or "" when it cannot be had.
+
+    An app started from Finder or the Dock inherits launchd's PATH —
+    /usr/bin:/bin:/usr/sbin:/sbin — and nothing the user installed is on it:
+    not Homebrew's node and npm, not nvm, not a pipx bin. The agent's shell
+    tool inherits the server's environment, so a skill that runs
+    `node scripts/imap.js` answered "node: command not found" in the app while
+    the same command worked in Terminal. Asking the login shell once, the way
+    a terminal would build it, is how GUI apps on macOS recover that PATH.
+
+    Interactive as well as login, because nvm and many Homebrew setups live
+    in .zshrc. The markers fence the value off from anything a profile prints.
+    """
+    if sys.platform != "darwin":
+        return ""
+    shell = os.environ.get("SHELL") or "/bin/zsh"
+    script = f'printf "%s%s%s" "{_PATH_BEGIN}" "$PATH" "{_PATH_END}"'
+    try:
+        result = subprocess.run(
+            [shell, "-ilc", script],
+            stdin=subprocess.DEVNULL,
+            capture_output=True,
+            text=True,
+            timeout=5,
+            check=False,
+        )
+    except (OSError, subprocess.SubprocessError) as exc:
+        log.warning("Could not read PATH from login shell %s: %s", shell, exc)
+        return ""
+    begin = result.stdout.rfind(_PATH_BEGIN)
+    end = result.stdout.find(_PATH_END, begin)
+    if begin < 0 or end < 0:
+        log.warning("Login shell %s printed no PATH (exit %s)", shell, result.returncode)
+        return ""
+    return result.stdout[begin + len(_PATH_BEGIN) : end]
+
+
+def _merge_path(*parts: str) -> str:
+    """Join PATH strings in order, keeping the first occurrence of each entry."""
+    seen: set[str] = set()
+    entries: list[str] = []
+    for part in parts:
+        for entry in part.split(os.pathsep):
+            if entry and entry not in seen:
+                seen.add(entry)
+                entries.append(entry)
+    return os.pathsep.join(entries)
+
+
 def env_overlay(p: AppPaths) -> dict[str, str]:
     """Environment additions for any subprocess that should use the overlay.
 
@@ -222,7 +280,11 @@ def env_overlay(p: AppPaths) -> dict[str, str]:
     overlay = {
         "PYTHONUSERBASE": str(p.userbase),
         "PIP_CONFIG_FILE": str(p.pip_conf),
-        "PATH": f"{p.userbase_bin}{sep}{p.bundled_python_bin}{sep}{base_path}",
+        # The bundled interpreter stays ahead of everything, so `python` and
+        # `pip` are still the app's; the user's own tools come after it.
+        "PATH": _merge_path(
+            str(p.userbase_bin), str(p.bundled_python_bin), base_path, login_shell_path()
+        ),
     }
     # Named explicitly, for the interpreter that ignores user-site. The caller
     # puts the bundled kimi_cli ahead of these, so the overlay adds packages
