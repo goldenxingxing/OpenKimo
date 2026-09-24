@@ -422,10 +422,9 @@ def _top_level_modules(src: Path) -> list[str]:
 def build_local_wheels(wheels_dir: Path) -> list[Path]:
     """Build the kimi-cli wheel *and* every workspace member's, via ``uv build``.
 
-    Order is the workspace's own, which is not a dependency order — kimi-code
-    depends on kimi-cli and is declared before it. That is fine here and only
-    here: every wheel goes into a single pip resolve, where argument order
-    carries no meaning. The macOS build, which feeds venvstacks a sequential
+    Order is the workspace's own, which need not be a dependency order. That
+    is fine here and only here: every wheel goes into a single pip resolve,
+    where argument order carries no meaning. The macOS build, which feeds venvstacks a sequential
     requirements list, is the one that has to care.
 
     Deliberately not cached. Workspace members keep their version across source
@@ -641,9 +640,8 @@ def install_site_packages(
         print(f"  ! {requirements_file} missing; skipping the Windows deps.")
 
     # Fatal on Windows, where this tree is the one that ships. The wheels pin
-    # each other (kimi-code wants kimi-cli==1.49.0, kimi-cli wants
-    # kosong[contrib]==0.55.0 and pykaos==0.9.0), so one stale pin makes the
-    # resolve unsatisfiable and installs nothing; carrying on from that only
+    # each other (kimi-cli wants kosong[contrib]==0.55.0 and pykaos==0.9.0),
+    # so one stale pin makes the resolve unsatisfiable and installs nothing; carrying on from that only
     # reaches verify_workspace_members(), which would report every member
     # missing instead of the conflict pip actually printed.
     rc = run_ok(pip_cmd_base + common_flags + resolve)

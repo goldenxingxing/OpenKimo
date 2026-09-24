@@ -459,7 +459,7 @@ def _create_resolved_toml(cfg: BuildConfig, wheels_dir: Path) -> Path:
     if not wheels:
         raise RuntimeError("no wheels were produced under packaging/wheels/")
 
-    # Keep ordering: kosong / kaos / kimi-code / kimi-sdk first, then kimi-cli.
+    # Keep ordering: kosong / kaos / carryover first, then kimi-cli.
     # Dependencies before dependents, in the order the workspace declares them,
     # with kimi-cli last. Derived rather than transcribed for the same reason
     # as the list itself: a member missing from a hand-written order sorts to
