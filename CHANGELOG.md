@@ -6,6 +6,8 @@ this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [v0.3.0] — 2026-09-24
+
 ### Changed
 
 - **版本号改为 OpenKimo 自己的 0.3.0**。上游 kimi-cli 停在 1.49/1.50，已经转去做 Kimi Code；OpenKimo 在它之上有自己的改动，于是从 0.3.0 起单独编号，安装包、应用和网页左上角显示的都是这个版本。发给 Kimi 接口和登录服务的身份仍固定为 `KimiCLI/1.49.0`，接口那边看到的和以前完全一样。
