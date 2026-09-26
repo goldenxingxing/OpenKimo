@@ -310,6 +310,27 @@ def _port_owner_pid(port: int) -> int | None:
     return pid if healthy else None
 
 
+def _kill_tree_windows(proc: subprocess.Popen) -> None:
+    """End the server and everything it started.
+
+    TerminateProcess (``Popen.terminate``) ends the server alone. Its session
+    workers are stopped by the server's own shutdown, which a killed server never
+    runs, so they were left behind: after Quit, three "Python"s still held the
+    install dir and the installer could not replace it. ``taskkill /T`` walks the
+    tree from the server while it is still alive to be walked.
+    """
+    try:
+        subprocess.run(
+            ["taskkill", "/PID", str(proc.pid), "/T", "/F"],
+            capture_output=True, text=True, timeout=10.0,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0x08000000),
+        )
+    except Exception:
+        log.exception("taskkill failed for pid %d", proc.pid)
+    if proc.poll() is None:
+        proc.terminate()
+
+
 def _reap_orphan_listener_windows(port: int) -> None:
     """Windows counterpart of :func:`_reap_orphan_listener`.
 
@@ -598,7 +619,7 @@ class UvicornSupervisor:
             # TerminateProcess() — hard kill — which is the right escalation
             # after CTRL_BREAK_EVENT was ignored.
             if _IS_WINDOWS:
-                self._proc.terminate()
+                _kill_tree_windows(self._proc)
             else:
                 self._proc.kill()
             try:
@@ -621,9 +642,9 @@ class UvicornSupervisor:
             try:
                 proc.send_signal(signal.CTRL_BREAK_EVENT)
             except (OSError, ValueError):
-                # Process already gone or signal not supported on this build —
-                # fall back to TerminateProcess so we don't leave it running.
-                proc.terminate()
+                # Process already gone, or no console to send it through: the
+                # tray app is pythonw and has none. Don't leave it running.
+                _kill_tree_windows(proc)
         else:
             proc.terminate()
 

@@ -80,3 +80,17 @@ def test_uninstall_does_not_call_wizard_functions():
     assert "WizardIsTaskSelected" not in uninstall_proc
     assert "purge-user-data.marker" in INSTALLER
     assert "CurStepChanged" in INSTALLER
+
+
+def test_installer_closes_a_running_openkimo_itself():
+    # The Restart Manager listed a running OpenKimo as three "Python"s and then
+    # failed to close them (no window to ask). Setup finds what runs from the
+    # install dir and ends it, before installing and before uninstalling.
+    setup = INSTALLER[INSTALLER.index("[Setup]") : INSTALLER.index("[Languages]")]
+    code = INSTALLER[INSTALLER.index("[Code]") :]
+    assert "CloseApplications=no" in setup
+    assert "Win32_Process" in code and "taskkill.exe" in code
+    for event in ("function PrepareToInstall(", "function InitializeUninstall("):
+        body = code[code.index(event) :]
+        body = body[: body.index("\nend;")]
+        assert "CloseRunningApp()" in body

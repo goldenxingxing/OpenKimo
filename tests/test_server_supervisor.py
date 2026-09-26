@@ -156,8 +156,97 @@ class TestTheRetryBudgetIsConsecutive:
         import inspect
 
         source = inspect.getsource(srv.UvicornSupervisor._watch_forever)
-        running = source[source.index("_check_health(self._port"):]
+        running = source[source.index("_check_health(self._port") :]
 
         assert "_restart_attempts = 0" in running.split("ServerState.RUNNING")[0], (
             "the budget must be cleared when the child reaches RUNNING"
         )
+
+
+class TestWindowsStopEndsTheSessionWorkersToo:
+    """Quit on Windows left the session workers running.
+
+    The tray app is pythonw, with no console to send CTRL_BREAK through, so the
+    graceful signal failed and the fallback, TerminateProcess, ended the server
+    alone. The workers are stopped by the server's own shutdown, which a killed
+    server never runs: after Quit, three "Python"s still held the install dir.
+    """
+
+    class _Child:
+        pid = 4242
+
+        def __init__(self, *, signal_fails: bool) -> None:
+            self.signal_fails = signal_fails
+            self.alive = True
+            self.terminated = False
+
+        def poll(self) -> int | None:
+            return None if self.alive else 0
+
+        def send_signal(self, _sig: int) -> None:
+            if self.signal_fails:
+                raise OSError("no console")
+
+        def terminate(self) -> None:
+            self.terminated = True
+            self.alive = False
+
+        def wait(self, timeout: float | None = None) -> int:
+            if self.alive:
+                raise srv.subprocess.TimeoutExpired("uvicorn", timeout or 0)
+            return 0
+
+    @pytest.fixture(autouse=True)
+    def windows(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setattr(srv, "_IS_WINDOWS", True)
+        monkeypatch.setattr(srv.signal, "CTRL_BREAK_EVENT", 1, raising=False)
+        monkeypatch.setattr(srv, "GRACEFUL_KILL_TIMEOUT", 0)
+
+    def _stop(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        proc: _Child,
+        *,
+        has_taskkill: bool = True,
+    ) -> list[list[str]]:
+        calls: list[list[str]] = []
+
+        def run(cmd: list[str], **_kw: object) -> None:
+            if not has_taskkill:
+                raise FileNotFoundError("taskkill")
+            calls.append(cmd)
+            proc.alive = False  # the tree is gone
+
+        monkeypatch.setattr(srv.subprocess, "run", run)
+        s = _supervisor()
+        s._proc = proc
+        s._terminate_locked()
+        return calls
+
+    def test_a_failed_graceful_signal_kills_the_whole_tree(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        proc = self._Child(signal_fails=True)
+
+        calls = self._stop(monkeypatch, proc)
+
+        assert calls == [["taskkill", "/PID", "4242", "/T", "/F"]]
+        assert not proc.terminated  # not the server alone
+
+    def test_an_ignored_graceful_signal_kills_the_whole_tree(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        proc = self._Child(signal_fails=False)
+
+        calls = self._stop(monkeypatch, proc)
+
+        assert calls == [["taskkill", "/PID", "4242", "/T", "/F"]]
+
+    def test_the_server_is_still_ended_when_taskkill_is_missing(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        proc = self._Child(signal_fails=True)
+
+        self._stop(monkeypatch, proc, has_taskkill=False)
+
+        assert proc.terminated

@@ -53,6 +53,10 @@ WizardStyle=modern
 UninstallDisplayIcon={app}\OpenKimo.exe
 ArchitecturesInstallIn64BitMode=x64
 ArchitecturesAllowed=x64
+; The Restart Manager lists a running OpenKimo as three "Python"s and then fails
+; to close them: the tray app, the server and its workers have no window to be
+; asked to close. PrepareToInstall below closes them instead.
+CloseApplications=no
 
 [Languages]
 Name: "english"; MessagesFile: "compiler:Default.isl"
@@ -96,6 +100,82 @@ var
 function PurgeMarkerPath(): String;
 begin
   Result := ExpandConstant('{app}\purge-user-data.marker');
+end;
+
+// Counts the processes running from the install dir -- the tray app, the server,
+// its workers, a CLI started from the runtime -- and with Kill, ends them. They
+// hold files under {app}\runtime, which [InstallDelete] removes.
+function AppProcesses(Kill: Boolean): Integer;
+var
+  Locator, Service, Processes, Process: Variant;
+  Prefix, Path: String;
+  I, Pid, ResultCode: Integer;
+begin
+  Result := 0;
+  Prefix := Lowercase(AddBackslash(ExpandConstant('{app}')));
+  try
+    Locator := CreateOleObject('WbemScripting.SWbemLocator');
+    Service := Locator.ConnectServer('.', 'root\CIMV2');
+    Processes := Service.ExecQuery(
+      'SELECT ProcessId, ExecutablePath FROM Win32_Process WHERE ExecutablePath IS NOT NULL');
+    for I := 0 to Processes.Count - 1 do
+    begin
+      Process := Processes.ItemIndex(I);
+      Path := Process.ExecutablePath;
+      Pid := Process.ProcessId;
+      if Pos(Prefix, Lowercase(Path)) = 1 then
+      begin
+        Result := Result + 1;
+        if Kill then
+          Exec(ExpandConstant('{sys}\taskkill.exe'), Format('/F /T /PID %d', [Pid]),
+            '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+      end;
+    end;
+  except
+    Log('Could not list running processes: ' + GetExceptionMessage);
+  end;
+end;
+
+// Closes a running OpenKimo, after saying so. Returns '' when none is left
+// running, else why not.
+function CloseRunningApp(): String;
+var
+  I: Integer;
+begin
+  Result := '';
+  if AppProcesses(False) = 0 then
+    Exit;
+  if SuppressibleMsgBox('{#AppName} is running. Setup will close it and continue.' + #13#10#13#10 +
+      'Anything it is working on right now will be stopped.',
+      mbInformation, MB_OKCANCEL, IDOK) <> IDOK then
+  begin
+    Result := '{#AppName} is still running. Quit it from its tray icon, then run Setup again.';
+    Exit;
+  end;
+  AppProcesses(True);
+  for I := 1 to 20 do
+  begin
+    if AppProcesses(False) = 0 then
+      Exit;
+    Sleep(250);
+  end;
+  Result := 'Setup could not close {#AppName}. Quit it from its tray icon, or end its ' +
+    'python.exe processes in Task Manager, then run Setup again.';
+end;
+
+function PrepareToInstall(var NeedsRestart: Boolean): String;
+begin
+  Result := CloseRunningApp();
+end;
+
+function InitializeUninstall(): Boolean;
+var
+  Error: String;
+begin
+  Error := CloseRunningApp();
+  if Error <> '' then
+    MsgBox(Error, mbError, MB_OK);
+  Result := Error = '';
 end;
 
 // WizardIsTaskSelected only exists while the install wizard is alive, so the
