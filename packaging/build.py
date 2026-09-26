@@ -48,6 +48,14 @@ KIMI_CLI = REPO / "kimi-cli"
 LOGO_MAX_BYTES = 512 * 1024
 FAVICON_MAX_BYTES = 256 * 1024
 
+# sha256 of built-in logos/favicons earlier builds stored in the branding table
+# (see app_main/seed_branding.py). The square logo was the favicon until the
+# round one; keep build_windows.LEGACY_BUILTIN_ASSET_SHA256 the same.
+LEGACY_BUILTIN_ASSET_SHA256 = [
+    "dbd00e2ad61ea8832ef0b024662a4a8a5d1b66f0599d5d42e1c9688b9d4cfdf6",
+    "a30b84efe092999d20b4b7f78b1b99c8a2d1e1da72e3fa09f853bf68b616f0af",
+]
+
 
 # ---- config ---------------------------------------------------------------
 
@@ -64,6 +72,7 @@ class BuildConfig:
     icon: Path
     logo: Path | None
     favicon: Path | None
+    menubar_icon: Path | None
     brand_name: str
     page_title: str
     output_dir: Path
@@ -113,6 +122,7 @@ def parse_args(argv: list[str]) -> BuildConfig:
     parser.add_argument("--icon", default=bapp.get("icon", "icon.png"))
     parser.add_argument("--logo", default=bapp.get("logo"))
     parser.add_argument("--favicon", default=bapp.get("favicon"))
+    parser.add_argument("--menubar-icon", default=bapp.get("menubar_icon"))
     parser.add_argument("--brand-name", default=bbrand.get("brand_name"))
     parser.add_argument("--page-title", default=bbrand.get("page_title"))
     parser.add_argument("--py-version", default=bpy.get("version", "3.12"))
@@ -144,6 +154,7 @@ def parse_args(argv: list[str]) -> BuildConfig:
     icon = (ROOT / args.icon).resolve()
     logo = (ROOT / args.logo).resolve() if args.logo else None
     favicon = (ROOT / args.favicon).resolve() if args.favicon else None
+    menubar_icon = (ROOT / args.menubar_icon).resolve() if args.menubar_icon else None
 
     return BuildConfig(
         app_name=app_name,
@@ -157,6 +168,7 @@ def parse_args(argv: list[str]) -> BuildConfig:
         icon=icon,
         logo=logo,
         favicon=favicon,
+        menubar_icon=menubar_icon,
         brand_name=args.brand_name or app_name,
         page_title=args.page_title or app_name,
         output_dir=(ROOT / args.output_dir).resolve(),
@@ -574,13 +586,16 @@ def _create_icon(cfg: BuildConfig, dest: Path) -> Path:
     icns.parent.mkdir(parents=True, exist_ok=True)
     run(["iconutil", "-c", "icns", "-o", str(icns), str(iconset)])
 
-    # Menu-bar icon: a small PNG sized for the status item (22pt @ 2x = 44px).
-    # rumps loads this via NSImage; we keep it colored (not template) so the
-    # brand is recognisable even on the dark menu bar.
-    menubar = dest.parent / "MenuBarIcon.png"
-    run(["sips", "-z", "44", "44", str(cfg.icon),
-         "--out", str(menubar)],
-        stdout=subprocess.DEVNULL)
+    # Menu-bar icon (22pt @ 2x = 44px). A brand that supplies a monochrome
+    # template ships it as MenuBarIconTemplate.png, which the app shows as a
+    # template image: macOS tints it for a light or dark menu bar, like the
+    # system icons. Otherwise the app icon is shrunk into a coloured one.
+    if cfg.menubar_icon is not None:
+        shutil.copyfile(cfg.menubar_icon, dest.parent / "MenuBarIconTemplate.png")
+    else:
+        run(["sips", "-z", "44", "44", str(cfg.icon),
+             "--out", str(dest.parent / "MenuBarIcon.png")],
+            stdout=subprocess.DEVNULL)
     return icns
 
 
@@ -684,6 +699,9 @@ def write_brand_json(cfg: BuildConfig, resources: Path) -> None:
         "version": cfg.version,
         "build_number": cfg.build_number,
         "branding_seed": seed,
+        # Built-in logos/favicons earlier builds stored; on upgrade they are
+        # replaced by this build's, while an image set in the admin panel stays.
+        "branding_legacy_asset_sha256": LEGACY_BUILTIN_ASSET_SHA256,
     }
     (resources / "brand.json").write_text(json.dumps(data, indent=2))
 

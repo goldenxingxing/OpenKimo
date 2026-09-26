@@ -69,6 +69,30 @@ def _status_line(state: ServerState, port: int, reason: str | None = None) -> st
 
 # ---------- tray app ------------------------------------------------------
 
+
+class TrayIcon(pystray.Icon):
+    """A tray icon whose left click opens the menu, as its right click does.
+
+    pystray runs the menu's default item on a left click. That item was "Open
+    Web UI", so every click on the icon opened another browser tab. The tray is
+    the app's only window, so a click shows its menu and opening the web UI is
+    a choice made there. If pystray's Windows backend changes and the hook below
+    is gone, a left click does nothing: there is no default item left to run.
+    """
+
+    def _on_notify(self, wparam, lparam):  # pystray's win32 WM_NOTIFY handler
+        handler = getattr(super(), "_on_notify", None)
+        if handler is None:
+            return None
+        if lparam == _WM_LBUTTONUP:
+            lparam = _WM_RBUTTONUP
+        return handler(wparam, lparam)
+
+
+# win32 notification codes pystray receives for the tray icon
+_WM_LBUTTONUP = 0x0202
+_WM_RBUTTONUP = 0x0205
+
 class OpenKimoApp:
     """System-tray supervisor.
 
@@ -97,7 +121,7 @@ class OpenKimoApp:
             log.warning("tray icon missing at %s; using fallback", p.tray_icon)
             image = self._fallback_icon()
 
-        self.icon = pystray.Icon(
+        self.icon = TrayIcon(
             name=p.slug,
             title=p.app_name,
             icon=image,
@@ -125,7 +149,6 @@ class OpenKimoApp:
                 "Open Web UI",
                 self._on_open_web,
                 enabled=lambda _: self.supervisor.state == ServerState.RUNNING,
-                default=True,
             ),
             pystray.MenuItem(
                 "Open Admin",

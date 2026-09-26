@@ -20,7 +20,11 @@ min_macos_version = "11.0"
 # Asset paths are resolved relative to this file (packaging/).
 icon = "../kimi-cli/web/public/logo.png"
 logo = "../kimi-cli/web/public/logo.png"
-favicon = "../kimi-cli/web/public/logo.png"
+# Round: the logo's disc on a transparent background (derive_brand_icons.py).
+favicon = "../kimi-cli/web/public/favicon.png"
+# Monochrome template for the macOS menu bar (derive_brand_icons.py). Without
+# it the build shrinks `icon` into a coloured menu-bar icon.
+menubar_icon = "MenuBarIconTemplate.png"
 
 [branding]
 # Web UI branding seeded into the SQLite branding table on first run.

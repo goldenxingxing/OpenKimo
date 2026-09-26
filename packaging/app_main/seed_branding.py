@@ -155,6 +155,7 @@ def seed_if_needed(p: AppPaths) -> None:
             elif (
                 key in _PACKAGED_ASSET_FIELDS
                 and current
+                and current != value
                 and _data_url_sha256(current) in legacy_asset_hashes
             ):
                 to_write[key] = value

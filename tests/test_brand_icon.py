@@ -24,7 +24,9 @@ def test_builtin_brand_icon_has_one_canonical_source() -> None:
 
     assert brand["app"]["icon"] == expected_path
     assert brand["app"]["logo"] == expected_path
-    assert brand["app"]["favicon"] == expected_path
+    # the favicon and the menu-bar icon are derived from it (derive_brand_icons.py)
+    assert brand["app"]["favicon"] == "../kimi-cli/web/public/favicon.png"
+    assert brand["app"]["menubar_icon"] == "MenuBarIconTemplate.png"
     assert CANONICAL_ICON.is_file()
     assert _png_dimensions(CANONICAL_ICON) == (1024, 1024)
     assert not OLD_PACKAGING_ICON.exists()

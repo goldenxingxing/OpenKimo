@@ -81,6 +81,9 @@ class OpenKimoApp(rumps.App):
         kwargs: dict = {"quit_button": None}
         if icon_path:
             kwargs["icon"] = icon_path
+            # A *Template.png is monochrome: macOS tints it for a light or
+            # dark menu bar, as it does the system icons.
+            kwargs["template"] = p.menubar_icon.name.endswith("Template.png")
         else:
             kwargs["title"] = p.app_name
         super().__init__(p.app_name, **kwargs)
