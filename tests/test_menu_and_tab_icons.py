@@ -1,8 +1,9 @@
-"""The menu-bar icon, the browser-tab icon and the Windows tray click.
+"""The icons on every platform, and the Windows tray click.
 
-The logo is a full square. Shrunk as it was, it made a coloured square in the macOS
-menu bar, where icons are monochrome shapes that follow a light or dark bar, and a
-hard square in the browser tab. And on Windows a left click on the tray icon ran the
+The brand source is a full square. Used as it was, it was a hard-cornered square
+everywhere and a coloured square in the macOS menu bar, where icons are monochrome
+shapes that follow a light or dark bar. Every icon now has rounded corners, except
+the menu bar's template. And on Windows a left click on the tray icon ran the
 default menu item, "Open Web UI", so every click opened another browser tab.
 """
 
@@ -22,9 +23,14 @@ import pytest
 from PIL import Image
 
 ROOT = Path(__file__).resolve().parents[1]
+SOURCE = ROOT / "packaging" / "LogoSource.png"
 LOGO = ROOT / "kimi-cli" / "web" / "public" / "logo.png"
 FAVICON = ROOT / "kimi-cli" / "web" / "public" / "favicon.png"
+APP_ICON = ROOT / "packaging" / "AppIcon.png"
 MENUBAR = ROOT / "packaging" / "MenuBarIconTemplate.png"
+# what earlier builds shipped: the square logo, then the round favicon
+SQUARE_LOGO_SHA256 = "a30b84efe092999d20b4b7f78b1b99c8a2d1e1da72e3fa09f853bf68b616f0af"
+ROUND_FAVICON_SHA256 = "4f428414c9abb5bc592de38941460a3ec1cbfedc3d49803fe0973680bf86d6f3"
 
 
 def _load(name: str, path: Path) -> types.ModuleType:
@@ -36,14 +42,28 @@ def _load(name: str, path: Path) -> types.ModuleType:
     return module
 
 
-def test_the_favicon_is_round() -> None:
-    image = Image.open(FAVICON).convert("RGBA")
+@pytest.mark.parametrize("path", [LOGO, FAVICON], ids=["logo", "favicon"])
+def test_the_logo_and_the_favicon_have_rounded_corners(path: Path) -> None:
+    image = Image.open(path).convert("RGBA")
     width, height = image.size
 
     assert width == height
     for corner in ((0, 0), (width - 1, 0), (0, height - 1), (width - 1, height - 1)):
         assert image.getpixel(corner)[3] == 0
-    assert image.getpixel((width // 2, height // 5))[3] == 255  # inside the disc
+    # a rounded square, not a disc: the navy reaches the middle of every edge
+    for edge in ((width // 2, 0), (0, height // 2), (width - 1, height // 2)):
+        assert image.getpixel(edge)[3] == 255
+    assert image.getpixel((width // 2, height // 2))[3] == 255
+
+
+def test_the_macos_app_icon_sits_on_apples_grid() -> None:
+    image = Image.open(APP_ICON).convert("RGBA")
+
+    assert image.size == (1024, 1024)
+    assert image.getpixel((512, 512))[3] == 255
+    assert image.getpixel((512, 101))[3] == 255  # the body starts 100 px in
+    assert image.getpixel((512, 40))[3] == 0  # the margin around it is clear
+    assert image.getpixel((110, 110))[3] < 255  # its corners are rounded off
 
 
 def test_the_menu_bar_icon_is_a_monochrome_template_shape() -> None:
@@ -63,14 +83,20 @@ def test_the_committed_icons_are_what_the_script_makes(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     derive = _load("openkimo_derive_brand_icons", ROOT / "packaging" / "derive_brand_icons.py")
-    monkeypatch.setattr(derive, "FAVICON", tmp_path / "favicon.png")
-    monkeypatch.setattr(derive, "MENUBAR", tmp_path / "MenuBarIconTemplate.png")
+    committed = {"LOGO": LOGO, "FAVICON": FAVICON, "APP_ICON": APP_ICON, "MENUBAR": MENUBAR}
+    for name, path in committed.items():
+        monkeypatch.setattr(derive, name, tmp_path / path.name)
     monkeypatch.setattr(derive, "ROOT", tmp_path)
 
     derive.main()
 
-    for made, committed in ((tmp_path / "favicon.png", FAVICON), (tmp_path / "MenuBarIconTemplate.png", MENUBAR)):
-        assert list(Image.open(made).getdata()) == list(Image.open(committed).getdata())
+    for path in committed.values():
+        made = Image.open(tmp_path / path.name)
+        assert list(made.getdata()) == list(Image.open(path).getdata()), path.name
+
+
+def test_the_macos_build_uses_the_inset_app_icon() -> None:
+    assert build.parse_args([]).icon == APP_ICON.resolve()
 
 
 def test_the_web_ui_points_at_the_round_favicon() -> None:
@@ -96,12 +122,16 @@ def _data_url(path: Path) -> str:
     return "data:image/png;base64," + base64.b64encode(path.read_bytes()).decode()
 
 
-def test_the_macos_build_lists_the_square_logo_as_a_built_in_to_replace(tmp_path: Path) -> None:
+def test_the_macos_build_lists_the_earlier_icons_as_built_ins_to_replace(tmp_path: Path) -> None:
     config = build.parse_args([])
     build.write_brand_json(config, tmp_path)
 
     data = json.loads((tmp_path / "brand.json").read_text())
-    assert hashlib.sha256(LOGO.read_bytes()).hexdigest() in data["branding_legacy_asset_sha256"]
+    legacy = data["branding_legacy_asset_sha256"]
+    assert SQUARE_LOGO_SHA256 in legacy
+    assert ROUND_FAVICON_SHA256 in legacy
+    assert hashlib.sha256(SOURCE.read_bytes()).hexdigest() == SQUARE_LOGO_SHA256
+    assert hashlib.sha256(LOGO.read_bytes()).hexdigest() not in legacy
     assert data["branding_seed"]["favicon"] == _data_url(FAVICON)
     assert data["branding_seed"]["logo"] == _data_url(LOGO)
 
@@ -128,15 +158,15 @@ def _stored(paths: SimpleNamespace) -> dict[str, str]:
         return dict(connection.execute("SELECT key, value FROM branding"))
 
 
-def test_an_install_with_the_square_favicon_gets_the_round_one(tmp_path: Path) -> None:
-    square = _data_url(LOGO)
+def test_an_install_with_the_square_icons_gets_the_rounded_ones(tmp_path: Path) -> None:
+    square = _data_url(SOURCE)
     paths = _install(tmp_path, {"favicon": square, "logo": square})
 
     seed_branding.seed_if_needed(paths)
 
     stored = _stored(paths)
     assert stored["favicon"] == _data_url(FAVICON)
-    assert stored["logo"] == square  # the logo is unchanged
+    assert stored["logo"] == _data_url(LOGO)
 
 
 def test_a_favicon_set_in_the_admin_panel_is_kept(tmp_path: Path) -> None:

@@ -17,10 +17,13 @@ copyright = "© 2026 OpenKimo Contributors. Apache License 2.0."
 # binaries support is caught by verify_min_macos() at build time.
 min_macos_version = "11.0"
 
-# Asset paths are resolved relative to this file (packaging/).
+# Asset paths are resolved relative to this file (packaging/). All of them are
+# written by derive_brand_icons.py from LogoSource.png: rounded corners throughout.
 icon = "../kimi-cli/web/public/logo.png"
+# The macOS .icns: the same icon inset on Apple's app-icon grid, so it is the
+# size of the other icons in the Dock.
+macos_icon = "AppIcon.png"
 logo = "../kimi-cli/web/public/logo.png"
-# Round: the logo's disc on a transparent background (derive_brand_icons.py).
 favicon = "../kimi-cli/web/public/favicon.png"
 # Monochrome template for the macOS menu bar (derive_brand_icons.py). Without
 # it the build shrinks `icon` into a coloured menu-bar icon.

@@ -117,6 +117,8 @@ LEGACY_BUILTIN_ASSET_SHA256 = [
     "dbd00e2ad61ea8832ef0b024662a4a8a5d1b66f0599d5d42e1c9688b9d4cfdf6",
     # the square logo, the favicon until the round one; same list as build.py
     "a30b84efe092999d20b4b7f78b1b99c8a2d1e1da72e3fa09f853bf68b616f0af",
+    # the round favicon, before the rounded-corner icons
+    "4f428414c9abb5bc592de38941460a3ec1cbfedc3d49803fe0973680bf86d6f3",
 ]
 
 

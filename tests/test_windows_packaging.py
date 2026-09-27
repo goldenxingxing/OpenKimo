@@ -20,6 +20,7 @@ LEGACY_ICON_SHA256 = (
     "dbd00e2ad61ea8832ef0b024662a4a8a5d1b66f0599d5d42e1c9688b9d4cfdf6"
 )
 SQUARE_LOGO_SHA256 = "a30b84efe092999d20b4b7f78b1b99c8a2d1e1da72e3fa09f853bf68b616f0af"
+ROUND_FAVICON_SHA256 = "4f428414c9abb5bc592de38941460a3ec1cbfedc3d49803fe0973680bf86d6f3"
 BUILD_WINDOWS_PATH = ROOT / "packaging" / "build_windows.py"
 SPEC = importlib.util.spec_from_file_location("openkimo_build_windows", BUILD_WINDOWS_PATH)
 build_windows = importlib.util.module_from_spec(SPEC)
@@ -76,7 +77,11 @@ def test_windows_brand_json_contains_canonical_web_assets(tmp_path: Path) -> Non
     seed = data["branding_seed"]
     assert seed["logo"].startswith("data:image/png;base64,")
     assert seed["favicon"] == seed["logo"]
-    assert data["branding_legacy_asset_sha256"] == [LEGACY_ICON_SHA256, SQUARE_LOGO_SHA256]
+    assert data["branding_legacy_asset_sha256"] == [
+        LEGACY_ICON_SHA256,
+        SQUARE_LOGO_SHA256,
+        ROUND_FAVICON_SHA256,
+    ]
 
 
 def test_windows_brand_paths_use_the_canonical_icon() -> None:

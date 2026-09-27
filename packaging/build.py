@@ -49,11 +49,13 @@ LOGO_MAX_BYTES = 512 * 1024
 FAVICON_MAX_BYTES = 256 * 1024
 
 # sha256 of built-in logos/favicons earlier builds stored in the branding table
-# (see app_main/seed_branding.py). The square logo was the favicon until the
-# round one; keep build_windows.LEGACY_BUILTIN_ASSET_SHA256 the same.
+# (see app_main/seed_branding.py): the square logo, which was also the favicon,
+# and the round favicon that followed it, both before the rounded-corner icons.
+# Keep build_windows.LEGACY_BUILTIN_ASSET_SHA256 the same.
 LEGACY_BUILTIN_ASSET_SHA256 = [
     "dbd00e2ad61ea8832ef0b024662a4a8a5d1b66f0599d5d42e1c9688b9d4cfdf6",
     "a30b84efe092999d20b4b7f78b1b99c8a2d1e1da72e3fa09f853bf68b616f0af",
+    "4f428414c9abb5bc592de38941460a3ec1cbfedc3d49803fe0973680bf86d6f3",
 ]
 
 
@@ -119,7 +121,8 @@ def parse_args(argv: list[str]) -> BuildConfig:
                         default=bapp.get("copyright",
                                          "© 2026 OpenKimo Contributors. Apache License 2.0."))
     parser.add_argument("--min-macos", default=bapp.get("min_macos_version", "14.0"))
-    parser.add_argument("--icon", default=bapp.get("icon", "icon.png"))
+    # The .icns wants the icon inset on Apple's grid; other platforms take `icon`.
+    parser.add_argument("--icon", default=bapp.get("macos_icon", bapp.get("icon", "icon.png")))
     parser.add_argument("--logo", default=bapp.get("logo"))
     parser.add_argument("--favicon", default=bapp.get("favicon"))
     parser.add_argument("--menubar-icon", default=bapp.get("menubar_icon"))
