@@ -4,7 +4,13 @@ All notable changes to this project are documented here. The format
 follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and
 this project adheres to [Semantic Versioning](https://semver.org/).
 
-## [Unreleased]
+## [v0.4.3] — 2026-10-07
+
+### Fixed
+
+- **后台任务被误判“丢失”（lost）导致长任务作废**。心跳写盘不再每次强制刷盘（磁盘抖动或杀毒软件扫描文件不会再卡死任务进程）；判定丢失前会先确认任务进程真的已退出——进程还活着只是心跳慢的任务不再被误杀；崩溃的任务进程也会被及时回收，不会变僵尸进程。
+- **管道命令的失败被完全掩盖**：bash 命令（前台和后台任务）默认开启 pipefail，`python x.py | tail` 这类命令现在记录的是真实退出码，不再恒为 0。
+- **会话进程异常退出后“出错了”一直不消除**：worker 崩溃后会自动重启恢复（启动即崩的和短时间内反复崩溃的不会进入重启循环），恢复后错误标记自动清除；崩溃回合里未完成的工具显示“工具执行已中断（会话进程异常退出）”，不再误显示为“工具执行已取消”。
 
 ## [v0.4.2] — 2026-10-06
 
