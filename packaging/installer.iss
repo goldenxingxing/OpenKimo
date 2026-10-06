@@ -182,6 +182,8 @@ end;
 // task choice is persisted to a marker file here and read back at uninstall
 // (calling it from uninstall code raises "cannot call WizardIsTaskSelected").
 procedure CurStepChanged(CurStep: TSetupStep);
+var
+  Missing: String;
 begin
   if CurStep = ssPostInstall then
   begin
@@ -189,6 +191,25 @@ begin
       SaveStringToFile(PurgeMarkerPath(), '1', False)
     else
       DeleteFile(PurgeMarkerPath());
+
+    // The runtime tree is ~1 GB copied file-by-file; a silent partial copy
+    // (antivirus lock, disk error, a process holding a file) leaves an
+    // install whose launcher starts but whose server cannot spawn — and
+    // nothing says why. Verify the pieces the first run needs.
+    Missing := '';
+    if not FileExists(ExpandConstant('{app}\runtime\python\python.exe')) then
+      Missing := Missing + '  runtime\python\python.exe' + #13#10;
+    if not DirExists(ExpandConstant('{app}\runtime\playwright-browsers')) then
+      Missing := Missing + '  runtime\playwright-browsers\ (the browser used to open bot-protected pages)' + #13#10;
+    if Missing <> '' then
+      MsgBox(
+        'This installation looks INCOMPLETE — the following is missing:' + #13#10 + #13#10 +
+        Missing + #13#10 +
+        'The app will start but parts of it will fail (e.g. the browser ' +
+        'fallback for protected web pages). Run Setup again — with antivirus ' +
+        'real-time scanning temporarily off if it blocks the copy, and the app ' +
+        'fully quit — or uninstall and reinstall.',
+        mbError, MB_OK);
   end;
 end;
 

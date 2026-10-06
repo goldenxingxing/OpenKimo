@@ -743,9 +743,16 @@ def install_playwright_browsers(
     env["PLAYWRIGHT_BROWSERS_PATH"] = str(browsers_dir)
     rc = run_ok([str(python_exe), "-m", "playwright", "install", "chromium"], env=env)
     if rc != 0:
-        print(
-            f"  ! playwright install returned {rc}. The runtime will not have "
-            f"a bundled chromium; the agent will need to download it on first run."
+        # The fetch tool's browser fallback is product functionality; an
+        # installer without the bundled chromium ships broken silently (the
+        # runtime only finds out when a 403 page triggers the fallback).
+        # macOS's build.py treats its staging steps the same way: fail here.
+        raise RuntimeError(
+            f"playwright install returned {rc}; refusing to build an installer "
+            "without the bundled chromium. Check the network/proxy, then "
+            "re-run the build. To install by hand: run "
+            f"`python -m playwright install chromium` with "
+            f"PLAYWRIGHT_BROWSERS_PATH={browsers_dir}."
         )
 
 
