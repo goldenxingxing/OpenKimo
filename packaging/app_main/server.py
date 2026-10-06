@@ -162,6 +162,17 @@ def _build_env(p: AppPaths) -> dict[str, str]:
         browsers = runtime_root / "playwright-browsers"
         if browsers.is_dir():
             env["PLAYWRIGHT_BROWSERS_PATH"] = str(browsers)
+        else:
+            # Not an error — the fallback can still use a per-user download —
+            # but it fails opaque on machines that never ran `playwright
+            # install`, and nobody could tell why. Say it at startup.
+            log.warning(
+                "bundled playwright browsers missing at %s; the fetch tool's "
+                "browser fallback will look in the per-user default instead "
+                "(and fail there unless `playwright install chromium` has "
+                "been run for that user)",
+                browsers,
+            )
 
     # 4. User-overlay Python (so kimi-cli's shell tool can pip install).
     env.update(userenv.env_overlay(p))
