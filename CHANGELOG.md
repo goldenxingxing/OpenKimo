@@ -4,6 +4,13 @@ All notable changes to this project are documented here. The format
 follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and
 this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [v0.4.4] — 2026-10-07
+
+### Fixed
+
+- **长任务等待时会话突然"出错了"、工具一片"已取消/已中断"**。"等后台任务时可以直接插话"功能会把"agent 卡在任务等待中"的状态变化直接发到 stdout，但没按通信协议包装，网页端一解析到这条消息整个会话就读取中断——第一次真正长时间等待后台任务（任务还在跑、不是秒回）必触发。现在按协议正确包装；同时网页端对解析不了的消息改为记日志跳过，单条坏消息不再终结整个会话。
+- **偶发的"同一条回复显示两份"（切走再回来会自愈）**：网页端加了重复投递/重复渲染检测日志，命中时输出到开发者工具控制台，用于定位该合并竞态（数据层已验证无重复，重建回放始终正确）。
+
 ## [v0.4.3] — 2026-10-07
 
 ### Fixed
