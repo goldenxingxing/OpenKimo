@@ -251,6 +251,17 @@
     ];
     const CAPABILITIES = ["image_in", "video_in", "thinking", "always_thinking"];
     const DEFAULT_MAX_CONTEXT = 1000000;
+    const MASK_CHAR = "\u2022";
+
+    // Shows only the key's last four characters ("••••••••1234"). A plain
+    // password field renders every key as an uncountable run of dots, so there
+    // is no way to tell which provider holds which key.
+    function maskApiKey(key) {
+      key = key || "";
+      return key.length <= 4
+        ? MASK_CHAR.repeat(key.length)
+        : MASK_CHAR.repeat(key.length - 4) + key.slice(-4);
+    }
     const LEGACY_LLM_KEYS = [
       "LLM_PROVIDER",
       "KIMI_API_KEY", "KIMI_BASE_URL", "KIMI_MODEL_NAME", "KIMI_MODEL_MAX_CONTEXT_SIZE",
@@ -309,7 +320,7 @@
         <div class="row"><label>Type</label><div class="control">
           <select class="p-type">${typeOptions}</select></div></div>
         <div class="row"><label>API Key</label><div class="control">
-          <input type="password" class="p-apikey" placeholder="API key" autocomplete="off" /></div></div>
+          <input type="text" class="p-apikey" placeholder="API key" autocomplete="off" spellcheck="false" /></div></div>
         <div class="row"><label>Base URL</label><div class="control">
           <input type="text" class="p-baseurl" placeholder="https://..." /></div></div>
         <div class="row"><label>Model</label><div class="control">
@@ -319,14 +330,21 @@
         <div class="pfooter">
           <div class="left">
             <label class="default-label"><input type="radio" name="default_provider" class="p-default" />Set as default</label>
-            <button type="button" class="advanced-toggle">&#9654; Advanced (capabilities)</button>
-            <div class="caps">${capBoxes}</div>
+            <button type="button" class="advanced-toggle">&#9660; Advanced (capabilities)</button>
+            <div class="caps open">${capBoxes}</div>
           </div>
           <button type="button" class="p-remove">Remove</button>
         </div>`;
 
       card.querySelector(".p-name").value = entry.name || "";
-      card.querySelector(".p-apikey").value = entry.api_key || "";
+      const apiKeyField = card.querySelector(".p-apikey");
+      // The field shows a masked tail, not the secret. original/masked are kept
+      // so a save that leaves the field alone writes the stored key back
+      // instead of the mask; anything the user types replaces it.
+      const originalKey = entry.api_key || "";
+      apiKeyField.dataset.original = originalKey;
+      apiKeyField.value = maskApiKey(originalKey);
+      apiKeyField.dataset.masked = apiKeyField.value;
       card.querySelector(".p-baseurl").value = entry.base_url || "";
       card.querySelector(".p-model").value = entry.model || "";
       card.querySelector(".p-maxctx").value = entry.max_context_size || "";
@@ -464,7 +482,11 @@
       let defaultName = "";
       document.querySelectorAll("#providers .provider").forEach((card) => {
         const name = card.querySelector(".p-name").value.trim();
-        const apiKey = card.querySelector(".p-apikey").value.trim();
+        const apiKeyField = card.querySelector(".p-apikey");
+        const typedKey = apiKeyField.value.trim();
+        const apiKey = typedKey === (apiKeyField.dataset.masked || "")
+          ? (apiKeyField.dataset.original || "")
+          : typedKey;
         const baseUrl = card.querySelector(".p-baseurl").value.trim();
         const modelId = card.querySelector(".p-model").value.trim();
         // A key is not what makes a provider real — a local endpoint (Ollama,

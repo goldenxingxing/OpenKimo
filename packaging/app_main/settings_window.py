@@ -120,6 +120,23 @@ def _format_ratio(value: float) -> str:
     return f"{round(value * 100)}%"
 
 
+MASK_CHAR = "\u2022"
+
+
+def _mask_api_key(key: str) -> str:
+    """Render a stored key with only its last four characters visible.
+
+    ``NSSecureTextField`` can only show bullets, so two providers with long
+    keys look identical and there is no way to tell which is which. Showing
+    the tail — ``••••••••1234`` — keeps the field recognisable while leaving
+    the secret itself unreadable.
+    """
+    key = key or ""
+    if len(key) <= 4:
+        return MASK_CHAR * len(key)
+    return MASK_CHAR * (len(key) - 4) + key[-4:]
+
+
 def _v() -> NSView:
     """Construct an NSView with auto-resizing translation disabled."""
     view = NSView.alloc().init()
@@ -404,6 +421,8 @@ class _ProviderRow:
         "advanced_visible",
         "advanced_height_zero",
         "caps",
+        "original_api_key",
+        "api_key_display",
     )
 
     def __init__(
@@ -422,6 +441,8 @@ class _ProviderRow:
         advanced_view,
         advanced_height_zero,
         caps,
+        original_api_key: str = "",
+        api_key_display: str = "",
     ):
         self.view = view
         self.title_label = title_label
@@ -434,15 +455,26 @@ class _ProviderRow:
         self.default_radio = default_radio
         self.advanced_btn = advanced_btn
         self.advanced_view = advanced_view
-        self.advanced_visible = False
+        self.advanced_visible = True
         self.advanced_height_zero = advanced_height_zero
         self.caps = caps  # dict[str, NSButton]
+        # The field shows a masked tail (``••••••••1234``), not the secret.
+        # ``original_api_key`` is what was stored; ``api_key_display`` is what
+        # was put in the field. If the two still match on Save the user never
+        # touched it, so the real key goes back instead of the mask.
+        self.original_api_key = original_api_key
+        self.api_key_display = api_key_display
 
     def get_name(self) -> str:
         return str(self.name_field.stringValue()).strip()
 
+    def api_key_value(self) -> str:
+        """The key to persist: the stored one when the mask is untouched."""
+        typed = str(self.api_key.stringValue())
+        return self.original_api_key if typed == self.api_key_display else typed.strip()
+
     def has_api_key(self) -> bool:
-        return bool(str(self.api_key.stringValue()).strip())
+        return bool(self.api_key_value().strip())
 
     def is_default(self) -> bool:
         return bool(self.default_radio.state())
@@ -461,7 +493,7 @@ class _ProviderRow:
         out: dict[str, Any] = {
             "name": self.get_name(),
             "type": self.selected_type(),
-            "api_key": str(self.api_key.stringValue()).strip(),
+            "api_key": self.api_key_value(),
             "base_url": str(self.base_url.stringValue()).strip(),
             "model": str(self.model.stringValue()).strip(),
             "max_context_size": ctx,
@@ -1000,7 +1032,9 @@ def _build_provider_row(controller, entry: dict[str, Any] | None = None) -> _Pro
     if type_value:
         type_popup.selectItemWithTitle_(type_value)
 
-    api_key = _text(str(entry.get("api_key", "")), secure=True, placeholder="API key")
+    original_api_key = str(entry.get("api_key", ""))
+    api_key = _text(_mask_api_key(original_api_key), placeholder="API key")
+    api_key_display = str(api_key.stringValue())
     base_url = _text(str(entry.get("base_url", "")), placeholder="https://...")
     model = _text(str(entry.get("model", "")), placeholder="model id")
 
@@ -1029,7 +1063,7 @@ def _build_provider_row(controller, entry: dict[str, Any] | None = None) -> _Pro
 
     advanced_btn = NSButton.alloc().init()
     advanced_btn.setBezelStyle_(11)  # recessed/flat
-    advanced_btn.setTitle_("▶ Advanced (capabilities)")
+    advanced_btn.setTitle_("▼ Advanced (capabilities)")
     advanced_btn.setTarget_(controller)
     advanced_btn.setAction_("onToggleAdvanced:")
     advanced_btn.setTranslatesAutoresizingMaskIntoConstraints_(False)
@@ -1049,7 +1083,7 @@ def _build_provider_row(controller, entry: dict[str, Any] | None = None) -> _Pro
         cap_initial = set()
 
     advanced_view = _v()
-    advanced_view.setHidden_(True)
+    advanced_view.setHidden_(False)
     row.addSubview_(advanced_view)
 
     caps: dict[str, NSButton] = {}
@@ -1083,7 +1117,7 @@ def _build_provider_row(controller, entry: dict[str, Any] | None = None) -> _Pro
     # Mutable height==0 constraint on advanced_view (active when collapsed).
     advanced_height_zero = advanced_view.heightAnchor().constraintEqualToConstant_(0.0)
     advanced_height_zero.setPriority_(999)
-    advanced_height_zero.setActive_(True)
+    advanced_height_zero.setActive_(False)
 
     remove_btn = _button("Remove", controller, "onRemoveProvider:")
     row.addSubview_(remove_btn)
@@ -1184,6 +1218,8 @@ def _build_provider_row(controller, entry: dict[str, Any] | None = None) -> _Pro
         advanced_view=advanced_view,
         advanced_height_zero=advanced_height_zero,
         caps=caps,
+        original_api_key=original_api_key,
+        api_key_display=api_key_display,
     )
     tag = id(pr)
     default_radio.setTag_(tag)
