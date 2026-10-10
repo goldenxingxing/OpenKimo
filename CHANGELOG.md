@@ -4,6 +4,21 @@ All notable changes to this project are documented here. The format
 follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and
 this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [v0.4.5] — 2026-10-10
+
+### Added
+
+- **取消的回合不再留下"假在跑"的工具**。用户停止或出错结束时，agent 会为已发出但没返回结果的工具调用补一条"已取消"结果，网页端不会再出现"Agent 一直在工作"的悬挂状态（重新打开会话也一样干净）。
+- **回合结束原因可见**。回合因取消/出错/步数用尽而中断时，网页端能区分"卡住了"和"已结束"：被取消回合留下的待办清单会标记为遗留内容，不再当作进行中的任务钉住。
+- **服务端吞思考的步骤会被标记**。部分接口（如 Kimi-for-Coding）偶发跳过推理输出，网页端现在会说明思考块为空是服务端行为，不像客户端出了 bug。
+- **设置窗口里的 API Key 显示尾 4 位**（macOS 与 Windows 均生效）。纯密码框下两个长 Key 长得一样没法分辨，现在显示为「••••••••1234」，密钥本体不可读。
+
+### Fixed
+
+- **切换会话偶发"历史缺失且不再恢复"**。历史回放读到一半出错时会被静默吞掉并宣告"加载完成"，客户端此时已清空消息列表，缺口就成了永久视图；现在回放失败不再宣告完成，由上层决定重试或报错。
+- **推理内容提取兼容多种字段名**。openai_legacy / Kimi 通道从一组候选字段（reasoning_content、reasoning 等）提取思考内容，不再依赖单一配置键；Kimi 用量里的 reasoning_tokens 会正确映射到推理输出统计。
+- **Wiki 编辑负载传成 JSON 字符串不再报"不是合法字典"**。模型层自动把能解析成对象的 JSON 字符串解包为结构化负载；解析不出对象或标量仍按原校验报错。
+
 ## [v0.4.4] — 2026-10-07
 
 ### Fixed
