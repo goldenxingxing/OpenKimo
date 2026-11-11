@@ -127,7 +127,7 @@ The project follows a **minor-bump-only** versioning scheme (`MAJOR.MINOR.PATCH`
 
 Examples: `0.68.0` → `0.69.0` → `0.70.0`; never `0.68.1`.
 
-This rule applies to all packages in the repo (root, `packages/*`, `sdks/*`) as well as release
+This rule applies to all packages in the repo (root, `packages/*`) as well as release
 and skill workflows.
 
 ## Release workflow

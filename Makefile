@@ -59,4 +59,100 @@ gen-docs: ## Generate user docs with Kimo Code CLI.
 	@echo "==> Generating user docs"
 	@uv run kimo --yolo --prompt /skill:gen-docs
 
+.PHONY: check check-kimo-cli check-kosong check-pykaos check-web
+check: check-kimo-cli check-kosong check-pykaos check-web ## Run linting and type checks for all packages.
+
+check-kimo-cli: ## Run linting and type checks for Kimo Code CLI.
+	@echo "==> Checking Kimo Code CLI (ruff blocking; pyright + ty non-blocking)"
+	@uv run ruff check
+	@uv run ruff format --check
+	@uv run pyright || true
+	@uv run ty check || true
+
+check-kosong: ## Run linting and type checks for kosong.
+	@echo "==> Checking kosong (ruff blocking; pyright + ty non-blocking)"
+	@uv run --project packages/kosong --directory packages/kosong ruff check
+	@uv run --project packages/kosong --directory packages/kosong ruff format --check
+	@uv run --project packages/kosong --directory packages/kosong pyright || true
+	@uv run --project packages/kosong --directory packages/kosong ty check || true
+
+check-pykaos: ## Run linting and type checks for pykaos.
+	@echo "==> Checking pykaos (ruff blocking; pyright + ty non-blocking)"
+	@uv run --project packages/kaos --directory packages/kaos ruff check
+	@uv run --project packages/kaos --directory packages/kaos ruff format --check
+	@uv run --project packages/kaos --directory packages/kaos pyright || true
+	@uv run --project packages/kaos --directory packages/kaos ty check || true
+
+check-web: ## Run linting and type checks for web.
+	@echo "==> Checking web (biome + tsc)"
+	@if command -v npm >/dev/null 2>&1; then \
+		npm --prefix web run lint && npm --prefix web run typecheck; \
+	else \
+		echo "npm not found. Install Node.js (npm) to run web checks."; \
+		exit 1; \
+	fi
+
+.PHONY: test test-kimo-cli test-kosong test-pykaos
+test: test-kimo-cli test-kosong test-pykaos ## Run all test suites.
+
+test-kimo-cli: ## Run Kimo Code CLI tests.
+	@echo "==> Running Kimo Code CLI tests"
+	@uv run pytest tests -vv
+	@uv run pytest tests_e2e -vv
+
+test-kosong: ## Run kosong tests (including doctests).
+	@echo "==> Running kosong tests"
+	@uv run --project packages/kosong --directory packages/kosong pytest --doctest-modules -vv
+
+test-pykaos: ## Run pykaos tests.
+	@echo "==> Running pykaos tests"
+	@uv run --project packages/kaos --directory packages/kaos pytest tests -vv
+
+.PHONY: build build-kimo-cli build-kosong build-pykaos build-web build-vis build-bin build-bin-onedir
+build: build-web build-vis build-kimo-cli build-kosong build-pykaos ## Build Python packages and UIs for release.
+
+build-kimo-cli: build-web build-vis ## Build the kimo-cli sdist and wheel.
+	@echo "==> Injecting build SHA"
+	@uv run scripts/inject_build_sha.py
+	@echo "==> Building kimo-cli distributions"
+	@uv build --package kimo-cli --no-sources --out-dir dist
+
+build-kosong: ## Build the kosong sdist and wheel.
+	@echo "==> Building kosong distributions"
+	@uv build --package kosong --no-sources --out-dir dist/kosong
+
+build-pykaos: ## Build the pykaos sdist and wheel.
+	@echo "==> Building pykaos distributions"
+	@uv build --package pykaos --no-sources --out-dir dist/pykaos
+
+build-web: ## Build web UI and sync into kimo-cli package.
+	@echo "==> Building web UI"
+	@uv run scripts/build_web.py
+
+build-vis: ## Build vis UI and sync into kimo-cli package.
+	@echo "==> Building vis UI"
+	@uv run scripts/build_vis.py
+
+build-bin: build-web build-vis ## Build the standalone executable with PyInstaller (one-file mode).
+	@echo "==> Injecting build SHA"
+	@KIMO_BUILD_SHA=$$(git rev-parse HEAD 2>/dev/null | cut -c1-12) uv run scripts/inject_build_sha.py
+	@echo "==> Building PyInstaller binary (one-file)"
+	@KIMO_BUILD_SHA=$$(git rev-parse HEAD 2>/dev/null | cut -c1-12) uv run pyinstaller kimo.spec
+	@mkdir -p dist/onefile
+	@if [ -f dist/kimo.exe ]; then mv dist/kimo.exe dist/onefile/; elif [ -f dist/kimo ]; then mv dist/kimo dist/onefile/; fi
+
+build-bin-onedir: build-web build-vis ## Build the standalone executable with PyInstaller (one-dir mode).
+	@echo "==> Injecting build SHA"
+	@KIMO_BUILD_SHA=$$(git rev-parse HEAD 2>/dev/null | cut -c1-12) uv run scripts/inject_build_sha.py
+	@echo "==> Building PyInstaller binary (one-dir)"
+	@rm -rf dist/onedir dist/kimo
+	@KIMO_BUILD_SHA=$$(git rev-parse HEAD 2>/dev/null | cut -c1-12) PYINSTALLER_ONEDIR=1 uv run pyinstaller kimo.spec
+	@if [ -f dist/kimo/kimo-exe.exe ]; then mv dist/kimo/kimo-exe.exe dist/kimo/kimo.exe; elif [ -f dist/kimo/kimo-exe ]; then mv dist/kimo/kimo-exe dist/kimo/kimo; fi
+	@mkdir -p dist/onedir && mv dist/kimo dist/onedir/
+
+.PHONY: ai-test
+ai-test: ## Run the test suite with Kimo Code CLI.
+	@echo "==> Running AI test suite"
+	@uv run tests_ai/scripts/run.py tests_ai
+
 include src/kimo_cli/deps/Makefile

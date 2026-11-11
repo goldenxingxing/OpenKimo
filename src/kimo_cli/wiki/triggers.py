@@ -34,7 +34,6 @@ EvidenceClass = Literal[
     "workspace-file",
     "workspace-search",
     "shell-result",
-    "web-search",
     "web-document",
     "workspace-mutation",
 ]
@@ -63,7 +62,6 @@ _EXPECTED_SOURCE_KIND: dict[EvidenceClass, Literal["workspace-file", "conversati
     "workspace-file": "workspace-file",
     "workspace-search": "workspace-file",
     "shell-result": "conversation",
-    "web-search": "web",
     "web-document": "web",
     "workspace-mutation": "workspace-file",
 }

@@ -444,7 +444,7 @@ async def feedback(app: Shell, args: str):
     """Submit feedback to make OpenKimo better"""
     import webbrowser
 
-    ISSUE_URL = "https://github.com/j0x7c4/OpenKimo/issues"
+    ISSUE_URL = "https://github.com/goldenxingxing/OpenKimo/issues"
 
     def _fallback_to_issues():
         if not webbrowser.open(ISSUE_URL):

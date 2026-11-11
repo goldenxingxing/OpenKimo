@@ -52,7 +52,6 @@ _NON_TRANSIENT_CLASSES = frozenset(
         "workspace-file",
         "workspace-search",
         "shell-result",
-        "web-search",
         "web-document",
         "workspace-mutation",
     }
@@ -365,8 +364,7 @@ class WikiEvidenceReporter:
             "workspace-file",
             "workspace-search",
             "shell-result",
-            "web-search",
-            "web-document",
+                "web-document",
             "workspace-mutation",
         ],
         request_hash: str,

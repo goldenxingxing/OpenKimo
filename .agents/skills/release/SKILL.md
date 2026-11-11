@@ -10,7 +10,6 @@ Release process for Kimo Code CLI packages. Tags are pushed without a `v` prefix
 | `1.42.0` (numeric) | `kimo-cli` (root), released on its own |
 | `kosong-0.53.0` | `packages/kosong` |
 | `pykaos-0.9.0` | `packages/kaos` (PyPI name `pykaos`) |
-| `kimo-sdk-0.3.0` | `sdks/kimo-sdk` |
 
 The Rust implementation (`kagent`) lives in a separate repository and is **not** released from here.
 

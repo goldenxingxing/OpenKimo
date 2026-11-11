@@ -8,7 +8,7 @@ Generate changelog entries for changes on the current branch relative to `main`,
 ## Steps
 
 1. **Inspect**: `git log main..HEAD --oneline` + `git diff main..HEAD --stat`.
-2. **Edit root CHANGELOG**: add bullets under `## Unreleased` in `CHANGELOG.md` using the prefix table below. For changes scoped to a subpackage under `packages/` or `sdks/`, **also** update that subpackage's `CHANGELOG.md` — subpackage CHANGELOGs follow their own prefix conventions (e.g. `packages/kosong/CHANGELOG.md` uses provider prefixes like `Kimo:` / `Anthropic:`); only the root CHANGELOG follows the table below.
+2. **Edit root CHANGELOG**: add bullets under `## Unreleased` in `CHANGELOG.md` using the prefix table below. For changes scoped to a subpackage under `packages/`, **also** update that subpackage's `CHANGELOG.md` — subpackage CHANGELOGs follow their own prefix conventions (e.g. `packages/kosong/CHANGELOG.md` uses provider prefixes like `Kimo:` / `Anthropic:`); only the root CHANGELOG follows the table below.
 3. **Sync English docs**: `node docs/scripts/sync-changelog.mjs`.
 4. **Translate to Chinese**: hand-write equivalents under `## 未发布` in `docs/zh/release-notes/changelog.md`. Use the full-width colon `：`. Follow `docs/AGENTS.md` terminology.
 5. **Breaking changes**: if any, add a section under `## Unreleased` in `docs/en/release-notes/breaking-changes.md` with **Affected** + **Migration** subsections, and under `## 未发布` in `docs/zh/release-notes/breaking-changes.md` with **受影响** + **迁移** subsections.
