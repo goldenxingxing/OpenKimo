@@ -335,6 +335,33 @@ onboard_env() {
     done
   fi
 
+  # The initial admin account is created on first boot. A published
+  # default password ("admin123") on a privileged account is a credential
+  # everyone already knows, so the deployer picks or generates one here and
+  # it lands in .env for the first boot to pick up.
+  local _gen_admin
+  ask_yn _gen_admin "自动生成强随机管理员初始口令？(推荐)" "y"
+  if [ "$_gen_admin" = "true" ]; then
+    KIMO_INITIAL_ADMIN_PASSWORD="$(random_token)"
+    ok "已生成管理员初始口令: ${KIMO_INITIAL_ADMIN_PASSWORD:0:12}…"
+  else
+    while true; do
+      ask KIMO_INITIAL_ADMIN_PASSWORD "自定义管理员初始口令 (至少 12 位)" ""
+      ask_eof_guard
+      case "$KIMO_INITIAL_ADMIN_PASSWORD" in
+        "")        warn "口令不能为空" ;;
+        admin123)  warn "admin123 是公开的默认口令，请换一个" ;;
+        *)
+          if [ "${#KIMO_INITIAL_ADMIN_PASSWORD}" -lt 12 ]; then
+            warn "口令太短了（至少 12 位），或者上一步选 y 自动生成"
+          else
+            break
+          fi
+          ;;
+      esac
+    done
+  fi
+
   local _lan_only
   ask_yn _lan_only "仅允许局域网访问？(对外暴露选 n)" "n"
   KIMO_WEB_LAN_ONLY="$_lan_only"
@@ -396,6 +423,7 @@ ANTHROPIC_BASE_URL=$(envq "$ANTHROPIC_BASE_URL")
 # ---------------- Web Server ----------------
 KIMO_WEB_PORT=$(envq "$KIMO_WEB_PORT")
 KIMO_WEB_SESSION_TOKEN=$(envq "$KIMO_WEB_SESSION_TOKEN")
+KIMO_INITIAL_ADMIN_PASSWORD=$(envq "$KIMO_INITIAL_ADMIN_PASSWORD")
 KIMO_WEB_ALLOWED_ORIGINS=*
 KIMO_WEB_ENFORCE_ORIGIN=false
 KIMO_WEB_RESTRICT_SENSITIVE_APIS=$(envq "$KIMO_WEB_RESTRICT_SENSITIVE_APIS")
@@ -477,7 +505,15 @@ print_summary() {
     printf "  带 Token:  ${C_CYAN}http://localhost:%s/?token=%s${C_RESET}\n" "${port:-5494}" "$token"
   fi
   echo
-  printf "  默认管理员账号: ${C_BOLD}admin / admin123${C_RESET} ${C_YELLOW}(请尽快通过 /admin 修改)${C_RESET}\n"
+  local admin_password
+  admin_password="$(read_env_value KIMO_INITIAL_ADMIN_PASSWORD)"
+  printf "  初始管理员账号: ${C_BOLD}admin${C_RESET}"
+  if [ -n "$admin_password" ]; then
+    printf "  初始口令: ${C_BOLD}%s${C_RESET}" "$admin_password"
+  else
+    printf "  ${C_YELLOW}(未在 .env 中设置 KIMO_INITIAL_ADMIN_PASSWORD，首次启动时随机生成并打印)${C_RESET}"
+  fi
+  printf " ${C_YELLOW}(请尽快通过 /admin 修改)${C_RESET}\n"
   echo
   printf "  常用命令:\n"
   printf "    查看日志:   ${C_DIM}%s logs -f gateway${C_RESET}\n" "$COMPOSE_CMD"

@@ -912,3 +912,31 @@ class TestPlanOptionValidator:
         )
         assert params.options is not None
         assert len(params.options) == 3
+
+
+class TestSharedAgentPlanModeBinding:
+    """A second soul on the same agent must not keep the shared tool bindings."""
+
+    def test_rebind_plan_mode_tools_takes_bindings_back(
+        self, runtime: Runtime, tmp_path: Path
+    ) -> None:
+        toolset = KimoToolset()
+        exit_tool = ExitPlanMode()
+        toolset.add(exit_tool)
+        agent = Agent(
+            name="Test Agent",
+            system_prompt="Test system prompt.",
+            toolset=toolset,
+            runtime=runtime,
+        )
+        soul = KimoSoul(agent, context=Context(file_backend=tmp_path / "history.jsonl"))
+
+        assert getattr(exit_tool._toggle_callback, "__self__", None) is soul
+
+        # A second soul on the same agent shares the tool objects and rebinds
+        # them to itself — this is what `/init` does with its temporary soul.
+        tmp_soul = KimoSoul(agent, context=Context(file_backend=tmp_path / "tmp.jsonl"))
+        assert getattr(exit_tool._toggle_callback, "__self__", None) is tmp_soul
+
+        soul.rebind_plan_mode_tools()
+        assert getattr(exit_tool._toggle_callback, "__self__", None) is soul

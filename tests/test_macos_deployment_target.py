@@ -55,7 +55,7 @@ def test_the_launcher_is_compiled_against_the_declared_floor() -> None:
     """The floor must reach the compiler, not just Info.plist."""
     source = BUILD_PY.read_text(encoding="utf-8")
 
-    assert '-mmacosx-version-min={cfg.min_macos}' in source
+    assert "-mmacosx-version-min={cfg.min_macos}" in source
     assert '"LSMinimumSystemVersion": cfg.min_macos' in source
 
 
@@ -135,9 +135,9 @@ def test_the_build_rewrites_readlink_f_out_of_layer_wrappers(tmp_path: Path) -> 
 
     for wrapper in runtimes.glob("*/bin/python"):
         text = wrapper.read_text(encoding="utf-8")
-        assert "readlink -f" not in text.replace(
-            "# Note: `readlink -f`", ""
-        ).replace("venvstacks emits `readlink -f", ""), wrapper
+        assert "readlink -f" not in text.replace("# Note: `readlink -f`", "").replace(
+            "venvstacks emits `readlink -f", ""
+        ), wrapper
         assert 'while [ -h "$_wrapper_target" ]' in text, wrapper
         assert wrapper.stat().st_mode & 0o111, f"{wrapper} lost its executable bit"
 
@@ -160,7 +160,7 @@ def test_the_portable_wrapper_resolves_the_same_directory(tmp_path: Path) -> Non
     fake_bin.mkdir()
     fake_readlink = fake_bin / "readlink"
     fake_readlink.write_text(
-        '#!/bin/sh\n'
+        "#!/bin/sh\n"
         'case "$1" in -f*) echo "readlink: illegal option -- f" >&2; exit 1 ;; esac\n'
         'exec /usr/bin/readlink "$@"\n',
         encoding="utf-8",
@@ -172,7 +172,11 @@ def test_the_portable_wrapper_resolves_the_same_directory(tmp_path: Path) -> Non
     env = {**os.environ, "PATH": f"{fake_bin}:{os.environ['PATH']}"}
     result = subprocess.run(
         ["/bin/zsh", str(wrapper), "MARKER"],
-        cwd=elsewhere, env=env, capture_output=True, text=True, timeout=30,
+        cwd=elsewhere,
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=30,
     )
 
     assert "Invalid wrapper script path" not in result.stderr, result.stderr

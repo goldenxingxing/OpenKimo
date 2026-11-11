@@ -95,8 +95,7 @@ def test_sitecustomize_follows_the_bundle_when_it_moves(tmp_path: Path) -> None:
     moved.parent.mkdir(parents=True)
     (tmp_path / "build" / "runtimes").rename(moved.parent / "runtimes")
     sitecustomize = (
-        moved.parent
-        / "runtimes/app-app-demo/lib/python3.12/site-packages/sitecustomize.py"
+        moved.parent / "runtimes/app-app-demo/lib/python3.12/site-packages/sitecustomize.py"
     )
 
     added = subprocess.run(
@@ -199,7 +198,8 @@ def test_the_build_checks_before_it_signs() -> None:
 
     tree = ast.parse(source)
     copy_runtimes = next(
-        node for node in ast.walk(tree)
+        node
+        for node in ast.walk(tree)
         if isinstance(node, ast.FunctionDef) and node.name == "copy_runtimes"
     )
     called = {

@@ -618,10 +618,34 @@ export const CodeBlockPreviewButton = ({
     }
 
     try {
-      const blob = new Blob([code], { type: "text/html" });
-      const url = URL.createObjectURL(blob);
-      window.open(url, "_blank");
-      setTimeout(() => URL.revokeObjectURL(url), 5000);
+      // The previewed document must not share the app's origin. A blob URL is
+      // same-origin with the page that created it, so the previewed HTML —
+      // which came from a model or a fetched file — could read the app's
+      // localStorage and cookies. A frame without `allow-same-origin` runs in
+      // an opaque origin, so scripts inside it cannot reach the app.
+      const frame = document.createElement("iframe");
+      frame.setAttribute("sandbox", "allow-scripts");
+      frame.setAttribute("title", "HTML preview");
+      frame.style.position = "fixed";
+      frame.style.inset = "0";
+      frame.style.width = "100vw";
+      frame.style.height = "100vh";
+      frame.style.border = "0";
+      frame.style.zIndex = "2147483647";
+      frame.style.background = "#fff";
+      frame.srcdoc = code;
+
+      const close = () => {
+        frame.remove();
+        window.removeEventListener("keydown", onKeyDown);
+      };
+      const onKeyDown = (event: KeyboardEvent) => {
+        if (event.key === "Escape") {
+          close();
+        }
+      };
+      window.addEventListener("keydown", onKeyDown);
+      document.body.appendChild(frame);
       onPreview?.();
     } catch (error) {
       const err =

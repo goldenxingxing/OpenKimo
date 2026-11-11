@@ -13,7 +13,6 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import json
-import re
 from pathlib import Path
 from typing import Any, cast
 from uuid import UUID
@@ -84,8 +83,6 @@ def _caller_owner_id(user: dict[str, Any] | None) -> str:
     if user is None:
         return resolve_owner_id(None)
     return resolve_owner_id(user.get("id"))
-
-
 
 
 # ----------------------- persistent memory (per-user) -----------------------

@@ -132,7 +132,6 @@ async def execute_side_question(
 
         chat_provider = soul._runtime.llm.chat_provider  # pyright: ignore[reportPrivateUsage]
         system_prompt, history, toolset = _build_btw_context(soul, question)
-        main_history_size = len(history) - 1
 
         text_chunks: list[str] = []
 

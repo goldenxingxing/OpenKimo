@@ -5,8 +5,8 @@ from kosong.chat_provider.echo import EchoChatProvider
 from kosong.contrib.chat_provider.openai_responses import OpenAIResponses
 from pydantic import SecretStr
 
-from kimo_cli.config import Config, LLMModel, LLMProvider
-from kimo_cli.llm import clone_llm_with_model_alias, create_llm
+from kimo_cli.config import LLMModel, LLMProvider
+from kimo_cli.llm import create_llm
 
 
 def test_create_llm_echo_provider():

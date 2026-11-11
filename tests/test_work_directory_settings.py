@@ -64,9 +64,7 @@ def test_settings_do_not_expose_path_controls() -> None:
     assert '"CUSTOM_SKILLS_HOST_PATH",' not in editable_source
 
 
-def test_legacy_env_cannot_override_managed_desktop_paths(
-    monkeypatch, tmp_path: Path
-) -> None:
+def test_legacy_env_cannot_override_managed_desktop_paths(monkeypatch, tmp_path: Path) -> None:
     server = importlib.import_module("packaging.app_main.server")
     paths = SimpleNamespace(
         app_name="OpenKimo",

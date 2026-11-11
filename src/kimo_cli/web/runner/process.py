@@ -899,9 +899,8 @@ class SessionProcess:
             capabilities = derive_model_capabilities(model_config)
         else:
             # Fallback: derive from env var when config file has no model entry
-            env_model_name = (
-                os.environ.get("OPENAI_MODEL_NAME")
-                or os.environ.get("ANTHROPIC_MODEL_NAME")
+            env_model_name = os.environ.get("OPENAI_MODEL_NAME") or os.environ.get(
+                "ANTHROPIC_MODEL_NAME"
             )
             if env_model_name:
                 capabilities = derive_model_capabilities(

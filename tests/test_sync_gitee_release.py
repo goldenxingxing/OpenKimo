@@ -8,13 +8,7 @@ import unittest
 from dataclasses import dataclass
 from pathlib import Path
 
-
-SCRIPT = (
-    Path(__file__).resolve().parents[1]
-    / ".github"
-    / "scripts"
-    / "sync_gitee_release.py"
-)
+SCRIPT = Path(__file__).resolve().parents[1] / ".github" / "scripts" / "sync_gitee_release.py"
 SPEC = importlib.util.spec_from_file_location("sync_gitee_release", SCRIPT)
 sync = importlib.util.module_from_spec(SPEC)
 sys.modules[SPEC.name] = sync
@@ -69,9 +63,7 @@ class GiteeReleaseTargetTests(unittest.TestCase):
 
         self.assertIn("release notes", body)
         self.assertIn("## 安装包下载", body)
-        self.assertIn(
-            "[OpenKimo.dmg](https://github.com/example/OpenKimo.dmg)", body
-        )
+        self.assertIn("[OpenKimo.dmg](https://github.com/example/OpenKimo.dmg)", body)
         self.assertIn("245.5 MiB", body)
 
     def test_creates_release_when_tag_is_absent(self):
@@ -125,9 +117,7 @@ class GiteeReleaseTargetTests(unittest.TestCase):
 
         self.assertEqual(release_id, 7)
         self.assertEqual(api.calls[-1].method, "PATCH")
-        self.assertEqual(
-            api.calls[-1].path, "/repos/qunwei/OpenKimo/releases/7"
-        )
+        self.assertEqual(api.calls[-1].path, "/repos/qunwei/OpenKimo/releases/7")
 
     def test_sync_does_not_upload_release_assets(self):
         api = FakeApi([{"id": 7}, {"id": 7}])
@@ -160,8 +150,11 @@ class GiteeReleaseTargetTests(unittest.TestCase):
         api = FakeApi([{"id": 7}, {"id": 7}])
         target = sync.GiteeReleaseTarget(api, "qunwei", "OpenKimo")
         release = sync.Release(
-            tag="v1.2.0-rc1", name="v1.2.0-rc1", body="notes",
-            assets=[], prerelease=True,
+            tag="v1.2.0-rc1",
+            name="v1.2.0-rc1",
+            body="notes",
+            assets=[],
+            prerelease=True,
         )
 
         target.sync(release)
@@ -194,9 +187,7 @@ class GiteeReleaseTargetTests(unittest.TestCase):
                 file_path,
             )
 
-        self.assertEqual(
-            [call.method for call in api.calls], ["GET", "DELETE", "POST"]
-        )
+        self.assertEqual([call.method for call in api.calls], ["GET", "DELETE", "POST"])
         self.assertIn("/attach_files/3", api.calls[1].path)
         self.assertNotIn("/attach_files/4", api.calls[1].path)
         self.assertEqual(api.calls[2].file_path.name, "OpenKimo.dmg")
@@ -227,7 +218,6 @@ class ApiClientTests(unittest.TestCase):
         self.assertIn("HTTP 403", message)
         self.assertNotIn("gitee-secret", message)
         self.assertNotIn("github-secret", message)
-
 
     def test_rate_limit_waits_as_long_as_the_server_asked(self):
         """1, 2, 3 seconds is not a rate-limit window; the header says what is."""
@@ -285,7 +275,6 @@ class ApiClientTests(unittest.TestCase):
         client.request_json("GET", "/release")
 
         self.assertEqual(delays, [sync.MAX_RETRY_AFTER_SECONDS])
-
 
     def test_a_rate_limited_403_is_retried_but_a_plain_403_is_not(self):
         """GitHub answers a secondary rate limit with 403, and says so."""

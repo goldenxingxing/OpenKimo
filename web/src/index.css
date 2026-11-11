@@ -140,10 +140,6 @@
   --code-foreground: oklch(0.985 0 0);
 }
 
-* {
-  border-color: var(--border);
-}
-
 html,
 body {
   margin: 0;

@@ -274,6 +274,7 @@ function OpenPathAnchor({
   const { t } = useTranslation("chat");
   const openMentioned = useOpenMentionedPath();
   const workDir = usePathWorkDir();
+  const hover = useHoverReveal();
   const path = isOpenPathHref(href)
     ? decodeOpenPathHref(href)
     : resolveLocalLinkPath(href, workDir);
@@ -298,7 +299,6 @@ function OpenPathAnchor({
     event.preventDefault();
     void openMentioned(path, event);
   };
-  const hover = useHoverReveal();
 
   return (
     <span
@@ -343,6 +343,7 @@ function InlinePathCode({
   const { t } = useTranslation("chat");
   const openMentioned = useOpenMentionedPath();
   const workDir = usePathWorkDir();
+  const hover = useHoverReveal();
   const text = getCodeText(children);
   if (!isLikelyStandalonePath(text, workDir)) {
     return null;
@@ -353,7 +354,6 @@ function InlinePathCode({
     event.preventDefault();
     void openMentioned(path, event);
   };
-  const hover = useHoverReveal();
 
   return (
     <code
@@ -397,12 +397,13 @@ const StreamdownCode = ({
   node,
   ...props
 }: StreamdownCodeProps) => {
+  const workDir = usePathWorkDir();
   const isInline = node?.position?.start?.line === node?.position?.end?.line;
 
   if (isInline) {
     // A backticked path is the most common way an agent cites a file; offer
     // the open action right where the reader sees it.
-    if (isLikelyStandalonePath(getCodeText(children), usePathWorkDir())) {
+    if (isLikelyStandalonePath(getCodeText(children), workDir)) {
       return (
         <InlinePathCode className={className} {...props}>
           {children}

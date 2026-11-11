@@ -390,4 +390,3 @@ class FetchURL(CallableTool2[Params]):
 
         builder.write(extracted_text)
         return builder.ok("The returned content was fetched via browser automation.")
-

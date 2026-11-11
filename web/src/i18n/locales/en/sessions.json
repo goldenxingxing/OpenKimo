@@ -22,11 +22,19 @@
       "title1": "New session",
       "title2": "New session here",
       "body": "Click to open in new tab"
-    }
+    },
+    "failed": "Failed to create the session"
   },
   "delete_dialog": {
     "title": "Delete Session",
     "body": "Are you sure you want to delete \"{{name}}\"? This action cannot be undone.",
+    "cancel": "Cancel",
+    "confirm": "Delete"
+  },
+  "delete_bulk_dialog": {
+    "title": "Delete Sessions",
+    "body_one": "Are you sure you want to delete {{count}} selected session? This action cannot be undone.",
+    "body_other": "Are you sure you want to delete {{count}} selected sessions? This action cannot be undone.",
     "cancel": "Cancel",
     "confirm": "Delete"
   },

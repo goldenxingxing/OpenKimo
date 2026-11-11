@@ -77,9 +77,7 @@ class TestRequestIdsAreUnique:
         guard = _guard()
         # Nothing for the first command, so it times out.
         ws = FakeWS([])
-        first = asyncio.run(
-            guard._send_cdp_command(ws, "Browser.getWindowForTarget", timeout=0.05)
-        )
+        first = asyncio.run(guard._send_cdp_command(ws, "Browser.getWindowForTarget", timeout=0.05))
         assert first is None
 
         # Now the late reply to command 1 shows up, followed by command 2's.
@@ -87,9 +85,7 @@ class TestRequestIdsAreUnique:
             json.dumps({"id": 1, "result": {"windowId": 111}}),
             json.dumps({"id": 2, "result": {"bounds": {"windowState": "minimized"}}}),
         ]
-        second = asyncio.run(
-            guard._send_cdp_command(ws, "Browser.getWindowBounds", timeout=1.0)
-        )
+        second = asyncio.run(guard._send_cdp_command(ws, "Browser.getWindowBounds", timeout=1.0))
 
         assert second == {"bounds": {"windowState": "minimized"}}
         assert second != {"windowId": 111}, "stale reply must not be reused"

@@ -10,7 +10,7 @@ from app_main import runtime_repair  # noqa: E402
 
 # Minimal stand-in for the venvstacks-generated postinstall.py: same public
 # functions runtime_repair calls, deriving paths from the layer location.
-_POSTINSTALL_STUB = '''
+_POSTINSTALL_STUB = """
 from pathlib import Path
 
 def load_layer_config(layer_path):
@@ -31,7 +31,7 @@ def generate_sitecustomize(pylib_paths, dynlib_paths, *, include_missing_dynlib_
     lines = ["from site import addsitedir"]
     lines += [f"addsitedir({str(p)!r})" for p in pylib_paths]
     return "\\n".join(lines) + "\\n"
-'''
+"""
 
 
 def _make_layer(runtimes: Path, name: str, home: Path) -> Path:

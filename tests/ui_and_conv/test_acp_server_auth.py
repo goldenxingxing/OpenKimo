@@ -3,7 +3,6 @@ from unittest.mock import patch
 
 import acp
 import pytest
-
 from pydantic import SecretStr
 
 from kimo_cli.acp.server import ACPServer
@@ -67,52 +66,64 @@ def _make_token(
 
 def test_check_auth_raises_when_no_token(server: ACPServer, oauth_config) -> None:
     """Test that _check_auth raises AUTH_REQUIRED when no token exists."""
-    with patch("kimo_cli.acp.server.load_config", return_value=oauth_config):
-        with patch("kimo_cli.acp.server.load_tokens", return_value=None):
-            with pytest.raises(acp.RequestError) as exc_info:
-                server._check_auth()
+    with (
+        patch("kimo_cli.acp.server.load_config", return_value=oauth_config),
+        patch("kimo_cli.acp.server.load_tokens", return_value=None),
+    ):
+        with pytest.raises(acp.RequestError) as exc_info:
+            server._check_auth()
 
-            assert exc_info.value.code == -32000  # AUTH_REQUIRED error code
+        assert exc_info.value.code == -32000  # AUTH_REQUIRED error code
 
 
 def test_check_auth_raises_when_token_has_no_access_token(server: ACPServer, oauth_config) -> None:
     """Test that _check_auth raises AUTH_REQUIRED when token has no access_token."""
     token = _make_token(access_token="")
 
-    with patch("kimo_cli.acp.server.load_config", return_value=oauth_config):
-        with patch("kimo_cli.acp.server.load_tokens", return_value=token):
-            with pytest.raises(acp.RequestError) as exc_info:
-                server._check_auth()
+    with (
+        patch("kimo_cli.acp.server.load_config", return_value=oauth_config),
+        patch("kimo_cli.acp.server.load_tokens", return_value=token),
+    ):
+        with pytest.raises(acp.RequestError) as exc_info:
+            server._check_auth()
 
-            assert exc_info.value.code == -32000
+        assert exc_info.value.code == -32000
 
 
 def test_check_auth_passes_when_valid_token(server: ACPServer, oauth_config) -> None:
     """Test that _check_auth passes when a valid token exists."""
     token = _make_token()
 
-    with patch("kimo_cli.acp.server.load_config", return_value=oauth_config):
-        with patch("kimo_cli.acp.server.load_tokens", return_value=token):
-            # Should not raise
-            server._check_auth()
+    with (
+        patch("kimo_cli.acp.server.load_config", return_value=oauth_config),
+        patch("kimo_cli.acp.server.load_tokens", return_value=token),
+    ):
+        # Should not raise
+        server._check_auth()
 
 
-def test_check_auth_raises_when_token_expired_without_refresh(server: ACPServer, oauth_config) -> None:
+def test_check_auth_raises_when_token_expired_without_refresh(
+    server: ACPServer, oauth_config
+) -> None:
     """Test that _check_auth raises AUTH_REQUIRED when token expired and no refresh token."""
     token = _make_token(
         expires_at=time.time() - 100,  # expired 100 seconds ago
         refresh_token="",
     )
 
-    with patch("kimo_cli.acp.server.load_config", return_value=oauth_config):
-        with patch("kimo_cli.acp.server.load_tokens", return_value=token):
-            with pytest.raises(acp.RequestError) as exc_info:
-                server._check_auth()
+    with (
+        patch("kimo_cli.acp.server.load_config", return_value=oauth_config),
+        patch("kimo_cli.acp.server.load_tokens", return_value=token),
+    ):
+        with pytest.raises(acp.RequestError) as exc_info:
+            server._check_auth()
 
-            assert exc_info.value.code == -32000
+        assert exc_info.value.code == -32000
 
 
-def test_check_auth_passes_when_token_expired_but_has_refresh(server: ACPServer, oauth_config) -> None:
+def test_check_auth_passes_when_token_expired_but_has_refresh(
+    server: ACPServer, oauth_config
+) -> None:
     """Test that _check_auth passes when token expired but refresh token is available.
 
     The background refresh mechanism will handle renewal.
@@ -122,10 +133,12 @@ def test_check_auth_passes_when_token_expired_but_has_refresh(server: ACPServer,
         refresh_token="refresh_123",
     )
 
-    with patch("kimo_cli.acp.server.load_config", return_value=oauth_config):
-        with patch("kimo_cli.acp.server.load_tokens", return_value=token):
-            # Should not raise — background refresh will handle it
-            server._check_auth()
+    with (
+        patch("kimo_cli.acp.server.load_config", return_value=oauth_config),
+        patch("kimo_cli.acp.server.load_tokens", return_value=token),
+    ):
+        # Should not raise — background refresh will handle it
+        server._check_auth()
 
 
 def test_check_auth_passes_when_expires_at_is_zero(server: ACPServer, oauth_config) -> None:
@@ -137,10 +150,12 @@ def test_check_auth_passes_when_expires_at_is_zero(server: ACPServer, oauth_conf
     """
     token = _make_token(expires_at=0.0)
 
-    with patch("kimo_cli.acp.server.load_config", return_value=oauth_config):
-        with patch("kimo_cli.acp.server.load_tokens", return_value=token):
-            # Should not raise
-            server._check_auth()
+    with (
+        patch("kimo_cli.acp.server.load_config", return_value=oauth_config),
+        patch("kimo_cli.acp.server.load_tokens", return_value=token),
+    ):
+        # Should not raise
+        server._check_auth()
 
 
 # ---------------------------------------------------------------------------
@@ -149,7 +164,9 @@ def test_check_auth_passes_when_expires_at_is_zero(server: ACPServer, oauth_conf
 
 
 @pytest.mark.asyncio
-async def test_authenticate_rejects_expired_token_without_refresh(server: ACPServer, oauth_config) -> None:
+async def test_authenticate_rejects_expired_token_without_refresh(
+    server: ACPServer, oauth_config
+) -> None:
     """authenticate('login') must reject an expired token with no refresh token,
     the same way _check_auth() does. Otherwise the client gets a false-success
     from authenticate, then immediately fails on new_session.
@@ -159,12 +176,14 @@ async def test_authenticate_rejects_expired_token_without_refresh(server: ACPSer
         refresh_token="",
     )
 
-    with patch("kimo_cli.acp.server.load_config", return_value=oauth_config):
-        with patch("kimo_cli.acp.server.load_tokens", return_value=token):
-            with pytest.raises(acp.RequestError) as exc_info:
-                await server.authenticate(method_id="login")
+    with (
+        patch("kimo_cli.acp.server.load_config", return_value=oauth_config),
+        patch("kimo_cli.acp.server.load_tokens", return_value=token),
+    ):
+        with pytest.raises(acp.RequestError) as exc_info:
+            await server.authenticate(method_id="login")
 
-            assert exc_info.value.code == -32000
+        assert exc_info.value.code == -32000
 
 
 @pytest.mark.asyncio
@@ -172,8 +191,10 @@ async def test_authenticate_accepts_valid_token(server: ACPServer, oauth_config)
     """authenticate('login') should succeed for a valid, non-expired token."""
     token = _make_token()
 
-    with patch("kimo_cli.acp.server.load_config", return_value=oauth_config):
-        with patch("kimo_cli.acp.server.load_tokens", return_value=token):
-            result = await server.authenticate(method_id="login")
+    with (
+        patch("kimo_cli.acp.server.load_config", return_value=oauth_config),
+        patch("kimo_cli.acp.server.load_tokens", return_value=token),
+    ):
+        result = await server.authenticate(method_id="login")
 
     assert result is not None

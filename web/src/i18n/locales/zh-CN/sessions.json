@@ -22,13 +22,20 @@
       "title1": "创建新会话",
       "title2": "在此创建新会话",
       "body": "点击，在新窗口打开"
-    }
+    },
+    "failed": "创建会话失败"
   },
   "delete_dialog": {
     "title": "删除会话",
     "body": "你确定要删除\"{{name}}\"吗？这个操作无法反悔。",
     "cancel": "取消",
     "confirm": "确认删除"
+  },
+  "delete_bulk_dialog": {
+    "title": "删除会话",
+    "body_other": "确定要删除选中的 {{count}} 个会话吗？此操作无法撤销。",
+    "cancel": "取消",
+    "confirm": "删除"
   },
   "createDir": {
     "title": "目录不存在",

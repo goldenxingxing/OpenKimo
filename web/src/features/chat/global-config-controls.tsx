@@ -83,6 +83,10 @@ export function GlobalConfigControls({
 
   const [isSelectorOpen, setIsSelectorOpen] = useState(false);
   const [lastBusySkip, setLastBusySkip] = useState<string[] | null>(null);
+  // The model change that was skipped for the busy sessions. The force-restart
+  // retry has to carry it, or the sessions get restarted without ever picking
+  // up the model the user asked for.
+  const [pendingDefaultModel, setPendingDefaultModel] = useState<string | null>(null);
   const [isSwitching, setIsSwitching] = useState(false);
   // Local fallback for the draft selection when the parent does not control it.
   const [localDraftModel, setLocalDraftModel] = useState<string | null>(null);
@@ -160,11 +164,13 @@ export function GlobalConfigControls({
 
       if (skippedBusy.length > 0) {
         setLastBusySkip(skippedBusy);
+        setPendingDefaultModel(effectiveModelName);
         toast.message(t("toasts:globalModel.busyTitle"), {
           description: t("toasts:globalModel.busyDesc", { count: skippedBusy.length }),
         });
       } else {
         setLastBusySkip(null);
+        setPendingDefaultModel(null);
       }
     } catch (err) {
       const message =
@@ -178,7 +184,13 @@ export function GlobalConfigControls({
       return;
     }
     try {
-      const resp = await update({ forceRestartBusySessions: true });
+      // Carry the skipped model change along: restarting the sessions without
+      // it would leave them on the old model, which is the opposite of what
+      // the user asked for when they hit the retry.
+      const resp = await update({
+        forceRestartBusySessions: true,
+        ...(pendingDefaultModel ? { defaultModel: pendingDefaultModel } : {}),
+      });
       const restarted = resp.restartedSessionIds ?? [];
       const skippedBusy = resp.skippedBusySessionIds ?? [];
 
@@ -195,7 +207,7 @@ export function GlobalConfigControls({
         err instanceof Error ? err.message : t("toasts:restartBusy.fallbackError");
       toast.error(t("toasts:restartBusy.errorTitle"), { description: message });
     }
-  }, [lastBusySkip, update, t]);
+  }, [lastBusySkip, pendingDefaultModel, update, t]);
 
   const attachments = usePromptInputAttachments();
 

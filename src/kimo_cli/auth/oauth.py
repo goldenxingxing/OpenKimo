@@ -20,9 +20,6 @@ import aiohttp
 import keyring
 from pydantic import SecretStr
 
-from kimo_cli.auth.platforms import (
-    managed_provider_key,
-)
 from kimo_cli.config import (
     Config,
     OAuthRef,
@@ -738,8 +735,6 @@ class OAuthManager:
                 track("oauth_refresh", success=True)
             finally:
                 xlock.release()
-
-
 
 
 if __name__ == "__main__":

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import contextlib
 import io
 import json
@@ -34,6 +35,15 @@ __all__ = ["collect_events", "router"]
 
 _SESSION_ID_RE = re.compile(r"^[a-zA-Z0-9_-]+$")
 _IMPORTED_HASH = "__imported__"
+
+#: Largest accepted upload, compressed.
+_MAX_UPLOAD_BYTES = 200 * 1024 * 1024
+#: Largest total size of the *expanded* archive.
+#:
+#: The compressed size is what the upload limit above bounds, and a ZIP
+#: declares the expanded size of every member up front — so a small upload
+#: can ask for gigabytes on disk, and nothing but this bound stops it.
+_MAX_EXPANDED_BYTES = 2 * 1024 * 1024 * 1024
 
 
 def _get_imported_root() -> Path:
@@ -639,16 +649,34 @@ def download_session(work_dir_hash: str, session_id: str) -> StreamingResponse:
     )
 
 
+def _extract_and_flatten(zf: zipfile.ZipFile, session_dir: Path) -> None:
+    """Extract *zf* into *session_dir*, flattening a single top-level directory.
+
+    Blocking work: a 200 MB archive takes real time to decompress and to
+    move into place, and the caller runs this in a worker thread so the
+    event loop keeps serving other requests meanwhile.
+    """
+    zf.extractall(session_dir)
+
+    # If all files are under a single subdirectory, flatten them
+    entries = list(session_dir.iterdir())
+    if len(entries) == 1 and entries[0].is_dir():
+        nested_dir = entries[0]
+        for item in nested_dir.iterdir():
+            shutil.move(str(item), str(session_dir / item.name))
+        nested_dir.rmdir()
+
+
 @router.post("/sessions/import")
 async def import_session(file: UploadFile) -> dict[str, Any]:
     """Import a session from an uploaded ZIP archive."""
     if not file.filename or not file.filename.endswith(".zip"):
         raise HTTPException(status_code=400, detail="Only .zip files are accepted")
 
-    # Check content length before reading to avoid memory exhaustion
-    _MAX_UPLOAD_BYTES = 200 * 1024 * 1024
-    content_length = file.size
-    if content_length and content_length > _MAX_UPLOAD_BYTES:
+    # Check the received size before reading it into memory. `file.size` counts
+    # the bytes actually written to the spooled file, so it is the real size of
+    # this part whatever the request headers claimed.
+    if file.size and file.size > _MAX_UPLOAD_BYTES:
         raise HTTPException(status_code=413, detail="File too large (max 200 MB)")
 
     content = await file.read()
@@ -676,6 +704,17 @@ async def import_session(file: UploadFile) -> dict[str, Any]:
                 "(or inside a single directory)",
             )
 
+        # A ZIP declares the expanded size of every member up front, so the
+        # total is known before a byte is written. That is what bounds the
+        # disk an upload can ask for: the compressed size above says nothing
+        # about how far the archive expands.
+        expanded = sum(info.file_size for info in zf.infolist())
+        if expanded > _MAX_EXPANDED_BYTES:
+            raise HTTPException(
+                status_code=413,
+                detail="Archive expands beyond the allowed size (max 2 GB)",
+            )
+
         session_id = uuid4().hex[:16]
         imported_root = _get_imported_root()
         session_dir = imported_root / session_id
@@ -690,16 +729,10 @@ async def import_session(file: UploadFile) -> dict[str, Any]:
                     detail="ZIP contains unsafe path entries",
                 )
 
-        # Extract - handle both flat ZIPs and ZIPs with a single top-level directory
-        zf.extractall(session_dir)
-
-        # If all files are under a single subdirectory, flatten them
-        entries = list(session_dir.iterdir())
-        if len(entries) == 1 and entries[0].is_dir():
-            nested_dir = entries[0]
-            for item in nested_dir.iterdir():
-                shutil.move(str(item), str(session_dir / item.name))
-            nested_dir.rmdir()
+        # Extract - handle both flat ZIPs and ZIPs with a single top-level directory.
+        # Decompressing 200 MB and moving the files around takes real time, so
+        # it runs in a worker thread instead of on the event loop.
+        await asyncio.to_thread(_extract_and_flatten, zf, session_dir)
 
     return {
         "session_id": session_id,

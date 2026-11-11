@@ -53,9 +53,19 @@ def collect_host_values(config: Config, oauth: OAuthManager) -> dict[str, str]:
 
 
 def _validate_name(name: str, plugins_dir: Path) -> Path:
-    """Resolve and validate plugin name, returning the safe destination path."""
-    dest = (plugins_dir / name).resolve()
-    if not dest.is_relative_to(plugins_dir.resolve()):
+    """Resolve and validate plugin name, returning the safe destination path.
+
+    The name must be a single path component under ``plugins_dir``. An empty
+    name, ``.``/``..``, or anything carrying a separator resolves to the
+    plugins directory itself or outside it, and callers remove that path
+    wholesale when replacing an existing plugin — ``remove_plugin("")`` would
+    otherwise delete every installed plugin.
+    """
+    if not name or name in {".", ".."} or "/" in name or "\\" in name:
+        raise PluginError(f"Invalid plugin name: {name}")
+    root = plugins_dir.resolve()
+    dest = (root / name).resolve()
+    if dest == root or not dest.is_relative_to(root):
         raise PluginError(f"Invalid plugin name: {name}")
     return dest
 

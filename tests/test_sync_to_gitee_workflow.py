@@ -2,13 +2,7 @@ import re
 import unittest
 from pathlib import Path
 
-
-WORKFLOW = (
-    Path(__file__).resolve().parents[1]
-    / ".github"
-    / "workflows"
-    / "sync-to-gitee.yml"
-)
+WORKFLOW = Path(__file__).resolve().parents[1] / ".github" / "workflows" / "sync-to-gitee.yml"
 
 
 class SyncToGiteeWorkflowTests(unittest.TestCase):
@@ -29,17 +23,11 @@ class SyncToGiteeWorkflowTests(unittest.TestCase):
 
         self.assertIn("github.event_name == 'workflow_dispatch'", text)
         self.assertIn("startsWith(inputs.tag, 'v')", text)
-        self.assertIn(
-            "github.event.workflow_run.conclusion == 'success'", text
-        )
-        self.assertIn(
-            "startsWith(github.event.workflow_run.head_branch, 'v')", text
-        )
+        self.assertIn("github.event.workflow_run.conclusion == 'success'", text)
+        self.assertIn("startsWith(github.event.workflow_run.head_branch, 'v')", text)
         self.assertIn("GITEE_ACCESS_TOKEN", text)
         self.assertIn("sync_gitee_release.py", text)
-        self.assertIn(
-            "github.event_name == 'workflow_dispatch' && inputs.tag", text
-        )
+        self.assertIn("github.event_name == 'workflow_dispatch' && inputs.tag", text)
 
     def test_jobs_have_separate_concurrency_groups(self):
         text = WORKFLOW.read_text()
@@ -67,9 +55,7 @@ class SyncToGiteeWorkflowTests(unittest.TestCase):
     def test_git_mirror_uses_gitee_token_over_https(self):
         text = WORKFLOW.read_text()
 
-        self.assertIn(
-            "GITEE_ACCESS_TOKEN: ${{ secrets.GITEE_ACCESS_TOKEN }}", text
-        )
+        self.assertIn("GITEE_ACCESS_TOKEN: ${{ secrets.GITEE_ACCESS_TOKEN }}", text)
         self.assertIn(
             "https://gitee.com/qunwei/OpenKimo.git",
             text,

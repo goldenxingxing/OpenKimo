@@ -107,17 +107,22 @@ def init_db() -> None:
         row = conn.execute("SELECT COUNT(*) FROM users").fetchone()
         if row[0] == 0:
             admin_id = str(uuid.uuid4())
-            # The documented default stays the default — README, docs and
-            # deploy.sh all name it — but a deployment that does not want a
-            # published password on a privileged account can now say so
-            # without patching the source.
+            # No published default password. A well-known credential on a
+            # privileged account is a backdoor, not a convenience: the account
+            # is created on first boot only, but that boot is exactly when the
+            # deployment is most likely to be reachable. Set
+            # KIMO_INITIAL_ADMIN_PASSWORD to choose the password; otherwise one
+            # is generated and printed once, here and nowhere else.
             initial_password = os.environ.get("KIMO_INITIAL_ADMIN_PASSWORD")
             if not initial_password:
+                initial_password = secrets.token_urlsafe(16)
                 logger.warning(
-                    "KIMO_INITIAL_ADMIN_PASSWORD not set, using default 'admin123'. "
-                    "Set this env var to change the initial admin password."
+                    "KIMO_INITIAL_ADMIN_PASSWORD not set; generated a random password "
+                    "for the initial 'admin' account: {password} — store it now, it is "
+                    "not shown again.",
+                    password=initial_password,
                 )
-                initial_password = "admin123"
+                print(f"Initial admin password: {initial_password}")
             password_hash = _hash_password(initial_password)
             conn.execute(
                 """

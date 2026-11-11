@@ -10,7 +10,6 @@ import {
   attentionTitle,
   markSeen,
 } from "@/features/sessions/session-attention";
-import { getAuthToken } from "@/lib/auth";
 import { getApiBaseUrl } from "./utils";
 
 type ActivityEvent =
@@ -77,10 +76,10 @@ export function useSessionAttention(
       setAttention(EMPTY_ATTENTION);
       return;
     }
-    const token = getAuthToken();
     const base = `${getApiBaseUrl()}/api/sessions/activity`;
-    const url = token ? `${base}?token=${encodeURIComponent(token)}` : base;
-    const source = new EventSource(url, { withCredentials: true });
+    // The session cookie identifies the user for this route; a token in the
+    // URL would only end up in the access log.
+    const source = new EventSource(base, { withCredentials: true });
     let retry: number | undefined;
     // EventSource retries a dropped connection by itself, but a response it
     // cannot use — a 401, a 502 while the server restarts — closes it for

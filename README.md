@@ -143,12 +143,12 @@ Open http://localhost:5494 in your browser.
 
 #### Default Admin Account
 
-| Field    | Value     |
-|----------|-----------|
-| Username | `admin`   |
-| Password | `admin123` |
+| Field    | Value |
+|----------|-------|
+| Username | `admin` |
+| Password | the value of `KIMO_INITIAL_ADMIN_PASSWORD`. When that variable is unset, a random password is generated on the first start and printed once in the server log — there is no built-in default password. |
 
-> **Important:** Change the default password immediately after first login via the admin panel at `/admin`.
+> **Important:** Change the password immediately after first login via the admin panel at `/admin`.
 
 If Bearer token authentication is also enabled, append your token to the URL:
 

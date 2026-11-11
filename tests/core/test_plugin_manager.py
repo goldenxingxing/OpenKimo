@@ -280,3 +280,35 @@ def test_collect_host_values_empty_key():
 
     values = collect_host_values(config, oauth)
     assert "api_key" not in values
+
+
+def test_remove_plugin_rejects_empty_name(tmp_path: Path):
+    """An empty plugin name must not resolve to the plugins directory itself.
+
+    ``remove_plugin("")`` used to rmtree every installed plugin, because the
+    resolved destination was the plugins directory and the caller removes that
+    path wholesale.
+    """
+    plugins_dir = tmp_path / "plugins"
+    plugins_dir.mkdir()
+    keep = plugins_dir / "keep-me"
+    keep.mkdir()
+
+    with pytest.raises(PluginError):
+        remove_plugin("", plugins_dir)
+
+    assert keep.is_dir()
+
+
+@pytest.mark.parametrize("name", [".", "..", "a/b", "a\\b", "../escape"])
+def test_remove_plugin_rejects_non_single_component_names(tmp_path: Path, name: str):
+    """Only a single path component under the plugins directory is accepted."""
+    plugins_dir = tmp_path / "plugins"
+    plugins_dir.mkdir()
+    outside = tmp_path / "outside"
+    outside.mkdir()
+
+    with pytest.raises(PluginError):
+        remove_plugin(name, plugins_dir)
+
+    assert outside.is_dir()

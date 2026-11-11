@@ -4,7 +4,6 @@ import struct
 import tomllib
 from pathlib import Path
 
-
 ROOT = Path(__file__).resolve().parents[1]
 CANONICAL_ICON = ROOT / "web" / "public" / "logo.png"
 OLD_PACKAGING_ICON = ROOT / "packaging" / "icon.png"

@@ -3,12 +3,8 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-
 ROOT = Path(__file__).resolve().parents[1]
-APPROVAL_DIALOG = (
-    ROOT / "web" / "src" / "features" / "chat" / "components"
-    / "approval-dialog.tsx"
-)
+APPROVAL_DIALOG = ROOT / "web" / "src" / "features" / "chat" / "components" / "approval-dialog.tsx"
 
 
 def test_wiki_approval_reuses_three_actions_with_compact_copy() -> None:
@@ -31,14 +27,12 @@ def test_wiki_approval_reuses_three_actions_with_compact_copy() -> None:
 
 def test_wiki_approval_locales_define_compact_labels() -> None:
     en = json.loads(
-        (
-            ROOT / "web" / "src" / "i18n" / "locales" / "en" / "chat.json"
-        ).read_text(encoding="utf-8")
+        (ROOT / "web" / "src" / "i18n" / "locales" / "en" / "chat.json").read_text(encoding="utf-8")
     )
     zh = json.loads(
-        (
-            ROOT / "web" / "src" / "i18n" / "locales" / "zh-CN" / "chat.json"
-        ).read_text(encoding="utf-8")
+        (ROOT / "web" / "src" / "i18n" / "locales" / "zh-CN" / "chat.json").read_text(
+            encoding="utf-8"
+        )
     )
 
     assert en["wikiApproval"] == {

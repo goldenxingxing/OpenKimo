@@ -2,10 +2,10 @@ from __future__ import annotations
 
 import json
 import os
-from collections.abc import Mapping, Sequence
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Literal, Protocol, Self, cast, get_args
+from typing import TYPE_CHECKING, Any, Literal, Self, cast, get_args
 
 import yaml
 from kosong.chat_provider import ChatProvider, StreamedMessage, ThinkingEffort
@@ -93,9 +93,6 @@ def parse_llm_providers_env() -> list[dict[str, Any]] | None:
     return cast(list[dict[str, Any]], data)
 
 
-
-
-
 @dataclass(slots=True)
 class _TraceCallbackChatProvider:
     _provider: ChatProvider
@@ -133,20 +130,11 @@ class _TraceCallbackChatProvider:
         return type(self)(self._provider.with_thinking(effort), self._on_trace_id)
 
 
-
-
-
-
-
-
 def with_trace_callback(
     chat_provider: ChatProvider,
     on_trace_id: Callback[[str | None], None],
 ) -> ChatProvider:
     return _TraceCallbackChatProvider(chat_provider, on_trace_id)
-
-
-
 
 
 def estimate_request_tokens(
@@ -268,9 +256,6 @@ def augment_provider_with_env_vars(provider: LLMProvider, model: LLMModel) -> di
         applied["KIMO_MODEL_CAPABILITIES"] = capabilities
 
     return applied
-
-
-
 
 
 def create_llm(

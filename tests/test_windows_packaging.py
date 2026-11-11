@@ -9,16 +9,14 @@ import sqlite3
 import sys
 import types
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
-from types import SimpleNamespace
 
 ROOT = Path(__file__).resolve().parents[1]
 CANONICAL_ICON = ROOT / "web" / "public" / "logo.png"
 ROUND_FAVICON = ROOT / "web" / "public" / "favicon.png"
-LEGACY_ICON_SHA256 = (
-    "dbd00e2ad61ea8832ef0b024662a4a8a5d1b66f0599d5d42e1c9688b9d4cfdf6"
-)
+LEGACY_ICON_SHA256 = "dbd00e2ad61ea8832ef0b024662a4a8a5d1b66f0599d5d42e1c9688b9d4cfdf6"
 SQUARE_LOGO_SHA256 = "a30b84efe092999d20b4b7f78b1b99c8a2d1e1da72e3fa09f853bf68b616f0af"
 ROUND_FAVICON_SHA256 = "4f428414c9abb5bc592de38941460a3ec1cbfedc3d49803fe0973680bf86d6f3"
 BUILD_WINDOWS_PATH = ROOT / "packaging" / "build_windows.py"
@@ -127,9 +125,7 @@ def test_branding_seed_migrates_legacy_asset_and_seeds_empty_fields(
     tmp_path: Path,
 ) -> None:
     legacy_bytes = b"legacy built-in icon"
-    paths = _branding_paths(
-        tmp_path, legacy_hash=hashlib.sha256(legacy_bytes).hexdigest()
-    )
+    paths = _branding_paths(tmp_path, legacy_hash=hashlib.sha256(legacy_bytes).hexdigest())
     database = paths.sessions_dir / "users.db"
     connection = seed_branding._connect(database)
     connection.execute(
@@ -148,9 +144,7 @@ def test_branding_seed_migrates_legacy_asset_and_seeds_empty_fields(
 
 
 def test_branding_seed_preserves_custom_asset(tmp_path: Path) -> None:
-    paths = _branding_paths(
-        tmp_path, legacy_hash=hashlib.sha256(b"legacy").hexdigest()
-    )
+    paths = _branding_paths(tmp_path, legacy_hash=hashlib.sha256(b"legacy").hexdigest())
     custom = _data_url(b"user custom icon")
     database = paths.sessions_dir / "users.db"
     connection = seed_branding._connect(database)
@@ -174,9 +168,7 @@ def test_windows_server_process_uses_no_window_and_new_group() -> None:
 
 
 def test_posix_server_process_starts_a_new_session() -> None:
-    assert server._popen_new_group_kwargs("darwin") == {
-        "start_new_session": True
-    }
+    assert server._popen_new_group_kwargs("darwin") == {"start_new_session": True}
 
 
 # --- Text encoding -------------------------------------------------------
@@ -199,9 +191,7 @@ def test_env_round_trips_a_character_the_host_codepage_lacks(tmp_path: Path) -> 
     assert dotenv_io.read_env(env_file)["LLM_PROVIDERS"] == _NOT_IN_GBK
 
 
-def test_env_written_in_the_host_codepage_still_reads(
-    tmp_path: Path, monkeypatch
-) -> None:
+def test_env_written_in_the_host_codepage_still_reads(tmp_path: Path, monkeypatch) -> None:
     # A file left behind by the version that wrote the ANSI codepage. It has to
     # keep loading, or the app comes up with no provider configured at all.
     # "mbcs" only exists on Windows, so stand in the concrete codepage here.
@@ -272,9 +262,9 @@ def test_launcher_makes_the_same_distinction() -> None:
     # replaced; it sets PYTHONIOENCODING but never PYTHONUTF8. The comment there
     # names PYTHONUTF8 to explain why it is absent, so match the assignment
     # rather than the word.
-    launcher = (
-        Path(__file__).resolve().parents[1] / "packaging" / "launcher_win.c"
-    ).read_text(encoding="utf-8")
+    launcher = (Path(__file__).resolve().parents[1] / "packaging" / "launcher_win.c").read_text(
+        encoding="utf-8"
+    )
     assert "PYTHONIOENCODING" in launcher
     assert "PYTHONUTF8" not in launcher
 
@@ -287,6 +277,7 @@ def test_launcher_makes_the_same_distinction() -> None:
 # other server's 200 and called the dead child healthy, resetting the restart
 # counter. 947 respawns in 90 minutes, with nothing in the UI but "lost
 # connection to the session".
+
 
 def test_health_probe_rejects_a_server_that_is_not_our_child(monkeypatch) -> None:
     monkeypatch.setattr(server, "_probe_health", lambda port: (True, 4242))
@@ -328,14 +319,10 @@ def test_an_html_page_is_not_a_health_check(monkeypatch) -> None:
         def __exit__(self, *exc):
             return False
 
-    monkeypatch.setattr(
-        server, "_port_is_listening", lambda port: True, raising=False
-    )
+    monkeypatch.setattr(server, "_port_is_listening", lambda port: True, raising=False)
     import urllib.request
 
-    monkeypatch.setattr(
-        urllib.request, "urlopen", lambda *a, **k: _Resp(b"<!doctype html><html>")
-    )
+    monkeypatch.setattr(urllib.request, "urlopen", lambda *a, **k: _Resp(b"<!doctype html><html>"))
 
     assert server._probe_health(5494) == (False, None)
 
@@ -448,9 +435,7 @@ def test_watcher_does_not_overwrite_a_crash_diagnosis(tmp_path: Path) -> None:
     import threading
     import time as _time
 
-    paths = SimpleNamespace(
-        app_support=tmp_path, logs=tmp_path, server_log=tmp_path / "server.log"
-    )
+    paths = SimpleNamespace(app_support=tmp_path, logs=tmp_path, server_log=tmp_path / "server.log")
     sup = server.UvicornSupervisor(paths)  # type: ignore[arg-type]
     states: list[server.ServerState] = []
     sup.on_state_change = lambda state, info: states.append(state)
@@ -521,7 +506,11 @@ class TestPackagingNameCollision:
 
         root = Path(__file__).resolve().parents[1]
         result = subprocess.run(
-            [sys.executable, "-c", "import packaging.version; print(packaging.version.parse('1.0'))"],
+            [
+                sys.executable,
+                "-c",
+                "import packaging.version; print(packaging.version.parse('1.0'))",
+            ],
             cwd=root,
             capture_output=True,
             text=True,
@@ -824,9 +813,7 @@ class TestBundledInterpreterIsPinned:
         with tarfile.open(cache / tar_name, "w:gz") as tar:
             tar.add(payload, arcname="../escaped.txt")
         # Skip the digest gate; this test is about the extraction step.
-        monkeypatch.setattr(
-            build_windows, "_sha256", lambda p: build_windows.PY_STANDALONE_SHA256
-        )
+        monkeypatch.setattr(build_windows, "_sha256", lambda p: build_windows.PY_STANDALONE_SHA256)
 
         with pytest.raises(tarfile.OutsideDestinationError):
             build_windows.fetch_python_runtime(cache, tmp_path / "runtime")
@@ -847,7 +834,7 @@ class TestAFailedBuildExitsNonZero:
         import inspect
 
         source = inspect.getsource(build_windows.main)
-        tail = source[source.index("print_summary(cfg, staging"):]
+        tail = source[source.index("print_summary(cfg, staging") :]
 
         assert "return 1" in tail, "main must fail when no installer was produced"
         assert "installer_exe is None" in tail
@@ -858,6 +845,6 @@ class TestAFailedBuildExitsNonZero:
         import inspect
 
         source = inspect.getsource(build_windows.main)
-        tail = source[source.index("print_summary(cfg, staging"):]
+        tail = source[source.index("print_summary(cfg, staging") :]
 
         assert "if is_windows():" in tail

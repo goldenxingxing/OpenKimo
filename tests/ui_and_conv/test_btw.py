@@ -443,6 +443,7 @@ class TestExecuteSideQuestion:
         assert chunks == ["chunk1", "chunk2"]
         assert response == "chunk1chunk2"
 
+
 # ---------------------------------------------------------------------------
 # Telemetry tracking for execute_side_question
 # ---------------------------------------------------------------------------

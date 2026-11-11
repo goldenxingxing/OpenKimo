@@ -17,12 +17,11 @@ from kosong.chat_provider import (
     APIEmptyResponseError,
     APIStatusError,
     APITimeoutError,
-    ChatProvider,
     ChatProviderError,
     RetryableChatProvider,
 )
 from kosong.message import Message, ThinkPart, ToolCall
-from kosong.tooling import Tool, ToolError
+from kosong.tooling import ToolError
 from kosong.tooling.empty import EmptyToolset
 from tenacity import (
     RetryCallState,
@@ -64,7 +63,6 @@ from kimo_cli.soul import (
 from kimo_cli.soul.agent import Agent, Runtime
 from kimo_cli.soul.compaction import (
     COMPACTION_OUTPUT_PREFIX,
-    COMPACTION_SYSTEM_PROMPT,
     Compaction,
     CompactionResult,
     SimpleCompaction,
@@ -681,6 +679,16 @@ class KimoSoul:
         ask_tool = self._agent.toolset.find("AskUserQuestion")
         if isinstance(ask_tool, AskUserQuestion):
             ask_tool.bind_afk(self._approval.is_afk)
+
+    def rebind_plan_mode_tools(self) -> None:
+        """Take the plan-mode bindings back from a soul that shares our tools.
+
+        A second soul built on the same agent shares the tool objects, so its
+        constructor rebinds them to itself — the plan-mode state, the plan file
+        path and the plan-mode callbacks. The owner calls this afterwards to
+        restore its own bindings.
+        """
+        self._bind_plan_mode_tools()
 
     def _ensure_plan_session_id(self) -> None:
         """Allocate a stable plan session ID on first activation."""
@@ -2082,8 +2090,6 @@ class KimoSoul:
         self._truncation_continuations = 0
         return StepOutcome(stop_reason="no_tool_calls", assistant_message=result.message)
 
-
-
     async def _grow_context(self, result: StepResult, tool_results: list[ToolResult]):
         logger.debug("Growing context with result: {result}", result=result)
 
@@ -2300,7 +2306,6 @@ class KimoSoul:
         if estimate_message_bytes(history) > self._loop_control.max_request_bytes:
             history, _ = strip_image_parts(history, keep_last_user_message=True)
 
-        compaction_overrides = None
         if chat_provider is not None and isinstance(self._compaction, SimpleCompaction):
             compact_message, to_preserve = self._compaction.prepare(
                 history,
@@ -2335,7 +2340,6 @@ class KimoSoul:
                                 ],
                             )
                         )
-
 
         async def _run_compaction_once() -> CompactionResult:
             if self._runtime.llm is None:

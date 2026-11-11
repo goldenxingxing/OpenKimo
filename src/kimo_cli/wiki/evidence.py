@@ -364,7 +364,7 @@ class WikiEvidenceReporter:
             "workspace-file",
             "workspace-search",
             "shell-result",
-                "web-document",
+            "web-document",
             "workspace-mutation",
         ],
         request_hash: str,

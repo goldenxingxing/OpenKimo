@@ -721,10 +721,17 @@ class _LiveView:
         while self._approval_request_queue:
             # should not happen, but just in case
             self._approval_request_queue.popleft().resolve("reject")
+        if self._current_approval_request_panel is not None:
+            # The panel's request was popped from the queue, so it is not
+            # resolved by the loop above. Release the awaiting tool call —
+            # dropping the panel alone leaves it waiting forever.
+            self._current_approval_request_panel.request.resolve("reject")
         self._current_approval_request_panel = None
 
         while self._question_request_queue:
             self._question_request_queue.popleft().resolve({})
+        if self._current_question_panel is not None:
+            self._current_question_panel.request.resolve({})
         self._current_question_panel = None
 
     def flush_content(self) -> None:

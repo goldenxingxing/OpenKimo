@@ -58,9 +58,7 @@ def test_writing_the_same_value_leaves_the_file_untouched(tmp_path: Path) -> Non
 
 
 @pytest.mark.parametrize("ratio", [0.49, 0.0, 1.0, 1.5, -0.2])
-def test_an_out_of_range_ratio_is_refused_rather_than_written(
-    tmp_path: Path, ratio: float
-) -> None:
+def test_an_out_of_range_ratio_is_refused_rather_than_written(tmp_path: Path, ratio: float) -> None:
     """kimo-cli rejects these on load; failing here names the real culprit."""
     path = _config(tmp_path)
     before = path.read_text(encoding="utf-8")
@@ -165,7 +163,9 @@ def test_a_written_value_reads_back(tmp_path: Path) -> None:
     assert get_compaction_ratio(path) == 0.72
 
 
-@pytest.mark.parametrize("body", ["[loop_control]\ncompaction_trigger_ratio = 2.5\n", "== bad ==\n"])
+@pytest.mark.parametrize(
+    "body", ["[loop_control]\ncompaction_trigger_ratio = 2.5\n", "== bad ==\n"]
+)
 def test_an_unusable_file_falls_back_rather_than_crashing_settings(
     tmp_path: Path, body: str
 ) -> None:

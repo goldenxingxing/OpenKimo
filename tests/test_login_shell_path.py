@@ -52,8 +52,7 @@ def test_output_a_profile_prints_does_not_leak_into_path(monkeypatch) -> None:
 
     def fake_run(*_args, **_kwargs):
         stdout = (
-            "Welcome back!\n"
-            f"{userenv._PATH_BEGIN}/opt/homebrew/bin:/usr/bin{userenv._PATH_END}"
+            f"Welcome back!\n{userenv._PATH_BEGIN}/opt/homebrew/bin:/usr/bin{userenv._PATH_END}"
         )
         return subprocess.CompletedProcess([], 0, stdout=stdout, stderr="")
 

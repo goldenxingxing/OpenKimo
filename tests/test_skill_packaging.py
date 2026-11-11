@@ -30,7 +30,6 @@ def test_no_skill_ships_inside_the_package() -> None:
 
 def test_packaged_skills_do_not_include_local_secrets_or_caches() -> None:
     root = Path(__file__).parents[1]
-    builtin = root / "src/kimo_cli/skills"
     tracked = subprocess.check_output(
         ["git", "-C", root, "ls-files", "src/kimo_cli/skills"],
         text=True,

@@ -42,7 +42,14 @@ async def init(soul: KimoSoul, args: str):
     with tempfile.TemporaryDirectory() as temp_dir:
         tmp_context = Context(file_backend=Path(temp_dir) / "context.jsonl")
         tmp_soul = KimoSoul(soul.agent, context=tmp_context)
-        await tmp_soul.run(prompts.INIT)
+        try:
+            await tmp_soul.run(prompts.INIT)
+        finally:
+            # The temp soul shares the live agent's tool objects, so its
+            # constructor rebound the plan-mode state and callbacks to itself.
+            # Take them back, or the live session keeps writing through the
+            # temp soul's plan-mode bindings.
+            soul.rebind_plan_mode_tools()
 
     agents_md = await load_agents_md(soul.runtime.builtin_args.KIMO_WORK_DIR)
     system_message = system(

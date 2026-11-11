@@ -379,9 +379,7 @@ agent:
                 "kimo_cli.tools.plan.enter:EnterPlanMode",
             ]
         )
-        assert spec.exclude_tools == snapshot(
-            ["kimo_cli.tools.web:FetchURL"]
-        )
+        assert spec.exclude_tools == snapshot(["kimo_cli.tools.web:FetchURL"])
         assert "coder" in spec.subagents
 
 

@@ -320,8 +320,20 @@ export function isOpenPathHref(href: string | undefined): href is string {
   return Boolean(href?.startsWith(OPEN_PATH_SCHEME));
 }
 
-export function decodeOpenPathHref(href: string): string {
-  return decodeURIComponent(href.slice(OPEN_PATH_SCHEME.length));
+/**
+ * Decode an `open-path://` href back to the path it points at.
+ *
+ * Returns null when the payload is not valid percent-encoding — a message
+ * may carry a hand-written `open-path://bad%zz` link, and decoding that
+ * throws a URIError while the message renders, which takes the whole view
+ * down with it.
+ */
+export function decodeOpenPathHref(href: string): string | null {
+  try {
+    return decodeURIComponent(href.slice(OPEN_PATH_SCHEME.length));
+  } catch {
+    return null;
+  }
 }
 
 /** Merge the literal regions and markdown links of `text` into skip ranges. */

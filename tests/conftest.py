@@ -15,7 +15,6 @@ from kaos import get_current_kaos, reset_current_kaos, set_current_kaos
 from kaos.local import LocalKaos
 from kaos.path import KaosPath
 from kosong.chat_provider.mock import MockChatProvider
-from pydantic import SecretStr
 
 from kimo_cli.auth.oauth import OAuthManager
 from kimo_cli.background import BackgroundTaskManager

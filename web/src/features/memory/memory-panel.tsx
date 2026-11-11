@@ -32,9 +32,11 @@ function fmtTime(ts: number, locale: string): string {
 export function MemoryPanel() {
   const { t } = useTranslation("memory");
   const [tab, setTab] = useState<Tab>("persistent");
-  // Counted here rather than inside the tab so the number shows while another
-  // tab is open. A queue nobody is told about is the reason this tab exists.
-  const { candidates } = useCandidates();
+  // One instance, shared with the tab below. Two of them fetched the list
+  // twice, and the badge's copy was never refreshed — it kept counting
+  // suggestions the person had already answered.
+  const candidatesState = useCandidates();
+  const { candidates } = candidatesState;
 
   return (
     <div className="flex flex-col gap-3 p-3">
@@ -67,15 +69,19 @@ export function MemoryPanel() {
         </Button>
       </div>
       {tab === "persistent" && <PersistentTab />}
-      {tab === "suggested" && <SuggestedTab />}
+      {tab === "suggested" && <SuggestedTab state={candidatesState} />}
       {tab === "recent" && <RecentTab />}
     </div>
   );
 }
 
-function SuggestedTab() {
+function SuggestedTab({
+  state,
+}: {
+  state: ReturnType<typeof useCandidates>;
+}) {
   const { t, i18n } = useTranslation(["memory", "common"]);
-  const { candidates, loading, error, promote, dismiss } = useCandidates();
+  const { candidates, loading, error, promote, dismiss } = state;
 
   const decide = async (action: () => Promise<void>, done: string) => {
     try {

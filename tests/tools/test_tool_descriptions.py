@@ -387,6 +387,7 @@ Replace specific strings within a specified file.
 """
     )
 
+
 def test_fetch_url_description(fetch_url_tool: FetchURL):
     """Test the description of FetchURL tool."""
     assert fetch_url_tool.base.description == snapshot(

@@ -143,9 +143,7 @@ class TestUpdateBrandingRequestValidation:
     # ----- logo_url scheme -----
 
     def test_logo_url_without_http_prefix(self) -> None:
-        with pytest.raises(
-            ValidationError, match="logo_url must start with http:// or https://"
-        ):
+        with pytest.raises(ValidationError, match="logo_url must start with http:// or https://"):
             UpdateBrandingRequest(logo_url="ftp://example.com/logo.png")
 
     def test_logo_url_bare_domain(self) -> None:
@@ -306,11 +304,14 @@ class TestBrandingCRUD:
 
     def test_delete_all_branding(self, db: sqlite3.Connection) -> None:
         """delete_all_branding should remove every row."""
-        upsert_branding(db, {
-            "brand_name": "Acme",
-            "version": "1.0",
-            "page_title": "Title",
-        })
+        upsert_branding(
+            db,
+            {
+                "brand_name": "Acme",
+                "version": "1.0",
+                "page_title": "Title",
+            },
+        )
         delete_all_branding(db)
         result = get_branding(db)
         for key in BRANDING_KEYS:

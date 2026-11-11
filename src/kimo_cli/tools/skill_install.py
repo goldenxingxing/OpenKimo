@@ -2,6 +2,7 @@
 
 import asyncio
 import http.client
+import ipaddress
 import json
 import tempfile
 import urllib.request
@@ -31,7 +32,36 @@ def validate_skill_url(url: str) -> str:
         raise ValueError("Skill source must be an HTTPS URL")
     if parsed.username or parsed.password:
         raise ValueError("Skill source URL must not contain credentials")
+    _reject_internal_host(parsed.hostname)
     return url
+
+
+_BLOCKED_HOST_SUFFIXES = (".internal", ".local", ".localhost")
+
+
+def _reject_internal_host(hostname: str) -> None:
+    """Refuse hosts that point back into the machine or the local network.
+
+    The installer is agent-driven, and the download is the part that can reach
+    hosts the user never sees — the cloud metadata address, a private service
+    on the LAN. Those are not skill archives.
+    """
+    host = hostname.strip("[]").lower()
+    if host == "localhost" or host.endswith(_BLOCKED_HOST_SUFFIXES):
+        raise ValueError(f"Skill source host is not allowed: {hostname}")
+    try:
+        address = ipaddress.ip_address(host)
+    except ValueError:
+        return
+    if (
+        address.is_private
+        or address.is_loopback
+        or address.is_link_local
+        or address.is_reserved
+        or address.is_multicast
+        or address.is_unspecified
+    ):
+        raise ValueError(f"Skill source address is not allowed: {hostname}")
 
 
 class _HTTPSRedirectHandler(urllib.request.HTTPRedirectHandler):
@@ -80,21 +110,28 @@ class InstallSkill(CallableTool2[Params]):
     async def __call__(self, params: Params) -> ToolReturnValue:
         try:
             validate_skill_url(params.source_url)
-            data = await asyncio.to_thread(download_skill_archive, params.source_url)
-            skill_name = await asyncio.to_thread(inspect_archive_name, data)
         except Exception as exc:
             return ToolError(message=str(exc), brief="Skill validation failed")
 
+        # Approve before any network access. The download is the step that can
+        # reach hosts the user never sees — the cloud metadata address, a
+        # service on the LAN — so it must not happen on the agent's say-so.
         result = await self._runtime.approval.request(
             self.name,
             "skill.install",
             (
-                f"Install skill '{skill_name}' from {params.source_url} into "
+                f"Download and install a skill from {params.source_url} into "
                 "OpenKimo's managed skill library"
             ),
         )
         if not result:
             return result.rejection_error()
+
+        try:
+            data = await asyncio.to_thread(download_skill_archive, params.source_url)
+            skill_name = await asyncio.to_thread(inspect_archive_name, data)
+        except Exception as exc:
+            return ToolError(message=str(exc), brief="Skill download failed")
 
         try:
             installed = await asyncio.to_thread(

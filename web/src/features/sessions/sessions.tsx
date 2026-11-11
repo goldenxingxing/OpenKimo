@@ -33,6 +33,7 @@ import {
 } from "lucide-react";
 import { Virtuoso } from "react-virtuoso";
 import { useTranslation } from "react-i18next";
+import { toast } from "sonner";
 import { KimoCliBrand } from "@/components/kimo-cli-brand";
 import {
   Dialog,
@@ -301,7 +302,7 @@ export const SessionsSidebar = memo(function SessionsSidebarComponent({
   onCreateSessionInDir,
   onClose,
 }: SessionsSidebarProps): ReactElement {
-  const { t } = useTranslation("sessions");
+  const { t } = useTranslation(["sessions", "toasts"]);
   const minimumSpinMs = 600;
   const normalizeTitle = useCallback((t: string) => {
     // Split by any newline, join with space, then collapse whitespace
@@ -311,12 +312,22 @@ export const SessionsSidebar = memo(function SessionsSidebarComponent({
       .replace(WHITESPACE_REGEX, " ")
       .trim();
   }, []);
+  // A rejected callback used to escape as an unhandled rejection: the
+  // console showed it, and the person saw nothing happen at all.
+  const reportFailure = useCallback(
+    (err: unknown) => {
+      const message = err instanceof Error ? err.message : String(err);
+      toast.error(t("toasts:session.errorTitle"), { description: message });
+    },
+    [t],
+  );
   const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
   const [deleteConfirm, setDeleteConfirm] = useState<{ open: boolean; sessionId: string; sessionTitle: string }>({
     open: false,
     sessionId: "",
     sessionTitle: "",
   });
+  const [bulkDeleteConfirmOpen, setBulkDeleteConfirmOpen] = useState(false);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [editingSessionId, setEditingSessionId] = useState<string | null>(null);
   const [editingTitle, setEditingTitle] = useState("");
@@ -398,10 +409,12 @@ export const SessionsSidebar = memo(function SessionsSidebarComponent({
     try {
       await onBulkArchiveSessions(Array.from(selectedSessionIds));
       exitMultiSelectMode();
+    } catch (err) {
+      reportFailure(err);
     } finally {
       setIsBulkOperating(false);
     }
-  }, [onBulkArchiveSessions, selectedSessionIds, exitMultiSelectMode]);
+  }, [onBulkArchiveSessions, selectedSessionIds, exitMultiSelectMode, reportFailure]);
 
   const handleBulkUnarchive = useCallback(async () => {
     if (!onBulkUnarchiveSessions || selectedSessionIds.size === 0) return;
@@ -409,21 +422,33 @@ export const SessionsSidebar = memo(function SessionsSidebarComponent({
     try {
       await onBulkUnarchiveSessions(Array.from(selectedSessionIds));
       exitMultiSelectMode();
+    } catch (err) {
+      reportFailure(err);
     } finally {
       setIsBulkOperating(false);
     }
-  }, [onBulkUnarchiveSessions, selectedSessionIds, exitMultiSelectMode]);
+  }, [onBulkUnarchiveSessions, selectedSessionIds, exitMultiSelectMode, reportFailure]);
 
-  const handleBulkDelete = useCallback(async () => {
+  // Bulk delete is irreversible, so it asks first — the single delete already
+  // does, and deleting a dozen sessions on one stray click cannot be undone.
+  const handleBulkDelete = useCallback(() => {
     if (!onBulkDeleteSessions || selectedSessionIds.size === 0) return;
+    setBulkDeleteConfirmOpen(true);
+  }, [onBulkDeleteSessions, selectedSessionIds]);
+
+  const confirmBulkDelete = useCallback(async () => {
+    if (!onBulkDeleteSessions || selectedSessionIds.size === 0) return;
+    setBulkDeleteConfirmOpen(false);
     setIsBulkOperating(true);
     try {
       await onBulkDeleteSessions(Array.from(selectedSessionIds));
       exitMultiSelectMode();
+    } catch (err) {
+      reportFailure(err);
     } finally {
       setIsBulkOperating(false);
     }
-  }, [onBulkDeleteSessions, selectedSessionIds, exitMultiSelectMode]);
+  }, [onBulkDeleteSessions, selectedSessionIds, exitMultiSelectMode, reportFailure]);
 
   useEffect(() => {
     const handle = window.setTimeout(() => {
@@ -556,11 +581,11 @@ export const SessionsSidebar = memo(function SessionsSidebarComponent({
         setEditingTitle(normalizeTitle(session.title));
       }
     } else if (action === "archive" && onArchiveSession) {
-      await onArchiveSession(sessionId);
+      await onArchiveSession(sessionId).catch(reportFailure);
     } else if (action === "unarchive" && onUnarchiveSession) {
-      await onUnarchiveSession(sessionId);
+      await onUnarchiveSession(sessionId).catch(reportFailure);
     } else if (action === "record-memory" && onRecordSessionMemory) {
-      await onRecordSessionMemory(sessionId);
+      await onRecordSessionMemory(sessionId).catch(reportFailure);
     } else if (action === "select-multiple") {
       setIsMultiSelectMode(true);
       setIsMultiSelectArchived(isArchived);
@@ -589,6 +614,8 @@ export const SessionsSidebar = memo(function SessionsSidebarComponent({
       if (success) {
         handleCancelEdit();
       }
+    } catch (err) {
+      reportFailure(err);
     } finally {
       isSavingRenameRef.current = false;
     }
@@ -631,7 +658,7 @@ export const SessionsSidebar = memo(function SessionsSidebarComponent({
     setIsRefreshing(true);
     const startedAt = Date.now();
     try {
-      await Promise.resolve(onRefreshSessions());
+      await Promise.resolve(onRefreshSessions()).catch(reportFailure);
     } finally {
       const elapsed = Date.now() - startedAt;
       if (elapsed < minimumSpinMs) {
@@ -645,7 +672,7 @@ export const SessionsSidebar = memo(function SessionsSidebarComponent({
     if (!onLoadMoreSessions || isLoadingMore || !hasMoreSessions) {
       return;
     }
-    await Promise.resolve(onLoadMoreSessions());
+    await Promise.resolve(onLoadMoreSessions()).catch(reportFailure);
   };
 
   const renderLoadMore = () => {
@@ -1460,6 +1487,32 @@ export const SessionsSidebar = memo(function SessionsSidebarComponent({
             </Button>
             <Button variant="destructive" onClick={handleConfirmDelete}>
               {t('delete_dialog.confirm')}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Bulk Delete Confirmation Dialog */}
+      <Dialog
+        open={bulkDeleteConfirmOpen}
+        onOpenChange={(open) => !open && setBulkDeleteConfirmOpen(false)}
+      >
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-destructive">
+              <AlertTriangle className="size-5" />
+              {t("delete_bulk_dialog.title")}
+            </DialogTitle>
+            <DialogDescription>
+              {t("delete_bulk_dialog.body", { count: selectedSessionIds.size })}
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter className="gap-2 w-full justify-end">
+            <Button variant="outline" onClick={() => setBulkDeleteConfirmOpen(false)}>
+              {t("delete_bulk_dialog.cancel")}
+            </Button>
+            <Button variant="destructive" onClick={confirmBulkDelete}>
+              {t("delete_bulk_dialog.confirm")}
             </Button>
           </DialogFooter>
         </DialogContent>

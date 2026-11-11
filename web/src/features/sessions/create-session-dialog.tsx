@@ -7,6 +7,7 @@ import {
   useState,
 } from "react";
 import { Trans, useTranslation } from "react-i18next";
+import { toast } from "sonner";
 
 import {
   AlertDialog,
@@ -287,13 +288,19 @@ export function CreateSessionDialog({
         ) {
           setPendingPath(dir);
           setShowConfirmCreate(true);
+        } else {
+          // Any other failure left the dialog sitting there with no word —
+          // the person pressed a button and nothing appeared to happen.
+          toast.error(t("sessions:create.failed"), {
+            description: err instanceof Error ? err.message : undefined,
+          });
         }
       } finally {
         setIsCreating(false);
         isCreatingRef.current = false;
       }
     },
-    [onConfirm, onOpenChange, thinking, agentName],
+    [onConfirm, onOpenChange, thinking, agentName, t],
   );
 
   const handleInputSubmit = useCallback(() => {
@@ -314,13 +321,15 @@ export function CreateSessionDialog({
       await onConfirm(pendingPath, true, thinking, agentName);
       onOpenChange(false);
     } catch (err) {
-      console.error("Failed to create directory:", err);
+      toast.error(t("sessions:create.failed"), {
+        description: err instanceof Error ? err.message : undefined,
+      });
     } finally {
       setIsCreating(false);
       isCreatingRef.current = false;
       setPendingPath("");
     }
-  }, [pendingPath, onConfirm, onOpenChange, thinking, agentName]);
+  }, [pendingPath, onConfirm, onOpenChange, thinking, agentName, t]);
 
   const handleCancelCreateDir = useCallback(() => {
     setShowConfirmCreate(false);

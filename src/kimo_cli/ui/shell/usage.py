@@ -13,7 +13,6 @@ from rich.progress_bar import ProgressBar
 from rich.table import Table
 from rich.text import Text
 
-from kimo_cli.auth.platforms import parse_managed_provider_key
 from kimo_cli.config import LLMModel
 from kimo_cli.soul.kimosoul import KimoSoul
 from kimo_cli.ui.shell.console import console

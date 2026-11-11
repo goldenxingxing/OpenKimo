@@ -19,6 +19,7 @@ from kimo_cli.utils.server import (
 )
 from kimo_cli.vis.api import sessions_router, statistics_router, system_router
 from kimo_cli.web.api.open_in import router as open_in_router
+from kimo_cli.web.auth import DEFAULT_ALLOWED_ORIGIN_REGEX
 
 STATIC_DIR = Path(__file__).parent / "static"
 GZIP_MINIMUM_SIZE = 1024
@@ -50,8 +51,15 @@ def create_app() -> FastAPI:
 
     application.add_middleware(
         cast(Any, CORSMiddleware),
-        allow_origins=["*"],  # Local-only tool; port is dynamic so wildcard is acceptable
-        allow_credentials=True,
+        # A wildcard origin plus credentials lets any site the user visits
+        # read these responses — with a cookie present Starlette echoes the
+        # request's Origin back, and without one it answers ``*``.  Both
+        # let an unrelated page read the traces (and drive ``/api/open-in``)
+        # of a local server.  The visualizer is served from this same
+        # origin, and the dev server proxies ``/api`` to it, so only local
+        # origins ever need to be allowed.
+        allow_origin_regex=DEFAULT_ALLOWED_ORIGIN_REGEX.pattern,
+        allow_credentials=False,
         allow_methods=["*"],
         allow_headers=["*"],
     )

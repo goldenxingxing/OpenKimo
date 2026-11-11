@@ -49,13 +49,24 @@ def test_legacy_keys_cleared_on_save():
 
 def test_settings_covers_macos_sections():
     # LLM: multi-provider editor + thinking + temperature
-    for marker in ("LLM_PROVIDERS", "LLM_DEFAULT_PROVIDER", "LLM_THINKING",
-                   "LLM_TEMPERATURE", "add_provider", "Set as default",
-                   "Advanced (capabilities)", "max_context_size"):
+    for marker in (
+        "LLM_PROVIDERS",
+        "LLM_DEFAULT_PROVIDER",
+        "LLM_THINKING",
+        "LLM_TEMPERATURE",
+        "add_provider",
+        "Set as default",
+        "Advanced (capabilities)",
+        "max_context_size",
+    ):
         assert marker in SETTINGS_HTML, f"missing LLM marker: {marker}"
     # Web Server: port + session token (+ generate) + LAN only
-    for marker in ("KIMO_WEB_PORT", "KIMO_WEB_SESSION_TOKEN", "KIMO_WEB_LAN_ONLY",
-                   "generate_token"):
+    for marker in (
+        "KIMO_WEB_PORT",
+        "KIMO_WEB_SESSION_TOKEN",
+        "KIMO_WEB_LAN_ONLY",
+        "generate_token",
+    ):
         assert marker in SETTINGS_HTML, f"missing web marker: {marker}"
     # Branding reset
     assert "reset_branding" in SETTINGS_HTML
@@ -63,7 +74,8 @@ def test_settings_covers_macos_sections():
 
 def test_settings_api_has_reset_branding():
     win_settings = (ROOT / "packaging" / "app_main_win" / "settings_window.py").read_text(
-        encoding="utf-8")
+        encoding="utf-8"
+    )
     assert "def reset_branding" in win_settings
 
 
@@ -75,8 +87,8 @@ def test_settings_subprocess_is_windowless():
 def test_uninstall_does_not_call_wizard_functions():
     # WizardIsTaskSelected raises at uninstall time; the choice must be
     # persisted at install time and read back from the marker file.
-    code_section = INSTALLER[INSTALLER.index("[Code]"):]
-    uninstall_proc = code_section[code_section.index("CurUninstallStepChanged"):]
+    code_section = INSTALLER[INSTALLER.index("[Code]") :]
+    uninstall_proc = code_section[code_section.index("CurUninstallStepChanged") :]
     assert "WizardIsTaskSelected" not in uninstall_proc
     assert "purge-user-data.marker" in INSTALLER
     assert "CurStepChanged" in INSTALLER

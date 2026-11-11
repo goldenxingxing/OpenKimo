@@ -29,7 +29,9 @@ class _FakeRunner:
 def _config_with_one_model() -> Config:
     return Config(
         providers={
-            "openai": LLMProvider(type="openai_legacy", base_url="https://api.example.invalid", api_key="k")
+            "openai": LLMProvider(
+                type="openai_legacy", base_url="https://api.example.invalid", api_key="k"
+            )
         },
         models={"openai": LLMModel(provider="openai", model="gpt-4o", max_context_size=1024)},
         default_model="openai",

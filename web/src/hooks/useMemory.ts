@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
-import { getAuthHeader, getAuthToken } from "../lib/auth";
+import { getAuthHeader } from "../lib/auth";
 import { getApiBaseUrl } from "./utils";
 
 export type MemoryKind = "user" | "feedback" | "project" | "reference";
@@ -133,17 +133,17 @@ export type MemoryEvent =
  * and dispatch parsed events to ``onEvent``. Browser ``EventSource``
  * automatically reconnects on disconnect.
  *
- * Auth: cookie via ``withCredentials``; falls back to ``?token=`` query param
- * for Bearer-token clients (``EventSource`` cannot send custom headers).
+ * Auth: the ``kimo_session`` cookie, sent by ``withCredentials``. The
+ * bearer token stays out of the URL — a query string lands in the server's
+ * access log, and the cookie is what identifies the user for this route
+ * anyway.
  */
 export function useMemoryEvents(onEvent: (event: MemoryEvent) => void): void {
   const handlerRef = useRef(onEvent);
   handlerRef.current = onEvent;
 
   useEffect(() => {
-    const token = getAuthToken();
-    const base = `${getApiBaseUrl()}/api/memory/events`;
-    const url = token ? `${base}?token=${encodeURIComponent(token)}` : base;
+    const url = `${getApiBaseUrl()}/api/memory/events`;
     const es = new EventSource(url, { withCredentials: true });
     es.onmessage = (ev) => {
       try {
