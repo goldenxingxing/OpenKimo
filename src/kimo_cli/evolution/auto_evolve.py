@@ -318,7 +318,10 @@ async def auto_evolve_maybe(config, work_dir: Path | None = None) -> AutoEvolveR
         # insufficient_evidence) would reopen the cooldown window on every
         # turn-end dispatch and permanently starve auto_evolve after the
         # first completed cycle.
-        if result.attempted and not result.skip_reason:
+        # A failed cycle consumed the same propose+verify budget as a
+        # successful one. Without advancing the cooldown here, an exception
+        # makes the next turn retry immediately and burn it again.
+        if (result.attempted and not result.skip_reason) or result.error:
             state["last_cycle_end"] = time.time()
         _save_state(state)
     except Exception as exc:

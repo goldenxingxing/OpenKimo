@@ -55,9 +55,9 @@ _PRODUCTION = None  # filled from the shipped prompt
 
 
 def shipped_prompt() -> str:
-    from kimo_cli.memory.archivist import _EXTRACTION_PROMPT
+    from carryover.extract import EXTRACTION_PROMPT
 
-    return _EXTRACTION_PROMPT
+    return EXTRACTION_PROMPT
 
 
 _NEUTRAL = """\

@@ -93,9 +93,10 @@ def encode_kitty(data: bytes, *, chunk_size: int = 4096) -> str:
     parts: list[str] = []
     for index, chunk in enumerate(chunks):
         last = index == len(chunks) - 1
-        control = "a=T,f=100,t=d" if index == 0 else ""
-        m = 0 if last else 1
-        parts.append(f"\x1b_G{control}{';' if control else ''}m={m};{chunk}\x1b\\")
+        # kitty splits the escape sequence at the first ';'. Everything after
+        # it is payload, so m= must stay in the control part on every chunk.
+        control = f"a=T,f=100,t=d,m={0 if last else 1}" if index == 0 else f"m={0 if last else 1}"
+        parts.append(f"\x1b_G{control};{chunk}\x1b\\")
     return "".join(parts)
 
 

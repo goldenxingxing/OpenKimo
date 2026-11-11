@@ -36,7 +36,7 @@ content = content.replace(/^# Changelog\n+/, "");
 
 // Convert title format: ## [0.69] - 2025-12-29 -> ## 0.69 (2025-12-29)
 content = content.replace(
-  /^## \[([^\]]+)\] - (\d{4}-\d{1,2}-\d{1,2})/gm,
+  /^## \[([^\]]+)\]\s*[-–—]\s*(\d{4}-\d{1,2}-\d{1,2})/gm,
   "## $1 ($2)"
 );
 

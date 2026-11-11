@@ -78,7 +78,8 @@ def transcript(session: dict) -> str:
 
 async def run_ours(model: Model, client: httpx.AsyncClient, sessions, questions):
     """Extraction and upsert — the write path this project actually ships."""
-    from kimo_cli.memory.archivist import _EXTRACTION_PROMPT, _parse_candidates
+    from carryover.extract import EXTRACTION_PROMPT, parse_candidates
+
     from kimo_cli.memory.entry import MemoryEntry
     from kimo_cli.memory.search import MemorySearchIndex
     from kimo_cli.memory.storage import read_entries, upsert_entry
@@ -87,9 +88,9 @@ async def run_ours(model: Model, client: httpx.AsyncClient, sessions, questions)
     for session in sessions:
         reply = await model.ask(
             client,
-            _EXTRACTION_PROMPT.format(conversation=transcript(session), today=session["date"]),
+            EXTRACTION_PROMPT.format(conversation=transcript(session), today=session["date"]),
         )
-        for candidate in _parse_candidates(reply, session_id=str(session["id"])):
+        for candidate in parse_candidates(reply, session_id=str(session["id"])):
             upsert_entry(
                 store,
                 MemoryEntry(

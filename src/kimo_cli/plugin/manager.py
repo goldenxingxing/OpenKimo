@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import shutil
 import tempfile
+import uuid
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -103,10 +104,21 @@ def install_plugin(
         runtime = PluginRuntime(host=host_name, host_version=host_version)
         write_runtime(staging_plugin, runtime)
 
-        # Swap: remove old, move staged into place
+        # Swap without a window where neither install exists: move the old
+        # directory aside first, then put the staged copy in place, and roll
+        # back if the second rename fails.
+        backup = None
         if dest.exists():
-            shutil.rmtree(dest)
-        staging_plugin.rename(dest)
+            backup = dest.with_name(f".{dest.name}.old-{uuid.uuid4().hex[:8]}")
+            dest.rename(backup)
+        try:
+            staging_plugin.rename(dest)
+        except Exception:
+            if backup is not None:
+                backup.rename(dest)
+            raise
+        if backup is not None:
+            shutil.rmtree(backup, ignore_errors=True)
     except Exception:
         # On any failure, clean up staging but leave existing install intact
         shutil.rmtree(staging, ignore_errors=True)

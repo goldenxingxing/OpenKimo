@@ -26,6 +26,7 @@ process cwd otherwise (terminal CLI on the host).
 from __future__ import annotations
 
 import asyncio
+import json
 import os
 from pathlib import Path
 
@@ -48,10 +49,36 @@ class FsCheckpointer:
 
     def __init__(self, workspace: Path):
         self._workspace = workspace
+        # Inside .git so `git add -A` never tracks it, and so the map lives
+        # with the commits it points at. Restarting the process (or forking a
+        # session) must not lose the checkpoint -> HEAD association: without
+        # it a D-Mail revert only rolls back the conversation.
+        self._snapshot_file = workspace / ".git" / "kimo-checkpoints.json"
         self._snapshots: dict[int, str] = {}
+        self._load_snapshots()
         self._usable: bool | None = None
         """Lazy tri-state: None = not probed yet; False = disabled."""
         self._managed_repo = False
+
+    def _load_snapshots(self) -> None:
+        try:
+            raw = json.loads(self._snapshot_file.read_text(encoding="utf-8"))
+            if isinstance(raw, dict):
+                self._snapshots.update({int(k): v for k, v in raw.items() if isinstance(v, str)})
+        except (OSError, ValueError, TypeError):
+            # No file yet, or a corrupted one: an empty map is the same
+            # fail-open behaviour as a missing snapshot.
+            pass
+
+    def _save_snapshots(self) -> None:
+        try:
+            self._snapshot_file.parent.mkdir(parents=True, exist_ok=True)
+            self._snapshot_file.write_text(
+                json.dumps({str(k): v for k, v in self._snapshots.items()}),
+                encoding="utf-8",
+            )
+        except OSError as e:
+            logger.warning("Could not persist filesystem snapshots: {error}", error=e)
 
     # ── public API ───────────────────────────────────────────────────────────
 
@@ -79,6 +106,7 @@ class FsCheckpointer:
             )
             return
         self._snapshots[checkpoint_id] = head
+        self._save_snapshots()
         logger.debug(
             "Filesystem snapshot for checkpoint {id}: {head}",
             id=checkpoint_id,
@@ -93,6 +121,10 @@ class FsCheckpointer:
         operate.
         """
         head = self._snapshots.get(checkpoint_id)
+        if head is None:
+            # Another process may have written the map after we started.
+            self._load_snapshots()
+            head = self._snapshots.get(checkpoint_id)
         if head is None:
             logger.warning(
                 "No filesystem snapshot for checkpoint {id}; files not restored",

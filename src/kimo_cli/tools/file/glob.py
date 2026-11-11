@@ -154,7 +154,13 @@ class Glob(CallableTool2[Params]):
         try:
             # Perform the glob search - users can use ** directly in pattern
             matches: list[KaosPath] = []
+            root = dir_path.canonical()
             async for match in dir_path.glob(params.pattern):
+                # A pattern containing '..' can produce a path outside the
+                # validated directory; relative_to() at output time does not
+                # reject it. Only advertise matches inside the root.
+                if not is_within_directory(match.canonical(), root):
+                    continue
                 matches.append(match)
 
             # Filter out directories if not requested

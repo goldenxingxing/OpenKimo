@@ -47,9 +47,15 @@ def parse_changelog(md_text: str) -> dict[str, ReleaseEntry]:
         if line.startswith("## "):
             commit()
             ver = line[3:].strip()
-            # Remove trailing date in parentheses if present
+            # Accept both `## 0.75 (2026-01-09)` and `## [v0.5.0] — date`.
+            # Without stripping the brackets the version number is treated as
+            # a markup tag by the renderer.
+            if ver.startswith("[") and "]" in ver:
+                ver = ver[1 : ver.find("]")].strip()
             if "(" in ver:
                 ver = ver[: ver.find("(")].strip()
+            if "—" in ver:
+                ver = ver.split("—", 1)[0].strip()
             current_ver = ver
             desc_lines = []
             bullet_lines = []

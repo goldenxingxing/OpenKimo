@@ -29,7 +29,7 @@ jobs:
       # Published to the public downloads repo; this code repo is private, so
       # its own releases would not be downloadable.
       - name: Create GitHub Release
-        uses: softprops/action-gh-release@v3
+        uses: softprops/action-gh-release@8a0cd651e5b2365bd640854a3fa5dfc70e4875f3 # v3.0.4
         with:
           repository: goldenxingxing/OpenKimo-releases
           token: ${{ secrets.RELEASES_TOKEN }}
@@ -187,7 +187,7 @@ jobs:
           if-no-files-found: warn
 
       - name: Upload DMG to Release
-        uses: softprops/action-gh-release@v3
+        uses: softprops/action-gh-release@8a0cd651e5b2365bd640854a3fa5dfc70e4875f3 # v3.0.4
         with:
           repository: goldenxingxing/OpenKimo-releases
           token: ${{ secrets.RELEASES_TOKEN }}
@@ -257,7 +257,7 @@ jobs:
           if-no-files-found: warn
 
       - name: Upload DMG to Release
-        uses: softprops/action-gh-release@v3
+        uses: softprops/action-gh-release@8a0cd651e5b2365bd640854a3fa5dfc70e4875f3 # v3.0.4
         with:
           repository: goldenxingxing/OpenKimo-releases
           token: ${{ secrets.RELEASES_TOKEN }}
@@ -347,7 +347,7 @@ jobs:
           }
 
       - name: Upload installer to Release
-        uses: softprops/action-gh-release@v3
+        uses: softprops/action-gh-release@8a0cd651e5b2365bd640854a3fa5dfc70e4875f3 # v3.0.4
         with:
           repository: goldenxingxing/OpenKimo-releases
           token: ${{ secrets.RELEASES_TOKEN }}

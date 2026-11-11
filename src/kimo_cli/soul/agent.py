@@ -142,7 +142,11 @@ async def load_agents_md(work_dir: KaosPath) -> str | None:
                 break
 
         for path in candidates:
-            content = (await path.read_text()).strip()
+            try:
+                content = (await path.read_text()).strip()
+            except UnicodeDecodeError:
+                logger.warning("Ignoring non-UTF-8 AGENTS.md: {path}", path=path)
+                continue
             if content:
                 discovered.append((path, content))
                 logger.info("Loaded agents.md: {path}", path=path)

@@ -4,6 +4,8 @@ TMP_DIR := $(THIS_DIR)/tmp
 
 # Allow override via environment: RG_VERSION=15.0.0 make download-ripgrep
 RG_VERSION ?= 15.0.0
+# Optional sha256 of the downloaded archive; set it to enforce verification.
+RG_SHA256 ?=
 OS := $(shell uname -s)
 ARCH := $(shell uname -m | tr '[:upper:]' '[:lower:]')
 RG_ARCHIVE_EXT := tar.gz
@@ -66,6 +68,12 @@ download-ripgrep:
 			else \
 				echo "Error: neither curl nor wget is available" && exit 1; \
 			fi; \
+		fi; \
+		if [ -n "$(RG_SHA256)" ]; then \
+			echo "Verifying ripgrep archive checksum"; \
+			echo "$(RG_SHA256)  $$ARCHIVE_PATH" | shasum -a 256 -c - || exit 1; \
+		else \
+			echo "WARNING: RG_SHA256 is unset; the ripgrep archive is not verified" >&2; \
 		fi; \
 		if [ "$(RG_ARCHIVE_EXT)" = "zip" ]; then \
 			ARCHIVE_PATH="$$ARCHIVE_PATH" TMP_DIR="$(TMP_DIR)" python -c "import os, zipfile; zipfile.ZipFile(os.environ['ARCHIVE_PATH']).extractall(os.environ['TMP_DIR'])"; \

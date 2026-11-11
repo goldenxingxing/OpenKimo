@@ -75,17 +75,17 @@ runs:
 
         echo "Signing PyInstaller binary: $BINARY_PATH"
 
-        # PyInstaller onefile binaries embed libraries that get extracted at runtime.
-        # We need to unpack, sign everything, and repack.
-        
-        # First, try signing the binary directly with --deep
-        # For single-file PyInstaller executables, this should work
+        # PyInstaller onefile binaries embed libraries that get extracted at
+        # runtime. --deep signs the outer bundle only; the embedded libraries
+        # are not individually signed. Verify the result so a partial
+        # signature is caught here instead of at notarization.
         codesign --deep --force --options runtime --timestamp \
           --sign "$APPLE_SIGNING_IDENTITY" \
           --keychain "$APPLE_KEYCHAIN_PATH" \
           "$BINARY_PATH"
 
-        echo "✅ Binary signed"
+        codesign --verify --deep --strict --verbose=2 "$BINARY_PATH"
+        echo "✅ Binary signed and verified"
         codesign -dv --verbose=2 "$BINARY_PATH"
 
     - name: Notarize binary

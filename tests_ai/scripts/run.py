@@ -75,7 +75,15 @@ def emit_results(report: list[dict], *, use_color: bool) -> tuple[int, int]:
                 raise SystemExit(f"ERROR: each case must be an object in {display_file}.")
 
             case_name = str(case.get("name") or "unnamed_case")
-            status = bool(case.get("pass"))
+            raw_status = case.get("pass")
+            if isinstance(raw_status, bool):
+                status = raw_status
+            elif isinstance(raw_status, str):
+                status = raw_status.strip().lower() in {"true", "yes", "pass", "passed", "1"}
+            else:
+                status = raw_status is True
+            # bool("false") is True: a runner that reports a failure as the
+            # string "false" would otherwise count as passed and exit 0.
             outcome = colorize(
                 "PASSED" if status else "FAILED",
                 GREEN if status else RED,

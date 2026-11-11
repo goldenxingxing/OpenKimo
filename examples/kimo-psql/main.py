@@ -77,6 +77,17 @@ class ExecuteSql(CallableTool2[ExecuteSqlParams]):
         self._conninfo = conninfo
 
     async def __call__(self, params: ExecuteSqlParams) -> ToolReturnValue:
+        # A read-only transaction does not stop side-effecting functions such
+        # as pg_terminate_backend(), and yolo mode would approve them. Only
+        # allow a single read-only statement at the SQL level.
+        sql = params.sql.strip()
+        statement = sql.split(None, 1)[0].upper() if sql else ""
+        body = sql.rstrip().rstrip(";")
+        if statement not in {"SELECT", "WITH", "EXPLAIN", "SHOW", "TABLE", "VALUES"} or ";" in body:
+            return ToolError(
+                message="Only a single read-only SELECT/WITH/EXPLAIN/SHOW statement is allowed.",
+                brief="Not a read-only query",
+            )
         try:
             # Connect and execute in read-only transaction
             async with (

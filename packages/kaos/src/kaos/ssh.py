@@ -124,8 +124,10 @@ class SSHKaos:
             options["client_keys"] = client_keys
         # Ensure encoding is None to read/write bytes
         options["encoding"] = None
-        # Known hosts is None to avoid the "Host key is not trusted" error
-        options["known_hosts"] = None
+        # Leave asyncssh's default host-key verification in place. Setting
+        # known_hosts to None disabled it entirely, so any machine on the
+        # path could impersonate the server. Callers that manage their own
+        # known_hosts file can pass it through **extra_options.
         # Connect to ssh
         connection = await asyncssh.connect(**options)
         # Everything past the connect can fail — a missing `cwd` is the usual

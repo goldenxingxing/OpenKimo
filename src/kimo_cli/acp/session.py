@@ -182,6 +182,13 @@ class ACPSession:
             return False
 
     async def prompt(self, prompt: list[ACPContentBlock]) -> acp.PromptResponse:
+        if self._turn_state is not None:
+            # A follow-up turn can be in flight. Overwriting the state would
+            # swap the cancel event and turn id out from under it and trip the
+            # asserts in the _send_* helpers.
+            raise acp.RequestError.internal_error(
+                {"error": "A prompt is already in progress for this session"}
+            )
         user_input = acp_blocks_to_content_parts(prompt)
         self._turn_state = _TurnState()
         token = _current_turn_id.set(self._turn_state.id)

@@ -1184,6 +1184,21 @@ def create_app_bundle(cfg: BuildConfig, export_dir: Path) -> Path:
 
 def _macho_min_os(path: Path) -> str | None:
     """Return the minimum macOS version a Mach-O file declares, if any."""
+    # The comment in verify_min_macos promises a 4-byte magic check; without
+    # it every file in the bundle spawned an otool process, which dominates
+    # the whole verification step.
+    try:
+        with path.open("rb") as fh:
+            magic = fh.read(4)
+    except OSError:
+        return None
+    if magic not in (
+        b"\xfe\xed\xfa\xce", b"\xce\xfa\xed\xfe",  # 32-bit
+        b"\xfe\xed\xfa\xcf", b"\xcf\xfa\xed\xfe",  # 64-bit
+        b"\xca\xfe\xba\xbe", b"\xbe\xba\xfe\xca",  # fat
+        b"\xca\xfe\xba\xbf", b"\xbf\xba\xfe\xca",  # fat64
+    ):
+        return None
     try:
         out = subprocess.run(
             ["otool", "-l", str(path)],

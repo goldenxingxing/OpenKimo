@@ -23,6 +23,9 @@ else
   UV_BIN="uv"
 fi
 
+# The installer puts uv in ~/.local/bin and does not modify this process's
+# PATH, so a fresh install looked like a failed one on the very next check.
+export PATH="$HOME/.local/bin:$PATH"
 if ! command -v "$UV_BIN" >/dev/null 2>&1; then
   echo "Error: uv not found after installation." >&2
   exit 1

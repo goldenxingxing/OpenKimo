@@ -37,6 +37,13 @@ export PYTHONPATH="/app/src${PYTHONPATH:+:$PYTHONPATH}"
 HOST="${KIMO_WEB_HOST:-0.0.0.0}"
 PORT="${KIMO_WEB_PORT:-5494}"
 
+# 0.0.0.0 is required inside the container (the port is published by Docker),
+# but binding it without a session token exposes the whole UI to the network.
+if [ -z "${KIMO_WEB_SESSION_TOKEN:-}" ] && [ "$HOST" != "127.0.0.1" ] && [ "$HOST" != "localhost" ]; then
+  echo "WARNING: KIMO_WEB_SESSION_TOKEN is unset and the gateway listens on ${HOST}." >&2
+  echo "         Anyone who can reach this port can use the UI. Set a token." >&2
+fi
+
 echo ""
 echo "Configuration:"
 echo "  Listen:       ${HOST}:${PORT}"

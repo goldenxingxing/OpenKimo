@@ -7,7 +7,7 @@
  *   2.4s ~ 4.4s  All bots float, "All units online!"
  *   5.0s         Auto-dismiss
  */
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, useRef } from "react";
 import { useTranslation } from "react-i18next";
 import i18n from "@/i18n";
 import type {
@@ -299,19 +299,23 @@ function ClusterScene({
   const { t } = useTranslation("chat");
   const [phase, setPhase] = useState(0);
   const count = Math.min(agents.length, 8);
+  // dismiss is recreated on every parent render. Depending on it restarted
+  // the close timer on each event, so the 5s auto-dismiss never arrived.
+  const dismissRef = useRef(dismiss);
+  dismissRef.current = dismiss;
 
   useEffect(() => {
     const t1 = setTimeout(() => setPhase(1), SPAWN_DURATION);
     const t2 = setTimeout(() => {
       setPhase(2);
-      dismiss();
+      dismissRef.current();
     }, SPAWN_DURATION + HOLD_DURATION + 600);
 
     return () => {
       clearTimeout(t1);
       clearTimeout(t2);
     };
-  }, [dismiss]);
+  }, []);
 
   return (
     <button

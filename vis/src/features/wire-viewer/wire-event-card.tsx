@@ -596,7 +596,11 @@ function InnerEventContent({ type, payload }: { type: string; payload: Record<st
       <div className="mt-1">
         {isErr && <span className="text-[10px] text-red-500 font-medium">[error] </span>}
         <span className="text-[10px] text-muted-foreground">
-          {typeof output === "string" ? output.slice(0, 200) : JSON.stringify(output).slice(0, 200)}
+          {typeof output === "string"
+            ? output.slice(0, 200)
+            : output === undefined || output === null
+              ? ""
+              : JSON.stringify(output).slice(0, 200)}
         </span>
         {expanded && <ExpandedPayload payload={payload} />}
         <button onClick={() => setExpanded((v) => !v)} className="text-[9px] text-muted-foreground hover:text-foreground ml-1">

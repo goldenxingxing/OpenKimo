@@ -662,9 +662,19 @@ class Memory(CallableTool2[Params]):
         return _ok(output="\n\n".join(sections), brief=f"Listed ({op.scope})")
 
     async def _update(self, op: UpdateOp) -> ToolReturnValue:
+        # The index shows keys and id prefixes; resolve whatever the caller
+        # passed to a real id before comparing or writing.
+        candidates = list(self._runtime.session.state.session_memory) + read_entries(
+            self._persistent_file
+        )
+        try:
+            resolved = resolve_handle(candidates, op.id)
+        except AmbiguousHandleError as exc:
+            return ToolError(message=str(exc), brief="Ambiguous handle")
+        target_id = resolved.id if resolved is not None else op.id
         # Try session first (cheaper), then persistent.
         for i, entry in enumerate(self._runtime.session.state.session_memory):
-            if entry.id == op.id:
+            if entry.id == target_id:
                 self._runtime.session.state.session_memory[i] = entry.model_copy(
                     update={"content": op.content}
                 )
@@ -681,7 +691,7 @@ class Memory(CallableTool2[Params]):
         if rejection is not None:
             return rejection
         try:
-            updated = update_entry(self._persistent_file, op.id, op.content)
+            updated = update_entry(self._persistent_file, target_id, op.content)
         except AmbiguousHandleError as exc:
             return ToolError(message=str(exc), brief="Ambiguous handle")
         if updated is None:
@@ -778,9 +788,17 @@ class Memory(CallableTool2[Params]):
         )
 
     async def _delete(self, op: DeleteOp) -> ToolReturnValue:
+        candidates = list(self._runtime.session.state.session_memory) + read_entries(
+            self._persistent_file
+        )
+        try:
+            resolved = resolve_handle(candidates, op.id)
+        except AmbiguousHandleError as exc:
+            return ToolError(message=str(exc), brief="Ambiguous handle")
+        target_id = resolved.id if resolved is not None else op.id
         before = len(self._runtime.session.state.session_memory)
         self._runtime.session.state.session_memory[:] = [
-            e for e in self._runtime.session.state.session_memory if e.id != op.id
+            e for e in self._runtime.session.state.session_memory if e.id != target_id
         ]
         if len(self._runtime.session.state.session_memory) != before:
             self._runtime.session.save_state()
@@ -796,7 +814,7 @@ class Memory(CallableTool2[Params]):
         if rejection is not None:
             return rejection
         try:
-            deleted = delete_entry(self._persistent_file, op.id)
+            deleted = delete_entry(self._persistent_file, target_id)
         except AmbiguousHandleError as exc:
             return ToolError(message=str(exc), brief="Ambiguous handle")
         if deleted:

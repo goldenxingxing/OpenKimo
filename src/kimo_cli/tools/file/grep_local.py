@@ -535,7 +535,10 @@ class Grep(CallableTool2[Params]):
                         kept_lines.append(line)
                         continue
                     m = _RG_LINE_RE.match(line)
-                    file_path = m.group(1) if m else line
+                    # Without line numbers the output is "path:content".
+                    # Treating the whole line as a path hides a sensitive
+                    # filename from is_sensitive_file() below.
+                    file_path = m.group(1) if m else line.split(":", 1)[0]
                 elif params.output_mode == "count_matches":
                     # Count lines: "file.py:42"
                     idx = line.rfind(":")

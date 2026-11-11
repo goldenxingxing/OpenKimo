@@ -7,6 +7,8 @@
 # check that existed looked at one directory out of many.
 #
 # `git commit --no-verify` skips this.
+# Git does not read .githooks/ by default — enable once per clone with:
+#   git config core.hooksPath .githooks
 set -e
 
 root=$(git rev-parse --show-toplevel)
@@ -24,5 +26,7 @@ if ! command -v uv >/dev/null 2>&1; then
 fi
 
 echo "pre-commit: ruff"
-uv run --no-sync ruff check src tests benchmarks
-uv run --no-sync ruff format --check src tests benchmarks
+# --no-sync skips installing the project environment, so a fresh clone has
+# no ruff and every commit fails to spawn it. Plain `uv run` syncs on demand.
+uv run ruff check src tests benchmarks
+uv run ruff format --check src tests benchmarks

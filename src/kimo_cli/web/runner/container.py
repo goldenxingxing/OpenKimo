@@ -15,6 +15,7 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import time
 from collections.abc import Callable
 from pathlib import Path
 from uuid import UUID, uuid4
@@ -160,10 +161,13 @@ class ContainerSessionProcess(SessionProcess):
                 env=get_clean_env(),
             )
 
+            # Same bookkeeping as SessionProcess.start: the short-lived-worker
+            # guard needs the timestamp, and a restarted worker needs its
+            # initialize/state replayed before it accepts a prompt.
+            self._worker_started_at = time.monotonic()
             self._read_task = asyncio.create_task(self._read_loop())
+            await self._replay_initialize()
             if restart_started_at is not None:
-                import time
-
                 elapsed_ms = int((time.perf_counter() - restart_started_at) * 1000)
                 detail = f"restart_ms={elapsed_ms}"
                 await self._emit_status("idle", reason=reason or "start", detail=detail)

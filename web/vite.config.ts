@@ -60,7 +60,12 @@ export default defineConfig({
     },
   },
   server: {
-    allowedHosts: true,
+    // `true` accepts any Host header, which lets any name pointing at the dev
+    // server reach it (DNS rebinding). Keep the default local-only, with an
+    // explicit opt-in for LAN demos.
+    allowedHosts: process.env.VITE_ALLOWED_HOSTS
+      ? process.env.VITE_ALLOWED_HOSTS.split(",")
+      : ["localhost", "127.0.0.1"],
     proxy: {
       "/api": {
         target: process.env.VITE_API_TARGET ?? "http://127.0.0.1:5495",

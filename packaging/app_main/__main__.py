@@ -472,7 +472,12 @@ def _read_copyright(_p: paths_mod.AppPaths) -> str:
     return data.get("copyright") or "© OpenKimo Contributors. Apache License 2.0."
 
 
-def _install_edit_menu(app_name: str) -> None:
+# PyObjC needs a strong reference to the menu item target for the whole app
+# lifetime; a local target would be collected as soon as this function returns.
+_QUIT_TARGET: object | None = None
+
+
+def _install_edit_menu(app_name: str, quit_callback=None) -> None:
     """Menu-bar (accessory) apps don't ship with an app/Edit menu, so Cmd+C/V/X
     don't reach NSTextField first responders inside our Settings window. Wire
     up a minimal main menu so the standard editing shortcuts work."""
@@ -495,9 +500,28 @@ def _install_edit_menu(app_name: str) -> None:
         f"Hide {app_name}", "hide:", "h"
     )
     app_menu.addItem_(NSMenuItem.separatorItem())
-    app_menu.addItemWithTitle_action_keyEquivalent_(
-        f"Quit {app_name}", "terminate:", "q"
-    )
+    # NSApplication's terminate: bypasses OpenKimoApp._on_quit entirely, so
+    # the supervisor shutdown never runs and the child worker (started with
+    # start_new_session) is left orphaned, still holding the port. Route the
+    # menu item through the same callback as the rumps quit button.
+    if quit_callback is not None:
+        from Foundation import NSObject
+
+        class _QuitTarget(NSObject):
+            def quitViaSupervisor_(self, _sender):
+                quit_callback()
+
+        global _QUIT_TARGET
+        _QUIT_TARGET = _QuitTarget.alloc().init()
+        quit_item = NSMenuItem.alloc().initWithTitle_action_keyEquivalent_(
+            f"Quit {app_name}", "quitViaSupervisor:", "q"
+        )
+        quit_item.setTarget_(_QUIT_TARGET)
+        app_menu.addItem_(quit_item)
+    else:
+        app_menu.addItemWithTitle_action_keyEquivalent_(
+            f"Quit {app_name}", "terminate:", "q"
+        )
     app_item.setSubmenu_(app_menu)
 
     # 2) Edit menu — Cut/Copy/Paste/Select All/Undo/Redo via responder chain.
@@ -545,7 +569,7 @@ def main() -> int:
         sys.path.insert(0, str(p.kimo_cli.parent))
 
     app = OpenKimoApp(p)
-    _install_edit_menu(p.app_name)
+    _install_edit_menu(p.app_name, lambda: app._on_quit(None))
     app.run()
     return 0
 

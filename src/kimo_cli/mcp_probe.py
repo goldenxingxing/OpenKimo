@@ -72,10 +72,10 @@ async def probe_mcp_server(
             async with client:
                 tools: list[Any] = await client.list_tools()
     except TimeoutError:
-        return ProbeResult(
-            ok=False,
-            error=f"TimeoutError: no response within {timeout_s:g}s",
-        )
+        # timeout_s can be None for interactive OAuth logins. A TimeoutError
+        # can still come from the client, so format defensively.
+        limit = f"within {timeout_s:g}s" if timeout_s is not None else "without a timeout"
+        return ProbeResult(ok=False, error=f"TimeoutError: no response {limit}")
     except Exception as e:
         return ProbeResult(ok=False, error=f"{type(e).__name__}: {e}")
 

@@ -47,9 +47,11 @@ def _wiki_manager() -> WikiManager:
 
 
 async def _call[T](fn: Callable[[WikiManager], T]) -> T:
-    manager = _wiki_manager()
     try:
-        return await asyncio.to_thread(fn, manager)
+        # Construct the manager inside the worker thread too: the first call
+        # runs a force=True full index rebuild, which would otherwise block
+        # the event loop before to_thread is ever reached.
+        return await asyncio.to_thread(lambda: fn(_wiki_manager()))
     except WikiConflictError as exc:
         raise HTTPException(status.HTTP_409_CONFLICT, detail=str(exc)) from exc
     except WikiBusyError as exc:

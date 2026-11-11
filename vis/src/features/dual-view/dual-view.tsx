@@ -165,6 +165,7 @@ export function DualView({ sessionId, refreshKey = 0, agentScope }: DualViewProp
 
   // Fetch data
   useEffect(() => {
+    let cancelled = false;
     const forceRefresh = refreshKey > 0;
     setWireLoading(true);
     setWireError(null);
@@ -172,9 +173,9 @@ export function DualView({ sessionId, refreshKey = 0, agentScope }: DualViewProp
       ? getSubagentWireEvents(sessionId, agentScope, forceRefresh)
       : getWireEvents(sessionId, forceRefresh);
     wireFetch
-      .then((res) => setWireEvents(res.events))
-      .catch((err) => setWireError(err.message))
-      .finally(() => setWireLoading(false));
+      .then((res) => { if (!cancelled) setWireEvents(res.events); })
+      .catch((err) => { if (!cancelled) setWireError(err.message); })
+      .finally(() => { if (!cancelled) setWireLoading(false); });
 
     setContextLoading(true);
     setContextError(null);
@@ -182,9 +183,17 @@ export function DualView({ sessionId, refreshKey = 0, agentScope }: DualViewProp
       ? getSubagentContextMessages(sessionId, agentScope, forceRefresh)
       : getContextMessages(sessionId, forceRefresh);
     ctxFetch
-      .then((res) => setContextMessages(res.messages.filter((m) => !m.role.startsWith("_"))))
-      .catch((err) => setContextError(err.message))
-      .finally(() => setContextLoading(false));
+      .then((res) => {
+        if (!cancelled) {
+          setContextMessages(res.messages.filter((m) => !m.role.startsWith("_")));
+        }
+      })
+      .catch((err) => { if (!cancelled) setContextError(err.message); })
+      .finally(() => { if (!cancelled) setContextLoading(false); });
+
+    // Switching sessions quickly used to let an older response overwrite the
+    // new session's events.
+    return () => { cancelled = true; };
   }, [sessionId, refreshKey, agentScope]);
 
   // Build bidirectional mapping: tool_call_id -> wire event index

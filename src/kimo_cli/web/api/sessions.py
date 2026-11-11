@@ -780,7 +780,9 @@ if restrict:
         sys.exit(0)
     try:
         current = work_dir
-        for part in file_path.relative_to(work_dir).parts:
+        # Walk the *unresolved* request path: resolve() has already followed
+        # any symlink, so checking file_path can never see it.
+        for part in requested.relative_to(work_dir).parts:
             current = current / part
             if current.is_symlink():
                 print(json.dumps({"error": "symlink"}))

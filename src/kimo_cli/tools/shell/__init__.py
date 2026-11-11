@@ -274,14 +274,18 @@ class Shell(CallableTool2[Params]):
         process.stdin.close()
 
         try:
+            # process.wait() must be inside the timeout too: a command that
+            # redirects its output closes both streams immediately (EOF),
+            # while the process itself can run forever.
             await asyncio.wait_for(
                 asyncio.gather(
                     _read_stream(process.stdout, stdout_cb),
                     _read_stream(process.stderr, stderr_cb),
+                    process.wait(),
                 ),
                 timeout,
             )
-            return await process.wait()
+            return process.returncode
         except asyncio.CancelledError:
             await process.kill()
             raise

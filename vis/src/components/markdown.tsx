@@ -20,8 +20,12 @@ const escapeHtmlOutsideCodeBlocks = (text: string): string => {
   }
 
   const escapeForMarkdown = (str: string): string => {
-    let result = str.replace(/<(?=[a-zA-Z/!?])/g, "\uFF1C");
-    result = result.replace(/(?<!^)(?<![-=])>/gm, "\uFF1E");
+    // Only escape a complete tag-shaped span. The old rules rewrote every
+    // standalone '<' or '>', so "a<b", "x>y" and <https://...> autolinks
+    // came out with full-width characters.
+    let result = str.replace(/<(?!https?:\/\/)[^>\n]*>/g, (m) =>
+      m.replace(/</g, "&lt;").replace(/>/g, "&gt;"),
+    );
     result = result.replace(/\n([ ]{4,})/g, "\n\u200B$1");
     return result;
   };

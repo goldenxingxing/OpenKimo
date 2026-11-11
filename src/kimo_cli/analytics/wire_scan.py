@@ -88,7 +88,14 @@ def iter_wire_events(
     except OSError:
         return
     with handle as f:
-        for line in f:
+        while True:
+            try:
+                line = next(f)
+            except StopIteration:
+                break
+            except (OSError, UnicodeDecodeError):
+                # A torn or non-UTF-8 line must not abort the whole scan.
+                return
             line = line.strip()
             if not line:
                 continue

@@ -449,6 +449,10 @@ class ACPServer:
             oauth=cli_instance.soul.runtime.oauth,
         )
         cli_instance.soul.runtime.llm = new_llm
+        # Keep the session's recorded model in sync. Every early return below
+        # (including the non-default config path) still means the switch
+        # happened; leaving the old id here makes a later resume report it.
+        self.sessions[session_id] = (acp_session, model_id_conv)
 
         config.default_model = model_id_conv.model_key
         config.default_thinking = model_id_conv.thinking

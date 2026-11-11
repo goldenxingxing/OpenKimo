@@ -154,6 +154,22 @@ class ApprovalRequestPanel:
                     self._non_diff_truncated = True
                 idx += 1
             else:
+                # Never drop an unknown block: approval panels are the only
+                # place the user sees what they are approving. A caller that
+                # passes a custom block (e.g. WikiApprovalBlock with a summary
+                # and page list) must still have its text shown.
+                text = str(getattr(block, "text", None) or block).rstrip("\n")
+                if text:
+                    line_count = text.count("\n") + 1
+                    self._content_blocks.append(
+                        ApprovalContentBlock(text=text, lines=line_count, style="grey50")
+                    )
+                    if non_diff_budget > 0:
+                        truncated = "\n".join(text.split("\n")[:non_diff_budget])
+                        self._preview_renderables.append(Text(truncated, style="grey50"))
+                        non_diff_budget -= min(line_count, non_diff_budget)
+                    else:
+                        self._non_diff_truncated = True
                 idx += 1
 
         # P1: diff pager always has context lines not shown in preview

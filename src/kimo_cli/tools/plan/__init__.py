@@ -293,10 +293,11 @@ class ExitPlanMode(CallableTool2[Params]):
 
         if chose_reject:
             _track_telemetry("plan_resolved", outcome="rejected")
+            feedback = "; ".join(str(v) for v in answers.values() if str(v) != "Reject")
             return ToolRejectedError(
                 message=(
                     "Plan rejected by user. Stay in plan mode. "
-                    "The user will provide feedback via conversation. "
+                    f"User feedback: {feedback or '(none)'}. "
                     "Wait for the user's next message before revising."
                 ),
                 brief="Plan rejected",

@@ -29,6 +29,16 @@ class EchoSoul:
         return StatusSnapshot(context_usage=0.0)
 
     @property
+    def thinking(self) -> bool:
+        # Shell reads this unconditionally while composing its status line.
+        return False
+
+    @property
+    def hook_engine(self):
+        # EchoSoul has no hooks; expose the shape the shell expects.
+        return None
+
+    @property
     def available_slash_commands(self) -> list[SlashCommand[Any]]:
         return []
 

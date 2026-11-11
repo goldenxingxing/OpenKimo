@@ -430,7 +430,12 @@ class WikiTurnCoordinator:
         )
         existing_id = self._checkpoint_by_key.get(dedupe_key)
         if existing_id is not None:
-            return self._checkpoints[existing_id]
+            existing = self._checkpoints[existing_id]
+            if existing.state in {"pending", "persisting"}:
+                return existing
+            # A discarded checkpoint must not swallow a new trigger with the
+            # same dedupe key; the earlier attempt is over.
+            self._checkpoint_by_key.pop(dedupe_key, None)
         if self.unresolved_count >= _MAX_UNRESOLVED_CHECKPOINTS:
             self._safe_track("wiki_trigger_checkpoint_backpressure")
             raise WikiCheckpointBackpressure("runtime checkpoint capacity reached")

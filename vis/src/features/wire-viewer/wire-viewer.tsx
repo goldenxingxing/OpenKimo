@@ -108,6 +108,7 @@ export function WireViewer({ sessionId, refreshKey = 0, onNavigateToContext, scr
   const virtuosoRef = useRef<VirtuosoHandle>(null);
 
   useEffect(() => {
+    let cancelled = false;
     setLoading(true);
     setError(null);
     if (refreshKey === 0) {
@@ -119,9 +120,10 @@ export function WireViewer({ sessionId, refreshKey = 0, onNavigateToContext, scr
       ? getSubagentWireEvents(sessionId, agentScope, refreshKey > 0)
       : getWireEvents(sessionId, refreshKey > 0);
     fetch
-      .then((res) => setEvents(res.events))
-      .catch((err) => setError(err.message))
-      .finally(() => setLoading(false));
+      .then((res) => { if (!cancelled) setEvents(res.events); })
+      .catch((err) => { if (!cancelled) setError(err.message); })
+      .finally(() => { if (!cancelled) setLoading(false); });
+    return () => { cancelled = true; };
   }, [sessionId, refreshKey, agentScope]);
 
   const allTypes = useMemo(() => {

@@ -856,6 +856,15 @@ class SessionProcess:
     async def _encode_uploaded_files(
         self, inline: frozenset[str] = frozenset()
     ) -> tuple[list[ContentPart], dict[str, list[ContentPart]]]:
+        """Encode this turn's uploaded files off the event loop."""
+        # The whole body below is synchronous file I/O and base64 encoding.
+        # Running it inline stalls every other session while a large upload
+        # is being read.
+        return await asyncio.to_thread(self._encode_uploaded_files_sync, inline)
+
+    def _encode_uploaded_files_sync(
+        self, inline: frozenset[str] = frozenset()
+    ) -> tuple[list[ContentPart], dict[str, list[ContentPart]]]:
         """Encode this turn's uploaded files for the model.
 
         Returns the parts that go before the message — files the message does

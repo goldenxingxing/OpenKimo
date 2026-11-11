@@ -28,6 +28,10 @@ async def main():
     }
     proc.stdin.write(json.dumps(user_message).encode("utf-8") + b"\n")
     await proc.stdin.drain()
+    # The CLI reads stream-json until EOF. Leaving stdin open makes it wait
+    # forever and this example's readline() never returns.
+    proc.stdin.close()
+    await proc.stdin.wait_closed()
 
     while True:
         line = await proc.stdout.readline()

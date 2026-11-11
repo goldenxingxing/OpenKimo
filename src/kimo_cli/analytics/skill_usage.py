@@ -46,6 +46,7 @@ from __future__ import annotations
 
 import json
 import os
+import posixpath
 import re
 import threading
 import time
@@ -107,7 +108,7 @@ def _norm_parts(raw: str) -> tuple[str, ...]:
     cleaned = raw.replace("\\", "/").strip()
     if not cleaned:
         return ()
-    return PurePosixPath(os.path.normpath(cleaned)).parts
+    return PurePosixPath(posixpath.normpath(cleaned)).parts
 
 
 def _looks_like_skills_root(parts: Iterable[str], roots: set[tuple[str, ...]]) -> bool:

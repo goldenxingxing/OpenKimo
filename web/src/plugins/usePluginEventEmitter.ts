@@ -213,7 +213,10 @@ export function usePluginEventEmitter() {
           if (innerType === "TurnBegin") {
             const agentType = sub.payload.subagent_type ?? null;
             activeSubagentsRef.current.set(agentId, { agentType, parentToolCallId });
-            // Also track in cluster window so sequential foreground agents accumulate
+            // The ToolCall path already registered this agent under its tool
+            // call id. Replace that entry instead of adding a second one —
+            // otherwise a single agent counts twice and triggers a cluster.
+            clusterWindowAgentsRef.current.delete(parentToolCallId);
             clusterWindowAgentsRef.current.set(agentId, { agentId, agentType });
             emit({
               type: "subagent:start",

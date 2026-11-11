@@ -327,6 +327,14 @@ class FetchURL(CallableTool2[Params]):
                         wait_until="domcontentloaded",
                         timeout=30000,
                     )
+                    # goto() follows redirects, and Chromium resolves the
+                    # target itself. A public URL can bounce to a private or
+                    # metadata address, so check where we actually landed.
+                    if not await asyncio.to_thread(_is_safe_url, page.url):
+                        return builder.error(
+                            "URL redirected to a blocked target (localhost/private IP)",
+                            brief="Blocked URL",
+                        )
                     # Wait a moment for any lazy-loaded content
                     await page.wait_for_timeout(2000)
                     content = await page.content()

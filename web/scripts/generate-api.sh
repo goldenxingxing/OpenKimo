@@ -15,16 +15,17 @@ if ! curl -sf -o openapi.json "$API_URL"; then
     exit 1
 fi
 
-echo "Removing old API client..."
-rm -rf src/lib/api
-
 echo "Generating TypeScript client..."
 
-# Check if docker is available
+# Check prerequisites before deleting the existing generated client: a
+# missing docker used to leave the checkout with no API client at all.
 if ! command -v docker &> /dev/null; then
     echo "Error: docker is not installed"
     exit 1
 fi
+
+echo "Removing old API client..."
+rm -rf src/lib/api
 
 # Try docker without sudo first, fall back to sudo if needed
 DOCKER_CMD="docker"

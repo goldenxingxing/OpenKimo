@@ -159,6 +159,11 @@ class _WireRecorder:
                     error=e,
                 )
                 break
+            except Exception as e:
+                # One bad message must not kill the recorder task: the failure
+                # would otherwise surface only at join(), with the rest of the
+                # transcript silently missing.
+                logger.error("Wire recording failed for a message: {error}", error=e)
 
     async def _record(self, msg: WireMessage) -> None:
         await self._wire_file.append_message(msg)

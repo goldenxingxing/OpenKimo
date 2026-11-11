@@ -790,10 +790,13 @@ export function useSessions(): UseSessionsReturn {
    */
   const getSessionFileUrl = useCallback(
     (sessionId: string, path: string): string => {
-      const basePath = getApiBaseUrl();
+      const base = `${getApiBaseUrl()}/api/sessions/${encodeURIComponent(sessionId)}/files/${encodeURIComponent(path)}`;
+      // A logged-in user has the session cookie, so the token must stay out
+      // of the URL (history / access logs). A static-token deployment has no
+      // cookie and still needs it for a plain <a href> download.
       const token = getAuthToken();
-      const tokenParam = token ? `?token=${encodeURIComponent(token)}` : "";
-      return `${basePath}/api/sessions/${encodeURIComponent(sessionId)}/files/${encodeURIComponent(path)}${tokenParam}`;
+      const hasSessionCookie = document.cookie.includes("kimo_session=");
+      return hasSessionCookie || !token ? base : `${base}?token=${encodeURIComponent(token)}`;
     },
     [],
   );

@@ -707,6 +707,11 @@ class SkillManager:
             state = self._load_state()
             state["disabled"] = sorted(set(state["disabled"]) - {key})
             state["deleted"] = sorted(set(state["deleted"]) - {key})
+            enabled = state.get("enabled")
+            if enabled is not None:
+                # Restoring means "available again". With the opt-in
+                # enabled list, removing it from disabled is not enough.
+                state["enabled"] = sorted(set(enabled) | {key})
             self._save_state(state)
 
     def write_skill_md(self, name: str, content: str) -> ManagedSkill:

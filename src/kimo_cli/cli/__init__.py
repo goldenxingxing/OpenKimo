@@ -688,6 +688,7 @@ def kimo(
             # stderr noise is captured into logs without hiding startup failures.
             redirect_stderr_to_logger()
             preserve_background_tasks = False
+            session_is_ending = True
             try:
                 match ui:
                     case "shell":
@@ -712,6 +713,7 @@ def kimo(
                         exit_code = ExitCode.SUCCESS
             except Reload as e:
                 preserve_background_tasks = True
+                session_is_ending = False
                 if e.session_id is None:
                     r = Reload(session_id=session.id, prefill_text=e.prefill_text)
                     r.source_session = session
@@ -720,37 +722,43 @@ def kimo(
                 raise
             except SwitchToWeb:
                 preserve_background_tasks = True
+                session_is_ending = False
                 raise
             except SwitchToVis:
                 preserve_background_tasks = True
+                session_is_ending = False
                 raise
             finally:
-                # --- Cross-session memory archival ---
-                # Fail-open: a slow or broken summarizer must not block the
-                # SessionEnd hook or process exit.
-                with contextlib.suppress(Exception):
-                    from kimo_cli.memory.archivist import archive_on_session_end
+                # A Reload or a UI switch is not the end of the session: the
+                # same conversation continues in the next process. Running the
+                # end-of-session archival and hook here duplicates summaries
+                # and fires SessionEnd for a session that never ended.
+                if session_is_ending:
+                    # --- Cross-session memory archival ---
+                    # Fail-open: a slow or broken summarizer must not block the
+                    # SessionEnd hook or process exit.
+                    with contextlib.suppress(Exception):
+                        from kimo_cli.memory.archivist import archive_on_session_end
 
-                    await asyncio.wait_for(
-                        archive_on_session_end(instance.soul),
-                        timeout=10,
-                    )
+                        await asyncio.wait_for(
+                            archive_on_session_end(instance.soul),
+                            timeout=10,
+                        )
 
-                # --- SessionEnd hook ---
-                with contextlib.suppress(Exception):
-                    await asyncio.wait_for(
-                        instance.soul.hook_engine.trigger(
-                            "SessionEnd",
-                            matcher_value="exit",
-                            input_data=hook_events.session_end(
-                                session_id=session.id,
-                                cwd=str(work_dir),
-                                reason="exit",
+                    # --- SessionEnd hook ---
+                    with contextlib.suppress(Exception):
+                        await asyncio.wait_for(
+                            instance.soul.hook_engine.trigger(
+                                "SessionEnd",
+                                matcher_value="exit",
+                                input_data=hook_events.session_end(
+                                    session_id=session.id,
+                                    cwd=str(work_dir),
+                                    reason="exit",
+                                ),
                             ),
-                        ),
-                        timeout=5,
-                    )
-
+                            timeout=5,
+                        )
                 if not preserve_background_tasks:
                     await instance.shutdown_background_tasks()
                     await instance.await_bg_tasks_shutdown()

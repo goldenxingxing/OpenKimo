@@ -412,7 +412,12 @@ async def update_global_config(
             force=request.force_restart_busy_sessions or False,
             # Sessions with a per-session model override do not depend on the
             # global default model; skip them when only the default changed.
-            skip_model_override=request.default_model is not None,
+            # Only safe to skip when the *sole* change is the default model.
+            # A thinking change affects every session, including those with a
+            # per-session model override.
+            skip_model_override=(
+                request.default_model is not None and request.default_thinking is None
+            ),
         )
         restarted = [str(sid) for sid in summary.restarted_session_ids]
         skipped_busy = [str(sid) for sid in summary.skipped_busy_session_ids]

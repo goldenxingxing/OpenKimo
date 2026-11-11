@@ -208,8 +208,11 @@ def update_user(
         f"UPDATE users SET {', '.join(set_clauses)} WHERE id = ?",  # noqa: S608
         params,
     )
-    if "password" in kwargs:
+    if "password" in kwargs or ("is_active" in kwargs and not kwargs["is_active"]):
         # A password change has to end the sessions opened with the old one.
+        # So does deactivating an account: get_user_session re-checks
+        # is_active, but re-enabling the account later would make every old
+        # cookie valid again unless the rows are gone now.
         # Deactivating an account already does (get_user_session re-checks
         # is_active); a reset did not, so a stolen cookie outlived the reset
         # that was meant to revoke it — and with sliding renewal, for as long

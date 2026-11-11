@@ -20,6 +20,9 @@ export function LoginPage({ onLogin }: LoginPageProps) {
   const handleSubmit = useCallback(
     async (e?: FormEvent) => {
       e?.preventDefault();
+      if (isLoading) {
+        return;
+      }
       const trimmedUsername = username.trim();
       if (!(trimmedUsername && password)) {
         setError(t("login.missingCredentials"));
@@ -37,12 +40,15 @@ export function LoginPage({ onLogin }: LoginPageProps) {
         setIsLoading(false);
       }
     },
-    [username, password, onLogin, t],
+    [username, password, onLogin, t, isLoading],
   );
 
   const handleKeyDown = useCallback(
     (e: KeyboardEvent<HTMLInputElement>) => {
       if (e.key === "Enter") {
+        // Without this the keydown handler and the form's implicit submit
+        // both fire, logging the user in twice.
+        e.preventDefault();
         handleSubmit();
       }
     },

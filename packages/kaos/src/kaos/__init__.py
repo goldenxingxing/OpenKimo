@@ -11,8 +11,6 @@ if TYPE_CHECKING:
 
     from asyncssh.stream import SSHReader, SSHWriter
 
-    from kaos.path import KaosPath
-
     def type_check(
         stream_reader: StreamReader,
         stream_writer: StreamWriter,
@@ -344,3 +342,8 @@ async def mkdir(path: StrOrKaosPath, parents: bool = False, exist_ok: bool = Fal
 
 async def exec(*args: str, env: Mapping[str, str] | None = None) -> KaosProcess:
     return await get_current_kaos().exec(*args, env=env)
+
+
+# Runtime binding for `StrOrKaosPath` (PEP 695 evaluates its value lazily).
+# Imported at the end so kaos.path's `import kaos` sees an initialised module.
+from kaos.path import KaosPath  # noqa: E402

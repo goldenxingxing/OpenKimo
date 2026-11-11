@@ -119,6 +119,10 @@ export function GlobalConfigControls({
           if (ok) {
             toast.success(t("toasts:sessionModel.successTitle"));
           }
+        } catch (err) {
+          const message =
+            err instanceof Error ? err.message : t("toasts:sessionModel.fallbackError");
+          toast.error(t("toasts:sessionModel.errorTitle"), { description: message });
         } finally {
           setIsSwitching(false);
         }

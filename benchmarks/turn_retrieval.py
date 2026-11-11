@@ -130,9 +130,13 @@ async def build_store(client, sem) -> list[str]:
     """Extract facts from the user's own sessions with the shipped prompt."""
     import time as _time
 
-    from try_extract import conversation_tail
+    from carryover.extract import EXTRACTION_PROMPT, parse_candidates
 
-    from kimo_cli.memory.archivist import _EXTRACTION_PROMPT, _parse_candidates
+    def conversation_tail(session_id: str) -> str:
+        """Last TAIL_CHARS of a session's context.jsonl, as plain text."""
+        path = SESSIONS / session_id / "context.jsonl"
+        text = path.read_text(encoding="utf-8", errors="replace")
+        return text[-12_000:]
 
     if not SESSIONS.is_dir():
         raise SystemExit(
@@ -146,14 +150,14 @@ async def build_store(client, sem) -> list[str]:
             ask(
                 client,
                 sem,
-                _EXTRACTION_PROMPT.format(conversation=conversation_tail(i), today=today),
+                EXTRACTION_PROMPT.format(conversation=conversation_tail(i), today=today),
             )
             for i in ids
         )
     )
     facts: list[str] = []
     for reply, sid in zip(replies, ids, strict=True):
-        facts += [c.content for c in _parse_candidates(reply, session_id=sid)]
+        facts += [c.content for c in parse_candidates(reply, session_id=sid)]
     return facts
 
 

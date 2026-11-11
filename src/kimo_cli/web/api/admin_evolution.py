@@ -177,16 +177,18 @@ async def get_overview(admin: dict[str, Any] = Depends(require_admin)) -> Overvi
     del admin
     from kimo_cli.config import load_config
 
-    records = library.iter_all_session_records()
-    groups = library.task_groups(records)
-    state = library.load_generations()
+    records = await asyncio.to_thread(library.iter_all_session_records)
+    groups = await asyncio.to_thread(library.task_groups, records)
+    state = await asyncio.to_thread(library.load_generations)
+    proposals = await asyncio.to_thread(library.list_proposals)
+    adopted = await asyncio.to_thread(library.list_adopted)
     return OverviewResponse(
         enabled=bool(load_config().default_self_evolve),
         evidence_turns=len(records),
         evidence_tasks=len(groups),
         evidence_total_tokens=sum(r.total_tokens for r in records),
-        proposals_pending=len(library.list_proposals()),
-        adopted_total=len(library.list_adopted()),
+        proposals_pending=len(proposals),
+        adopted_total=len(adopted),
         generation_current=int(state.get("current") or 0),
         generation_count=len(state.get("generations") or []),
         disabled_ids=library.disabled_ids(),

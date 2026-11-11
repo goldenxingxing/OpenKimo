@@ -77,7 +77,16 @@ def extract_token_from_request(request: Request) -> str | None:
     token = parse_bearer_token(request.headers.get("authorization"))
     if token:
         return token
-    if request.method.upper() == "GET":
+    # Only EventSource endpoints need a token in the URL — they cannot set
+    # an Authorization header. Every other GET accepts the header (or the
+    # session cookie); allowing ?token= there leaks the secret into access
+    # logs, browser history and Referer headers.
+    path = request.url.path.rstrip("/")
+    # A plain <a href> download cannot set an Authorization header, and a
+    # static-token deployment has no session cookie. Keep ?token= for those
+    # two cases only; every other GET must use a header or the cookie.
+    needs_query_token = path.endswith(("/events", "/activity")) or "/files/" in path
+    if request.method.upper() == "GET" and needs_query_token:
         query_token = request.query_params.get("token")
         if query_token:
             return query_token

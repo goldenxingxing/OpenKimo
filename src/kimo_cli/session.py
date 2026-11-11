@@ -4,6 +4,7 @@ import asyncio
 import builtins
 import json
 import os
+import re
 import shutil
 import uuid
 from dataclasses import dataclass
@@ -186,6 +187,11 @@ class Session:
 
         if session_id is None:
             session_id = str(uuid.uuid4())
+        # session_id comes from the CLI/ACP caller. Keep it a single path
+        # component so a crafted '../...' cannot read or write outside the
+        # sessions directory.
+        if not re.fullmatch(r"[A-Za-z0-9_-]{1,128}", session_id):
+            raise ValueError(f"Invalid session id: {session_id!r}")
         session_dir = work_dir_meta.sessions_dir / session_id
         session_dir.mkdir(parents=True, exist_ok=True)
         if output_dir := work_dir_meta.output_dir:
