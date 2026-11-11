@@ -159,11 +159,7 @@ def _refresh_app_state(app) -> None:  # noqa: ANN001 - FastAPI app, kept untyped
     values = _read_settings_values()
 
     if "KIMO_WEB_SESSION_TOKEN" in values:
-        token = values["KIMO_WEB_SESSION_TOKEN"].strip()
-        if token:
-            app.state.session_token = token
-        # An empty value must not silently turn authentication off at reload.
-        # Keep the token the running server was started with instead.
+        app.state.session_token = values["KIMO_WEB_SESSION_TOKEN"] or None
 
     # The same spellings create_app() accepts (see app._load_env_flag). Reading
     # only "true" here meant a deployment configured with `KIMO_WEB_LAN_ONLY=1`
