@@ -122,10 +122,6 @@ class FsCheckpointer:
         """
         head = self._snapshots.get(checkpoint_id)
         if head is None:
-            # Another process may have written the map after we started.
-            self._load_snapshots()
-            head = self._snapshots.get(checkpoint_id)
-        if head is None:
             logger.warning(
                 "No filesystem snapshot for checkpoint {id}; files not restored",
                 id=checkpoint_id,
@@ -146,6 +142,9 @@ class FsCheckpointer:
         # gone from the conversation and its snapshots are unreachable.
         for stale in [cid for cid in self._snapshots if cid > checkpoint_id]:
             del self._snapshots[stale]
+        # Persist the pruning too — a restart must not bring unreachable
+        # checkpoints back from the file.
+        self._save_snapshots()
         logger.info(
             "Workspace restored to snapshot of checkpoint {id} ({head})",
             id=checkpoint_id,

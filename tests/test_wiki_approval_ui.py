@@ -36,7 +36,7 @@ def test_wiki_approval_locales_define_compact_labels() -> None:
     )
 
     assert en["wikiApproval"] == {
-        "title": "Write to global Wiki",
+        "title": "Write to Knowledge Base",
         "details": "Details",
         "paths": "Pages",
         "sources": "Sources",
@@ -48,7 +48,7 @@ def test_wiki_approval_locales_define_compact_labels() -> None:
         "decline": "Decline",
     }
     assert zh["wikiApproval"] == {
-        "title": "写入全局 Wiki",
+        "title": "写入知识库",
         "details": "详情",
         "paths": "页面",
         "sources": "来源",
