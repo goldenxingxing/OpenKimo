@@ -147,10 +147,7 @@ def duplicate_candidate_paths(
             proposed_sources = {_source_key(source) for source in page.sources}
             if proposed_sources.issubset(current_sources):
                 duplicates.append(page.logical_path)
-        elif current is None and _knowledge_fingerprint(page) in existing_content:
-            # When the path already exists, a changed title or tag IS the
-            # change. The body-only fingerprint would otherwise match the
-            # page's own current body and mark a legitimate edit as duplicate.
+        elif _knowledge_fingerprint(page) in existing_content:
             duplicates.append(page.logical_path)
     return tuple(duplicates)
 

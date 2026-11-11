@@ -19,6 +19,8 @@ from kimo_cli.web import session_policy
 from kimo_cli.web.db.crud import get_user_session_row
 from kimo_cli.web.db.database import get_db, init_db
 
+_TEST_ADMIN_PASSWORD = "test-admin-password"
+
 
 @pytest.fixture
 def client(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> TestClient:
@@ -26,12 +28,18 @@ def client(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> TestClient:
     monkeypatch.setenv("KIMO_SHARE_DIR", str(tmp_path))
     monkeypatch.setenv("KIMO_USE_CONTAINERS", "false")
     monkeypatch.delenv("KIMO_WEB_SESSION_TOKEN", raising=False)
+    # The initial admin password is random unless it is set explicitly; a
+    # test must not depend on a published default.
+    monkeypatch.setenv("KIMO_INITIAL_ADMIN_PASSWORD", _TEST_ADMIN_PASSWORD)
     init_db()
 
     from kimo_cli.web.app import create_app
 
     with TestClient(create_app()) as c:
-        resp = c.post("/api/auth/login", json={"username": "admin", "password": "admin123"})
+        resp = c.post(
+            "/api/auth/login",
+            json={"username": "admin", "password": _TEST_ADMIN_PASSWORD},
+        )
         assert resp.status_code == 200, resp.text
         yield c
 
