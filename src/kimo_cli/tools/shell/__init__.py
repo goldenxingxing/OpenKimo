@@ -277,7 +277,7 @@ class Shell(CallableTool2[Params]):
             # process.wait() must be inside the timeout too: a command that
             # redirects its output closes both streams immediately (EOF),
             # while the process itself can run forever.
-            await asyncio.wait_for(
+            results = await asyncio.wait_for(
                 asyncio.gather(
                     _read_stream(process.stdout, stdout_cb),
                     _read_stream(process.stderr, stderr_cb),
@@ -285,7 +285,7 @@ class Shell(CallableTool2[Params]):
                 ),
                 timeout,
             )
-            return process.returncode
+            return results[2]
         except asyncio.CancelledError:
             await process.kill()
             raise

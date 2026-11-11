@@ -247,8 +247,10 @@ async def test_cleanup_rejects_queued_approvals() -> None:
 
     view.cleanup(is_interrupt=True)
 
-    # r1 was current panel — cleanup sets panel to None but does NOT resolve r1
-    assert r1.resolved is False
+    # r1 was the current panel — it must be resolved too, or the tool call
+    # awaiting it hangs forever when a step ends or is interrupted.
+    assert r1.resolved is True
+    assert await r1.wait() == "reject"
     # r2 and r3 were in the queue — cleanup resolves them
     assert r2.resolved is True
     assert await r2.wait() == "reject"
@@ -259,7 +261,7 @@ async def test_cleanup_rejects_queued_approvals() -> None:
 
 @pytest.mark.asyncio
 async def test_cleanup_resolves_queued_questions_with_empty() -> None:
-    """cleanup() should resolve queued questions with empty dict and clear panel."""
+    """cleanup() should resolve every pending question and clear the panel."""
     view = _LiveView(StatusUpdate())
     q1 = _make_question_request("q1")
     q2 = _make_question_request("q2")
@@ -269,8 +271,9 @@ async def test_cleanup_resolves_queued_questions_with_empty() -> None:
 
     view.cleanup(is_interrupt=False)
 
-    # q1 was current — not resolved by cleanup
-    assert q1.resolved is False
+    # q1 was the current panel — resolve it so its waiter is released.
+    assert q1.resolved is True
+    assert await q1.wait() == {}
     # q2 was queued — resolved by cleanup
     assert q2.resolved is True
     assert await q2.wait() == {}
