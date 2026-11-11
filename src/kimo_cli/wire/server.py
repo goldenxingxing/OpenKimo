@@ -1,0 +1,1385 @@
+from __future__ import annotations
+
+import asyncio
+import contextlib
+import json
+from typing import Any, Literal, cast
+
+import acp  # type: ignore[reportMissingTypeStubs]
+import pydantic
+from kosong.chat_provider import APIStatusError, ChatProviderError
+from kosong.tooling import ToolError, ToolResult
+from kosong.utils.typing import JsonType
+
+from kimo_cli.approval_runtime import ApprovalRuntime
+from kimo_cli.soul import LLMNotSet, LLMNotSupported, MaxStepsReached, RunCancelled, Soul, run_soul
+from kimo_cli.soul.kimosoul import KimoSoul
+from kimo_cli.soul.toolset import KimoToolset, WireExternalTool
+from kimo_cli.utils.aioqueue import Queue, QueueShutDown
+from kimo_cli.utils.logging import logger
+from kimo_cli.utils.signals import install_sigint_handler
+from kimo_cli.wire import Wire
+from kimo_cli.wire.types import (
+    ApprovalRequest,
+    ApprovalResponse,
+    HookRequest,
+    HookResponse,
+    QuestionNotSupported,
+    QuestionRequest,
+    QuestionResponse,
+    Request,
+    StatusUpdate,
+    ToolCallRequest,
+    is_event,
+    is_request,
+)
+
+from .jsonrpc import (
+    ClientInfo,
+    ErrorCodes,
+    JSONRPCCancelMessage,
+    JSONRPCErrorObject,
+    JSONRPCErrorResponse,
+    JSONRPCErrorResponseNullableID,
+    JSONRPCEventMessage,
+    JSONRPCInitializeMessage,
+    JSONRPCInMessage,
+    JSONRPCInMessageAdapter,
+    JSONRPCMessage,
+    JSONRPCOutMessage,
+    JSONRPCPromptMessage,
+    JSONRPCReplayMessage,
+    JSONRPCRequestMessage,
+    JSONRPCSetCompactionRatioMessage,
+    JSONRPCSetPlanModeMessage,
+    JSONRPCSetYoloMessage,
+    JSONRPCSteerMessage,
+    JSONRPCSuccessResponse,
+    Statuses,
+)
+
+# Maximum buffer size for the asyncio StreamReader used for stdio.
+# Passed as the `limit` argument to `acp.stdio_streams`, this caps how much
+# data can be buffered when reading from stdin (e.g., large tool or model
+# outputs sent over JSON-RPC). A 100MB limit is large enough for typical
+# interactive use while still protecting the process from unbounded memory
+# growth or buffer-overrun errors when peers send unexpectedly large payloads.
+STDIO_BUFFER_LIMIT = 100 * 1024 * 1024
+
+
+def _is_oauth_session(runtime: Any) -> bool:
+    """Return True if the current session uses OAuth-based authentication."""
+    if runtime is None:
+        return False
+    llm = getattr(runtime, "llm", None)
+    if llm is None:
+        return False
+    provider_config = getattr(llm, "provider_config", None)
+    if provider_config is None:
+        return False
+    return getattr(provider_config, "oauth", None) is not None
+
+
+class WireServer:
+    def __init__(self, soul: Soul):
+        self._reader: asyncio.StreamReader | None = None
+        self._writer: asyncio.StreamWriter | None = None
+
+        # outward
+        self._write_task: asyncio.Task[None] | None = None
+        self._write_queue: Queue[JSONRPCOutMessage] = Queue()
+
+        # Background follow-up: armed only after the user has driven a turn on
+        # this connection, so reopening a session with old notifications
+        # pending does not start talking on its own.
+        self._followup_armed = False
+        self._last_waiting_sent = False
+        self._followup_task: asyncio.Task[None] | None = None
+        self._followup_failures = 0
+
+        # inward
+        self._dispatch_tasks: set[asyncio.Task[None]] = set()
+
+        # soul running stuffs
+        self._soul = soul
+        self._cancel_event: asyncio.Event | None = None
+        self._pending_requests: dict[str, Request] = {}
+        """Maps JSON RPC message IDs to pending `Request`s."""
+        self._client_supports_question: bool = False
+        """Whether the Wire client supports QuestionRequest."""
+        self._client_supports_plan_mode: bool = False
+        """Whether the Wire client supports plan mode."""
+        self._initialized: bool = False
+        self._root_hub_queue: Queue[Any] | None = None
+        self._root_hub_task: asyncio.Task[None] | None = None
+
+    @property
+    def _approval_runtime(self) -> ApprovalRuntime | None:
+        if isinstance(self._soul, KimoSoul):
+            return self._soul.runtime.approval_runtime
+        return None
+
+    async def serve(self) -> None:
+        logger.info("Starting Wire server on stdio")
+
+        self._reader, self._writer = await acp.stdio_streams(limit=STDIO_BUFFER_LIMIT)
+        self._write_task = asyncio.create_task(self._write_loop())
+        if isinstance(self._soul, KimoSoul) and self._soul.runtime.root_wire_hub is not None:
+            self._root_hub_queue = self._soul.runtime.root_wire_hub.subscribe()
+            self._root_hub_task = asyncio.create_task(self._root_hub_loop())
+        if isinstance(self._soul, KimoSoul) and self._soul.runtime.config.background.auto_followup:
+            self._followup_task = asyncio.create_task(self._background_followup_loop())
+        stop_event = asyncio.Event()
+        loop = asyncio.get_running_loop()
+        remove_sigint = install_sigint_handler(loop, stop_event.set)
+        read_task = asyncio.create_task(self._read_loop())
+        stop_task = asyncio.create_task(stop_event.wait())
+        tasks: set[asyncio.Task[Any]] = {read_task, stop_task}
+        pending = tasks
+        try:
+            done, pending = await asyncio.wait(
+                tasks,
+                return_when=asyncio.FIRST_COMPLETED,
+            )
+            if stop_event.is_set():
+                logger.info("Wire server interrupted, shutting down")
+                if self._cancel_event is not None:
+                    self._cancel_event.set()
+                if not read_task.done():
+                    read_task.cancel()
+                    with contextlib.suppress(asyncio.CancelledError):
+                        await read_task
+            elif read_task in done:
+                read_task.result()
+        except KeyboardInterrupt:
+            logger.info("Wire server interrupted, shutting down")
+            if self._cancel_event is not None:
+                self._cancel_event.set()
+        finally:
+            remove_sigint()
+            for task in pending:
+                task.cancel()
+                with contextlib.suppress(asyncio.CancelledError):
+                    await task
+            await self._shutdown()
+
+    #: What the agent is told when it is woken by a completed background task.
+    #: Same wording the interactive shell uses, so the two entry points read
+    #: the same way in a transcript.
+    _FOLLOWUP_PROMPT = (
+        "<system-reminder>Background tasks completed while you were idle.</system-reminder>"
+    )
+
+    #: Give up auto-following-up after this many consecutive failures, rather
+    #: than retrying a broken provider on every completion.
+    _MAX_FOLLOWUP_FAILURES = 3
+
+    async def _background_followup_loop(self) -> None:
+        """Report background results without waiting to be asked.
+
+        The interactive shell already does this: a completed task wakes the
+        loop and the agent reads the notification. A client that only runs a
+        turn when it is sent one has no such loop, so the result sat unread —
+        the session had ended, and the answer waited for the user to type
+        something unrelated before it surfaced.
+        """
+        assert isinstance(self._soul, KimoSoul)
+        runtime = self._soul.runtime
+        manager = runtime.background_tasks
+        notifications = runtime.notifications
+        coalesce_s = runtime.config.background.auto_followup_coalesce_ms / 1000
+        # `completion_event` is only set by publish_terminal_notifications(),
+        # which only runs inside reconcile() — and while this server sits idle
+        # between turns, nothing else calls reconcile(). Poll the task store so
+        # a task that finishes unnoticed still surfaces; this is the same
+        # driver the print mode uses while waiting.
+        poll_s = max(runtime.config.background.wait_poll_interval_ms / 1000, 0.1)
+
+        while True:
+            try:
+                async with asyncio.timeout(poll_s):
+                    await manager.completion_event.wait()
+            except TimeoutError:
+                pass
+            manager.completion_event.clear()
+            manager.reconcile()
+
+            # Advertise "turn parked on background task(s)" transitions. The
+            # client treats that state like idle for input: a prompt sent
+            # then replaces the parked turn instead of queueing behind it.
+            waiting = self._waiting_on_background()
+            if waiting != self._last_waiting_sent:
+                self._last_waiting_sent = waiting
+                # Bare wire messages are NOT valid stdout protocol: the web
+                # server's read loop parses each line as a JSONRPC envelope,
+                # and an unwrapped StatusUpdate kills it (read_loop_error).
+                await self._send_msg(
+                    JSONRPCEventMessage(
+                        method="event", params=StatusUpdate(waiting_on_background=waiting)
+                    )
+                )
+
+            # Let a burst settle: five subagents finishing together should
+            # produce one report, not five turns.
+            if coalesce_s:
+                await asyncio.sleep(coalesce_s)
+                manager.completion_event.clear()
+                manager.reconcile()
+
+            if not self._followup_armed:
+                logger.debug("Background completion ignored: no user turn yet")
+                continue
+            if self._is_streaming:
+                # A turn is running and will read the notification itself.
+                continue
+            if not notifications.has_pending_for_sink("llm"):
+                continue
+            if self._followup_failures >= self._MAX_FOLLOWUP_FAILURES:
+                logger.warning("Background auto-follow-up disabled after repeated failures")
+                continue
+
+            logger.info("Background task completed while idle; following up")
+            try:
+                await self._run_followup_turn()
+                self._followup_failures = 0
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                self._followup_failures += 1
+                logger.exception(
+                    "Background auto-follow-up failed ({n}/{max})",
+                    n=self._followup_failures,
+                    max=self._MAX_FOLLOWUP_FAILURES,
+                )
+
+    async def _run_followup_turn(self) -> None:
+        """Run one turn on the agent's behalf. Errors surface to the caller."""
+        if self._is_streaming:
+            return
+        runtime = self._soul.runtime if isinstance(self._soul, KimoSoul) else None
+        self._cancel_event = asyncio.Event()
+        try:
+            await run_soul(
+                self._soul,
+                self._FOLLOWUP_PROMPT,
+                self._stream_wire_messages,
+                self._cancel_event,
+                runtime.session.wire_file if runtime else None,
+                runtime,
+            )
+        except RunCancelled:
+            pass
+        finally:
+            self._cancel_event = None
+
+    async def _root_hub_loop(self) -> None:
+        assert self._root_hub_queue is not None
+        while True:
+            try:
+                msg = await self._root_hub_queue.get()
+            except QueueShutDown:
+                return
+            try:
+                if not self._initialized:
+                    continue
+                if isinstance(msg, ApprovalRequest):
+                    await self._request_approval(msg)
+                elif isinstance(msg, ApprovalResponse):
+                    self._pending_requests.pop(msg.request_id, None)
+                    await self._send_msg(JSONRPCEventMessage(method="event", params=msg))
+                elif is_event(msg):
+                    await self._send_msg(JSONRPCEventMessage(method="event", params=msg))
+            except Exception:
+                logger.exception("Root hub message handling failed")
+
+    async def _write_loop(self) -> None:
+        assert self._writer is not None
+
+        try:
+            while True:
+                try:
+                    msg = await self._write_queue.get()
+                except QueueShutDown:
+                    logger.debug("Send queue shut down, stopping Wire server write loop")
+                    break
+                self._writer.write(msg.model_dump_json().encode("utf-8") + b"\n")
+                await self._writer.drain()
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            logger.exception("Wire server write loop error:")
+            raise
+
+    async def _read_loop(self) -> None:
+        assert self._reader is not None
+
+        while True:
+            raw_line = await self._reader.readline()
+            if not raw_line:
+                logger.info("stdin closed, Wire server exiting")
+                break
+            line = raw_line.decode("utf-8", errors="replace").strip()
+
+            try:
+                msg_json = json.loads(line)
+            except ValueError:
+                logger.error("Invalid JSON line: {line}", line=line)
+                await self._send_msg(
+                    JSONRPCErrorResponseNullableID(
+                        id=None,
+                        error=JSONRPCErrorObject(
+                            code=ErrorCodes.PARSE_ERROR,
+                            message="Invalid JSON format",
+                        ),
+                    )
+                )
+                continue
+
+            try:
+                generic_msg = JSONRPCMessage.model_validate(msg_json)
+            except pydantic.ValidationError as e:
+                logger.error("Invalid JSON-RPC message: {error}", error=e)
+                await self._send_msg(
+                    JSONRPCErrorResponseNullableID(
+                        id=None,
+                        error=JSONRPCErrorObject(
+                            code=ErrorCodes.INVALID_REQUEST,
+                            message="Invalid request",
+                        ),
+                    )
+                )
+                continue
+
+            if generic_msg.is_response():
+                # for responses, we skip the method check
+                try:
+                    msg = JSONRPCInMessageAdapter.validate_python(msg_json)
+                except pydantic.ValidationError as e:
+                    logger.error("Invalid JSON-RPC response: {error}", error=e)
+                    await self._send_msg(
+                        JSONRPCErrorResponseNullableID(
+                            id=None,
+                            error=JSONRPCErrorObject(
+                                code=ErrorCodes.INVALID_REQUEST,
+                                message="Invalid response",
+                            ),
+                        )
+                    )
+                    continue  # ignore invalid json-rpc responses
+
+                if not isinstance(msg, (JSONRPCSuccessResponse, JSONRPCErrorResponse)):
+                    logger.error(
+                        "Invalid JSON-RPC response message: {msg}",
+                        msg=msg_json,
+                    )
+                    continue  # ignore invalid response messages
+
+                task = asyncio.create_task(self._dispatch_msg(msg))
+                self._dispatch_tasks.add(task)
+                task.add_done_callback(self._dispatch_task_done)
+                continue
+
+            if not generic_msg.method_is_inbound():
+                logger.error(
+                    "Unexpected JSON-RPC method received: {method}",
+                    method=generic_msg.method,
+                )
+                if generic_msg.id is not None:
+                    resp = JSONRPCErrorResponse(
+                        id=generic_msg.id,
+                        error=JSONRPCErrorObject(
+                            code=ErrorCodes.METHOD_NOT_FOUND,
+                            message=f"Unexpected method received: {generic_msg.method}",
+                        ),
+                    )
+                    await self._send_msg(resp)
+                continue  # ignore unexpected outbound methods
+
+            try:
+                msg = JSONRPCInMessageAdapter.validate_python(msg_json)
+            except pydantic.ValidationError as e:
+                logger.error("Invalid JSON-RPC inbound message: {error}", error=e)
+                if generic_msg.id is not None:
+                    resp = JSONRPCErrorResponse(
+                        id=generic_msg.id,
+                        error=JSONRPCErrorObject(
+                            code=ErrorCodes.INVALID_PARAMS,
+                            message=f"Invalid parameters for method `{generic_msg.method}`",
+                        ),
+                    )
+                    await self._send_msg(resp)
+                continue  # ignore invalid inbound messages
+
+            task = asyncio.create_task(self._dispatch_msg(msg))
+            self._dispatch_tasks.add(task)
+            task.add_done_callback(self._dispatch_task_done)
+
+    async def _shutdown(self) -> None:
+        # Cancel dispatch tasks FIRST, before resolving pending requests.
+        # A concurrent _dispatch_msg could pop an entry from
+        # _pending_requests mid-iteration of the resolve loop below,
+        # causing dict-mutation-during-iteration or double-resolution.
+        if self._dispatch_tasks:
+            for task in self._dispatch_tasks:
+                task.cancel()
+            await asyncio.gather(*self._dispatch_tasks, return_exceptions=True)
+            self._dispatch_tasks.clear()
+
+        for request in self._pending_requests.values():
+            if request.resolved:
+                continue
+            match request:
+                case ApprovalRequest():
+                    if request.source_kind == "foreground_turn":
+                        request.resolve("reject")
+                        if self._approval_runtime is not None:
+                            self._approval_runtime.resolve(request.id, "reject")
+                case ToolCallRequest():
+                    request.resolve(
+                        ToolError(
+                            message="Wire connection closed before tool result was received.",
+                            brief="Wire closed",
+                        )
+                    )
+                case QuestionRequest():
+                    request.resolve({})
+                case HookRequest():
+                    request.resolve("allow")
+        self._pending_requests.clear()
+
+        if self._cancel_event is not None:
+            self._cancel_event.set()
+            self._cancel_event = None
+
+        self._write_queue.shutdown()
+        if self._write_task is not None:
+            with contextlib.suppress(asyncio.CancelledError):
+                await self._write_task
+
+        if self._followup_task is not None:
+            self._followup_task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await self._followup_task
+            self._followup_task = None
+
+        if self._root_hub_task is not None:
+            self._root_hub_task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await self._root_hub_task
+            self._root_hub_task = None
+        if (
+            isinstance(self._soul, KimoSoul)
+            and self._root_hub_queue is not None
+            and self._soul.runtime.root_wire_hub is not None
+        ):
+            self._soul.runtime.root_wire_hub.unsubscribe(self._root_hub_queue)
+            self._root_hub_queue = None
+
+        # Dispatch tasks were already cancelled and gathered at the top of
+        # this method, before resolving pending requests.
+
+        if self._writer is not None:
+            self._writer.close()
+            with contextlib.suppress(Exception):
+                await self._writer.wait_closed()
+            self._writer = None
+
+        self._reader = None
+        self._initialized = False
+
+    def _dispatch_task_done(self, task: asyncio.Task[None]) -> None:
+        """Log a failed dispatch and drop the finished task from the set.
+
+        The set has to hold a task until it is done, so that _shutdown can
+        cancel and gather it. Keeping the finished ones forever instead grew
+        the set with every message the session ever received.
+        """
+        self._dispatch_tasks.discard(task)
+        if task.cancelled():
+            return
+        error = task.exception()
+        if error is not None:
+            logger.error("Wire dispatch failed: {error}", error=error)
+
+    async def _dispatch_msg(self, msg: JSONRPCInMessage) -> None:
+        resp: JSONRPCSuccessResponse | JSONRPCErrorResponse | None = None
+        try:
+            match msg:
+                case JSONRPCInitializeMessage():
+                    resp = await self._handle_initialize(msg)
+                case JSONRPCPromptMessage():
+                    resp = await self._handle_prompt(msg)
+                case JSONRPCReplayMessage():
+                    resp = await self._handle_replay(msg)
+                case JSONRPCSteerMessage():
+                    resp = await self._handle_steer(msg)
+                case JSONRPCSetPlanModeMessage():
+                    resp = await self._handle_set_plan_mode(msg)
+                case JSONRPCSetYoloMessage():
+                    resp = await self._handle_set_yolo(msg)
+                case JSONRPCSetCompactionRatioMessage():
+                    resp = await self._handle_set_compaction_ratio(msg)
+                case JSONRPCCancelMessage():
+                    resp = await self._handle_cancel(msg)
+                case JSONRPCSuccessResponse() | JSONRPCErrorResponse():
+                    await self._handle_response(msg)
+
+            if resp is not None:
+                await self._send_msg(resp)
+                if isinstance(msg, JSONRPCInitializeMessage) and isinstance(
+                    resp, JSONRPCSuccessResponse
+                ):
+                    for request in self._pending_approval_requests():
+                        await self._request_approval(request)
+                    # Same for questions: the client re-renders the history on
+                    # every connect, and only the ones still pending here can
+                    # still be answered.
+                    for request in self._pending_question_requests():
+                        await self._request_question(request)
+        except Exception:
+            logger.exception("Unexpected error dispatching JSONRPC message:")
+            raise
+
+    async def _send_msg(self, msg: JSONRPCOutMessage) -> None:
+        try:
+            await self._write_queue.put(msg)
+        except QueueShutDown:
+            logger.error("Send queue shut down; dropping message: {msg}", msg=msg)
+
+    @property
+    def _is_streaming(self) -> bool:
+        return self._cancel_event is not None
+
+    def _waiting_on_background(self) -> bool:
+        """True when the running turn is only parked in a blocking wait on
+        background task(s) (TaskOutput block=true) — interruptible without
+        losing substantive work."""
+        if self._cancel_event is None:
+            return False
+        runtime = self._soul.runtime if isinstance(self._soul, KimoSoul) else None
+        return runtime is not None and runtime.background_tasks.has_blocking_wait
+
+    async def _handle_initialize(
+        self, msg: JSONRPCInitializeMessage
+    ) -> JSONRPCSuccessResponse | JSONRPCErrorResponse:
+        if self._is_streaming and (msg.params.external_tools or msg.params.hooks):
+            return JSONRPCErrorResponse(
+                id=msg.id,
+                error=JSONRPCErrorObject(
+                    code=ErrorCodes.INVALID_STATE,
+                    message=(
+                        "Cannot register external tools or hooks while an agent turn "
+                        "is already in progress"
+                    ),
+                ),
+            )
+
+        accepted: list[str] = []
+        rejected: list[dict[str, str]] = []
+        toolset = None
+        if isinstance(self._soul, KimoSoul) and isinstance(self._soul.agent.toolset, KimoToolset):
+            toolset = self._soul.agent.toolset
+
+        if toolset and msg.params.external_tools:
+            for tool in msg.params.external_tools:
+                existing = toolset.find(tool.name)
+                if existing is not None and not isinstance(existing, WireExternalTool):
+                    rejected.append({"name": tool.name, "reason": "conflicts with builtin tool"})
+                    continue
+                ok, reason = toolset.register_external_tool(
+                    tool.name,
+                    tool.description,
+                    tool.parameters,
+                )
+                if ok:
+                    accepted.append(tool.name)
+                else:
+                    rejected.append({"name": tool.name, "reason": reason or "invalid schema"})
+
+        slash_commands: list[JsonType] = []
+        for cmd in self._soul.available_slash_commands:
+            slash_commands.append(
+                cast(
+                    JsonType,
+                    {"name": cmd.name, "description": cmd.description, "aliases": cmd.aliases},
+                )
+            )
+
+        from kimo_cli.constant import NAME, VERSION
+        from kimo_cli.hooks.config import HOOK_EVENT_TYPES
+        from kimo_cli.hooks.engine import WireHookHandle, WireHookSubscription
+        from kimo_cli.soul import wire_send
+        from kimo_cli.wire.protocol import WIRE_PROTOCOL_VERSION
+        from kimo_cli.wire.types import HookResolved, HookTriggered
+
+        # Hook engine setup — register wire subscriptions and callbacks
+
+        hook_engine = self._soul.hook_engine
+
+        if msg.params.hooks:
+            wire_subs: list[WireHookSubscription] = []
+            for wh in msg.params.hooks:
+                if wh.event not in HOOK_EVENT_TYPES:
+                    logger.warning("Ignoring unknown hook event from client: {}", wh.event)
+                    continue
+                wire_subs.append(
+                    WireHookSubscription(
+                        id=wh.id,
+                        event=wh.event,
+                        matcher=wh.matcher,
+                        timeout=wh.timeout,
+                    )
+                )
+            if wire_subs:
+                hook_engine.add_wire_subscriptions(wire_subs)
+                logger.info("Registered {} wire hook subscriptions from client", len(wire_subs))
+
+        def _on_triggered(event: str, target: str, count: int) -> None:
+            wire_send(HookTriggered(event=event, target=target, hook_count=count))
+
+        def _on_resolved(
+            event: str,
+            target: str,
+            action: str,
+            reason: str,
+            duration_ms: int,
+        ) -> None:
+            wire_send(
+                HookResolved(
+                    event=event,
+                    target=target,
+                    action=cast(Literal["allow", "block"], action),
+                    reason=reason,
+                    duration_ms=duration_ms,
+                )
+            )
+
+        async def _on_wire_hook(handle: WireHookHandle) -> None:
+            """Send HookRequest to client, wire response back to handle."""
+            request = HookRequest(
+                id=handle.id,
+                subscription_id=handle.subscription_id,
+                event=handle.event,
+                target=handle.target,
+                input_data=handle.input_data,
+            )
+            self._pending_requests[handle.id] = request
+            await self._send_msg(JSONRPCRequestMessage(id=handle.id, params=request))
+            # Wait for client response (resolved via _handle_response)
+            action, reason = await request.wait()
+            handle.resolve(action, reason)
+
+        hook_engine.set_callbacks(
+            on_triggered=_on_triggered,
+            on_resolved=_on_resolved,
+            on_wire_hook=_on_wire_hook,
+        )
+
+        hooks_info: dict[str, JsonType] = cast(
+            dict[str, JsonType],
+            {
+                "supported_events": HOOK_EVENT_TYPES,
+                "configured": hook_engine.summary,
+            },
+        )
+
+        result: dict[str, JsonType] = {
+            "protocol_version": WIRE_PROTOCOL_VERSION,
+            "server": cast(JsonType, {"name": NAME, "version": VERSION}),
+            "slash_commands": cast(JsonType, slash_commands),
+        }
+        if isinstance(self._soul, KimoSoul):
+            # Unlike plan mode, YOLO can be set before any wire message exists
+            # (the --yolo flag) and is not otherwise replayed, so a client
+            # rendering it as a toggle has to be told where it starts.
+            approval = self._soul.runtime.approval
+            result["yolo"] = approval.is_yolo_flag()
+            result["afk"] = approval.is_afk()
+        pending_approvals = self._pending_approval_requests()
+        result["approval_requests"] = cast(
+            JsonType,
+            [
+                {
+                    "type": "ApprovalRequest",
+                    "payload": request.model_dump(mode="json"),
+                }
+                for request in pending_approvals
+            ],
+        )
+        result["question_requests"] = cast(
+            JsonType,
+            [
+                {
+                    "type": "QuestionRequest",
+                    "payload": request.model_dump(mode="json"),
+                }
+                for request in self._pending_question_requests()
+            ],
+        )
+        if accepted or rejected:
+            result["external_tools"] = cast(
+                JsonType,
+                {
+                    "accepted": accepted,
+                    "rejected": rejected,
+                },
+            )
+
+        if hooks_info:
+            result["hooks"] = cast(JsonType, hooks_info)
+
+        self._apply_wire_client_info(msg.params.client)
+        self._track_session_started(msg.params.client)
+
+        if msg.params.capabilities is not None:
+            self._client_supports_question = msg.params.capabilities.supports_question
+            self._client_supports_plan_mode = msg.params.capabilities.supports_plan_mode
+
+        if toolset is not None:
+            self._sync_ask_user_tool_visibility(toolset)
+            self._sync_plan_mode_tool_visibility(toolset)
+
+        self._initialized = True
+
+        result["capabilities"] = cast(
+            JsonType,
+            {"supports_question": True},
+        )
+
+        return JSONRPCSuccessResponse(
+            id=msg.id,
+            result=result,
+        )
+
+    def _pending_approval_requests(self) -> list[ApprovalRequest]:
+        if self._approval_runtime is None:
+            return []
+        return [
+            ApprovalRequest(
+                id=request.id,
+                tool_call_id=request.tool_call_id,
+                sender=request.sender,
+                action=request.action,
+                description=request.description,
+                display=request.display,
+                source_kind=request.source.kind,
+                source_id=request.source.id,
+                agent_id=request.source.agent_id,
+                subagent_type=request.source.subagent_type,
+            )
+            for request in self._approval_runtime.list_pending()
+        ]
+
+    def _pending_question_requests(self) -> list[QuestionRequest]:
+        """The question requests that are still waiting for an answer.
+
+        A reconnecting client re-renders the session history, and that history
+        holds questions whose turn died together with the worker that asked
+        them. Such a question can never be answered: the answer arrives for a
+        request this server does not have, and it is dropped without a word —
+        the user answers, sees nothing happen, reloads, and meets the same
+        question again. The client needs this list to tell a live question
+        from a dead one.
+        """
+        return [
+            request
+            for request in self._pending_requests.values()
+            if isinstance(request, QuestionRequest) and not request.resolved
+        ]
+
+    def _sync_ask_user_tool_visibility(self, toolset: KimoToolset) -> None:
+        """Hide or unhide the AskUserQuestion tool based on client capabilities."""
+        from kimo_cli.tools.ask_user import NAME as ASK_USER_TOOL_NAME
+
+        all_toolsets = [toolset]
+
+        if self._client_supports_question:
+            for ts in all_toolsets:
+                ts.unhide(ASK_USER_TOOL_NAME)
+        else:
+            for ts in all_toolsets:
+                ts.hide(ASK_USER_TOOL_NAME)
+            logger.info(
+                "Hid {tool} tool: client does not support questions",
+                tool=ASK_USER_TOOL_NAME,
+            )
+
+    def _sync_plan_mode_tool_visibility(self, toolset: KimoToolset) -> None:
+        """Hide or unhide plan mode tools based on client capabilities."""
+        from kimo_cli.tools.plan import NAME as EXIT_PLAN_MODE_TOOL_NAME
+        from kimo_cli.tools.plan.enter import NAME as ENTER_PLAN_MODE_TOOL_NAME
+
+        plan_tool_names = [ENTER_PLAN_MODE_TOOL_NAME, EXIT_PLAN_MODE_TOOL_NAME]
+
+        all_toolsets = [toolset]
+
+        if self._client_supports_plan_mode:
+            for ts in all_toolsets:
+                for name in plan_tool_names:
+                    ts.unhide(name)
+        else:
+            for ts in all_toolsets:
+                for name in plan_tool_names:
+                    ts.hide(name)
+            logger.info(
+                "Hide plan mode tools: client does not support plan mode",
+            )
+
+    def _apply_wire_client_info(self, client: ClientInfo | None) -> None:
+        if client is not None:
+            from kimo_cli.telemetry import set_client_info
+
+            set_client_info(name=client.name, version=client.version)
+
+    def _track_session_started(self, client: ClientInfo | None) -> None:
+        if not isinstance(self._soul, KimoSoul):
+            return
+
+        from kimo_cli.telemetry import track_session_started_once
+
+        track_session_started_once(
+            ui_mode="wire",
+            resumed=self._soul.runtime.resumed,
+            client_name=client.name if client is not None else None,
+            client_version=client.version if client is not None else None,
+        )
+
+    async def _handle_prompt(
+        self, msg: JSONRPCPromptMessage
+    ) -> JSONRPCSuccessResponse | JSONRPCErrorResponse:
+        if self._is_streaming:
+            if not self._waiting_on_background():
+                # TODO: support queueing multiple inputs
+                return JSONRPCErrorResponse(
+                    id=msg.id,
+                    error=JSONRPCErrorObject(
+                        code=ErrorCodes.INVALID_STATE,
+                        message="An agent turn is already in progress",
+                    ),
+                )
+            # The turn is parked in a blocking wait on background task(s) —
+            # no substantive work is happening. Replace it with this prompt
+            # instead of refusing: cancel the parked turn, wait for it to
+            # unwind, then run the new prompt as its own turn. The background
+            # tasks themselves are separate processes and keep running.
+            self._cancel_event.set()
+            for _ in range(1200):  # ~60s cap, generous for teardown
+                if self._cancel_event is None:
+                    break
+                await asyncio.sleep(0.05)
+            if self._cancel_event is not None:
+                return JSONRPCErrorResponse(
+                    id=msg.id,
+                    error=JSONRPCErrorObject(
+                        code=ErrorCodes.INVALID_STATE,
+                        message="The current turn could not be interrupted; try again",
+                    ),
+                )
+            # Re-check: another prompt may have slipped in during the unwind
+            # and started the replacement turn already.
+            if self._is_streaming:
+                return JSONRPCErrorResponse(
+                    id=msg.id,
+                    error=JSONRPCErrorObject(
+                        code=ErrorCodes.INVALID_STATE,
+                        message="An agent turn is already in progress",
+                    ),
+                )
+
+        if not self._initialized:
+            self._track_session_started(None)
+
+        # The user has driven a turn on this connection, so a later background
+        # completion may speak up on its own. Before this point it must not:
+        # reopening a session with old notifications pending would have the
+        # agent start talking about them unprompted.
+        self._followup_armed = True
+
+        self._cancel_event = asyncio.Event()
+        runtime = self._soul.runtime if isinstance(self._soul, KimoSoul) else None
+        try:
+            await run_soul(
+                self._soul,
+                msg.params.user_input,
+                self._stream_wire_messages,
+                self._cancel_event,
+                runtime.session.wire_file if runtime else None,
+                runtime,
+            )
+            return JSONRPCSuccessResponse(
+                id=msg.id,
+                result={"status": Statuses.FINISHED},
+            )
+        except LLMNotSet:
+            return JSONRPCErrorResponse(
+                id=msg.id,
+                error=JSONRPCErrorObject(code=ErrorCodes.LLM_NOT_SET, message="LLM is not set"),
+            )
+        except LLMNotSupported as e:
+            return JSONRPCErrorResponse(
+                id=msg.id,
+                error=JSONRPCErrorObject(code=ErrorCodes.LLM_NOT_SUPPORTED, message=str(e)),
+            )
+        except APIStatusError as e:
+            if e.status_code == 401 and _is_oauth_session(runtime):
+                return JSONRPCErrorResponse(
+                    id=msg.id,
+                    error=JSONRPCErrorObject(
+                        code=ErrorCodes.AUTH_EXPIRED,
+                        message=(
+                            "Authentication failed. Your login session may have expired. "
+                            'Please run "/login" to sign in again.'
+                        ),
+                    ),
+                )
+            return JSONRPCErrorResponse(
+                id=msg.id,
+                error=JSONRPCErrorObject(code=ErrorCodes.CHAT_PROVIDER_ERROR, message=str(e)),
+            )
+        except ChatProviderError as e:
+            return JSONRPCErrorResponse(
+                id=msg.id,
+                error=JSONRPCErrorObject(code=ErrorCodes.CHAT_PROVIDER_ERROR, message=str(e)),
+            )
+        except MaxStepsReached as e:
+            return JSONRPCSuccessResponse(
+                id=msg.id,
+                result={"status": Statuses.MAX_STEPS_REACHED, "steps": e.n_steps},
+            )
+        except RunCancelled:
+            return JSONRPCSuccessResponse(
+                id=msg.id,
+                result={"status": Statuses.CANCELLED},
+            )
+        except Exception as e:
+            logger.exception("Unexpected error in prompt handler")
+            return JSONRPCErrorResponse(
+                id=msg.id,
+                error=JSONRPCErrorObject(
+                    code=ErrorCodes.INTERNAL_ERROR,
+                    message=f"{type(e).__name__}: {e}",
+                ),
+            )
+        finally:
+            # Clean up any remaining pending requests from this turn.
+            # After run_soul() returns, the soul and all subagents are done,
+            # so any unresolved requests are stale.
+            stale_ids = [k for k, v in self._pending_requests.items() if not v.resolved]
+            for msg_id in stale_ids:
+                request = self._pending_requests[msg_id]
+                match request:
+                    case ApprovalRequest():
+                        if request.source_kind == "foreground_turn":
+                            self._pending_requests.pop(msg_id, None)
+                            request.resolve("reject")
+                            if self._approval_runtime is not None:
+                                self._approval_runtime.resolve(request.id, "reject")
+                    case ToolCallRequest():
+                        self._pending_requests.pop(msg_id, None)
+                        request.resolve(
+                            ToolError(
+                                message="Agent turn ended before tool result was received.",
+                                brief="Turn ended",
+                            )
+                        )
+                    case QuestionRequest():
+                        self._pending_requests.pop(msg_id, None)
+                        request.resolve({})
+                    case HookRequest():
+                        self._pending_requests.pop(msg_id, None)
+                        request.resolve("allow")
+                    case _:
+                        pass
+            self._cancel_event = None
+
+    async def _handle_steer(
+        self, msg: JSONRPCSteerMessage
+    ) -> JSONRPCSuccessResponse | JSONRPCErrorResponse:
+        if not isinstance(self._soul, KimoSoul) or not self._is_streaming:
+            return JSONRPCErrorResponse(
+                id=msg.id,
+                error=JSONRPCErrorObject(
+                    code=ErrorCodes.INVALID_STATE,
+                    message="No agent turn is in progress",
+                ),
+            )
+
+        self._soul.steer(msg.params.user_input)
+        return JSONRPCSuccessResponse(
+            id=msg.id,
+            result={"status": Statuses.STEERED},
+        )
+
+    async def _handle_set_plan_mode(
+        self, msg: JSONRPCSetPlanModeMessage
+    ) -> JSONRPCSuccessResponse | JSONRPCErrorResponse:
+        if not isinstance(self._soul, KimoSoul):
+            return JSONRPCErrorResponse(
+                id=msg.id,
+                error=JSONRPCErrorObject(
+                    code=ErrorCodes.INVALID_STATE,
+                    message="Plan mode is not supported",
+                ),
+            )
+
+        new_state = await self._soul.set_plan_mode_from_manual(msg.params.enabled)
+
+        status = StatusUpdate(plan_mode=new_state)
+        await self._send_msg(JSONRPCEventMessage(params=status))
+        # Persist to wire file so replay reconstructs plan mode state
+        await self._soul.wire_file.append_message(status)
+        return JSONRPCSuccessResponse(
+            id=msg.id,
+            result={"status": "ok", "plan_mode": new_state},
+        )
+
+    async def _handle_set_yolo(
+        self, msg: JSONRPCSetYoloMessage
+    ) -> JSONRPCSuccessResponse | JSONRPCErrorResponse:
+        """Turn auto-approval on or off for this session.
+
+        Deliberately a set rather than a toggle: ``/yolo`` in the terminal and
+        a second client can both move this, and a toggle would invert whatever
+        the client last happened to see.
+        """
+        if not isinstance(self._soul, KimoSoul):
+            return JSONRPCErrorResponse(
+                id=msg.id,
+                error=JSONRPCErrorObject(
+                    code=ErrorCodes.INVALID_STATE,
+                    message="YOLO mode is not supported",
+                ),
+            )
+
+        approval = self._soul.runtime.approval
+        approval.set_yolo(msg.params.enabled)
+        new_state = approval.is_yolo_flag()
+
+        status = StatusUpdate(yolo=new_state)
+        await self._send_msg(JSONRPCEventMessage(params=status))
+        # Persist so a replay reconstructs the toggle's position.
+        await self._soul.wire_file.append_message(status)
+        return JSONRPCSuccessResponse(
+            id=msg.id,
+            # `afk` rides along because it also auto-approves: a client showing
+            # "approvals are off" needs to know when YOLO is not the reason.
+            result={"status": "ok", "yolo": new_state, "afk": approval.is_afk()},
+        )
+
+    async def _handle_set_compaction_ratio(
+        self, msg: JSONRPCSetCompactionRatioMessage
+    ) -> JSONRPCSuccessResponse | JSONRPCErrorResponse:
+        """Retune auto-compaction on a live worker, without a restart.
+
+        `should_auto_compact` reads the ratio from this config object on every
+        step, so mutating it in place is enough for the next step to honour the
+        new value — including mid-turn, while the agent is working.
+        """
+        if not isinstance(self._soul, KimoSoul):
+            return JSONRPCErrorResponse(
+                id=msg.id,
+                error=JSONRPCErrorObject(
+                    code=ErrorCodes.INVALID_STATE,
+                    message="Compaction ratio is not supported",
+                ),
+            )
+
+        loop_control = self._soul.runtime.config.loop_control
+        loop_control.compaction_trigger_ratio = msg.params.ratio
+        logger.info("Compaction trigger ratio set to {ratio}", ratio=msg.params.ratio)
+        return JSONRPCSuccessResponse(
+            id=msg.id,
+            result={"status": "ok", "compaction_trigger_ratio": msg.params.ratio},
+        )
+
+    async def _handle_replay(
+        self, msg: JSONRPCReplayMessage
+    ) -> JSONRPCSuccessResponse | JSONRPCErrorResponse:
+        if self._is_streaming:
+            return JSONRPCErrorResponse(
+                id=msg.id,
+                error=JSONRPCErrorObject(
+                    code=ErrorCodes.INVALID_STATE, message="An agent turn is already in progress"
+                ),
+            )
+
+        wire_file = self._soul.wire_file if isinstance(self._soul, KimoSoul) else None
+
+        self._cancel_event = asyncio.Event()
+        events = 0
+        requests = 0
+        try:
+            if wire_file is None or not wire_file.path.exists():
+                return JSONRPCSuccessResponse(
+                    id=msg.id,
+                    result={"status": Statuses.FINISHED, "events": 0, "requests": 0},
+                )
+
+            async for record in wire_file.iter_records():
+                if self._cancel_event.is_set():
+                    return JSONRPCSuccessResponse(
+                        id=msg.id,
+                        result={
+                            "status": Statuses.CANCELLED,
+                            "events": events,
+                            "requests": requests,
+                        },
+                    )
+
+                try:
+                    wire_msg = record.to_wire_message()
+                except Exception:
+                    logger.exception(
+                        "Failed to deserialize wire record for replay: {file}",
+                        file=wire_file.path,
+                    )
+                    continue
+
+                if is_request(wire_msg):
+                    await self._send_msg(JSONRPCRequestMessage(id=wire_msg.id, params=wire_msg))
+                    requests += 1
+                elif is_event(wire_msg):
+                    await self._send_msg(
+                        JSONRPCEventMessage(
+                            params=wire_msg,
+                            timestamp=record.timestamp,
+                        )
+                    )
+                    events += 1
+                else:
+                    # Not reachable for valid WireMessage, but keep a guard for corrupted data.
+                    logger.warning(
+                        "Skipping non-wire message during replay: {msg}",
+                        msg=wire_msg,
+                    )
+
+                await asyncio.sleep(0)  # yield control for cancel handling
+
+            if self._cancel_event.is_set():
+                return JSONRPCSuccessResponse(
+                    id=msg.id,
+                    result={
+                        "status": Statuses.CANCELLED,
+                        "events": events,
+                        "requests": requests,
+                    },
+                )
+
+            return JSONRPCSuccessResponse(
+                id=msg.id,
+                result={"status": Statuses.FINISHED, "events": events, "requests": requests},
+            )
+        except Exception:
+            logger.exception("Replay failed:")
+            return JSONRPCErrorResponse(
+                id=msg.id,
+                error=JSONRPCErrorObject(
+                    code=ErrorCodes.INTERNAL_ERROR,
+                    message="Replay failed",
+                ),
+            )
+        finally:
+            self._cancel_event = None
+
+    async def _handle_cancel(
+        self, msg: JSONRPCCancelMessage
+    ) -> JSONRPCSuccessResponse | JSONRPCErrorResponse:
+        if not self._is_streaming:
+            return JSONRPCErrorResponse(
+                id=msg.id,
+                error=JSONRPCErrorObject(
+                    code=ErrorCodes.INVALID_STATE, message="No agent turn is in progress"
+                ),
+            )
+
+        assert self._cancel_event is not None
+        self._cancel_event.set()
+        # Disarm auto-follow-up. Without this, the moment a background task
+        # finishes after the user hit Stop, _background_followup_loop spawns a
+        # brand-new autonomous turn (see _run_followup_turn) and the user sees
+        # "the agent kept going" right after pressing Stop. The flag is
+        # re-armed by the next user prompt in _handle_prompt.
+        self._followup_armed = False
+        # Kill any running background bash tasks. The user asked the agent to
+        # stop; a task that keeps running (Playwright crawler, long shell,
+        # subagent) is exactly the "still going" complaint Stop is supposed
+        # to silence. kill_all_active is sync and safe on a non-KimoSoul
+        # soul: the runtime attribute exists on KimoSoul only, and every
+        # current code path that reaches here goes through a KimoSoul.
+        # See src/kimo_cli/ui/print/__init__.py:286 for the established
+        # calling pattern.
+        if isinstance(self._soul, KimoSoul):
+            killed = self._soul.runtime.background_tasks.kill_all_active(reason="user_stop")
+            if killed:
+                logger.info(
+                    "Stop killed {n} background task(s): {ids}",
+                    n=len(killed),
+                    ids=killed,
+                )
+        return JSONRPCSuccessResponse(
+            id=msg.id,
+            result={},
+        )
+
+    async def _handle_response(self, msg: JSONRPCSuccessResponse | JSONRPCErrorResponse) -> None:
+        request = self._pending_requests.pop(msg.id, None)
+        if request is None:
+            logger.error("No pending request for response id={id}", id=msg.id)
+            return
+
+        match request:
+            case ApprovalRequest():
+                if isinstance(msg, JSONRPCErrorResponse):
+                    request.resolve("reject")
+                    if self._approval_runtime is not None:
+                        self._approval_runtime.resolve(request.id, "reject")
+                    return
+
+                try:
+                    result = ApprovalResponse.model_validate(msg.result)
+                except pydantic.ValidationError as e:
+                    logger.error(
+                        "Invalid response result for request id={id}: {error}",
+                        id=msg.id,
+                        error=e,
+                    )
+                    request.resolve("reject")
+                    if self._approval_runtime is not None:
+                        self._approval_runtime.resolve(request.id, "reject")
+                    return
+
+                if result.request_id != request.id:
+                    logger.warning(
+                        "Approval response id mismatch: request={request_id}, "
+                        "response={response_id}",
+                        request_id=request.id,
+                        response_id=result.request_id,
+                    )
+                request.resolve(result.response)
+                if self._approval_runtime is not None:
+                    self._approval_runtime.resolve(
+                        request.id, result.response, feedback=result.feedback
+                    )
+            case ToolCallRequest():
+                if isinstance(msg, JSONRPCErrorResponse):
+                    error = msg.error.message
+                    request.resolve(
+                        ToolError(
+                            message=error,
+                            brief="External tool error",
+                        )
+                    )
+                    return
+
+                try:
+                    tool_result = ToolResult.model_validate(msg.result)
+                except pydantic.ValidationError as e:
+                    logger.error(
+                        "Invalid tool result for request id={id}: {error}",
+                        id=msg.id,
+                        error=e,
+                    )
+                    request.resolve(
+                        ToolError(
+                            message="Invalid tool result payload from client.",
+                            brief="Invalid tool result",
+                        )
+                    )
+                    return
+                if tool_result.tool_call_id != request.id:
+                    logger.warning(
+                        "Tool result id mismatch: request={request_id}, result={result_id}",
+                        request_id=request.id,
+                        result_id=tool_result.tool_call_id,
+                    )
+                request.resolve(tool_result.return_value)
+            case QuestionRequest():
+                if isinstance(msg, JSONRPCErrorResponse):
+                    request.resolve({})
+                    return
+
+                try:
+                    result = QuestionResponse.model_validate(msg.result)
+                except pydantic.ValidationError as e:
+                    logger.error(
+                        "Invalid question response for request id={id}: {error}",
+                        id=msg.id,
+                        error=e,
+                    )
+                    request.resolve({})
+                    return
+
+                if result.request_id != request.id:
+                    logger.warning(
+                        "Question response id mismatch: request={request_id}, "
+                        "response={response_id}",
+                        request_id=request.id,
+                        response_id=result.request_id,
+                    )
+                request.resolve(result.answers)
+            case HookRequest():
+                if isinstance(msg, JSONRPCErrorResponse):
+                    request.resolve("allow")
+                    return
+
+                try:
+                    result = HookResponse.model_validate(msg.result)
+                except pydantic.ValidationError as e:
+                    logger.error(
+                        "Invalid hook response for request id={id}: {error}",
+                        id=msg.id,
+                        error=e,
+                    )
+                    request.resolve("allow")
+                    return
+
+                if result.request_id != request.id:
+                    logger.warning(
+                        "Hook response id mismatch: request={request_id}, response={response_id}",
+                        request_id=request.id,
+                        response_id=result.request_id,
+                    )
+                request.resolve(result.action, result.reason)
+
+    async def _stream_wire_messages(self, wire: Wire) -> None:
+        wire_ui = wire.ui_side(merge=False)
+        while True:
+            msg = await wire_ui.receive()
+            match msg:
+                case ApprovalRequest():
+                    await self._request_approval(msg)
+                case ToolCallRequest():
+                    await self._request_external_tool(msg)
+                case QuestionRequest():
+                    await self._request_question(msg)
+                case HookRequest():
+                    pass  # handled via hook engine callbacks
+                case _:
+                    await self._send_msg(JSONRPCEventMessage(method="event", params=msg))
+
+    async def _request_approval(self, request: ApprovalRequest) -> None:
+        msg_id = request.id  # just use the approval request id as message id
+        self._pending_requests[msg_id] = request
+        await self._send_msg(JSONRPCRequestMessage(id=msg_id, params=request))
+        # Do NOT await request.wait() here.  The approval future is awaited by
+        # the tool that created the request (inside the soul task).  Blocking the
+        # UI loop would prevent ALL subsequent Wire messages — from every
+        # concurrent subagent — from reaching stdout, causing a cascade deadlock
+        # when the approval response is lost (e.g. no WebSocket connected).
+
+    async def _request_external_tool(self, request: ToolCallRequest) -> None:
+        msg_id = request.id
+        self._pending_requests[msg_id] = request
+        await self._send_msg(JSONRPCRequestMessage(id=msg_id, params=request))
+        # Same rationale as _request_approval: do not block the UI loop.
+
+    async def _request_question(self, request: QuestionRequest) -> None:
+        if not self._client_supports_question:
+            # Client does not support interactive questions; signal the tool
+            # so it can tell the LLM to use an alternative approach.
+            request.set_exception(QuestionNotSupported())
+            return
+        msg_id = request.id
+        self._pending_requests[msg_id] = request
+        await self._send_msg(JSONRPCRequestMessage(id=msg_id, params=request))
+        # Same rationale as _request_approval: do not block the UI loop.

@@ -1,0 +1,397 @@
+"""Tests for the str_replace_file tool."""
+
+from __future__ import annotations
+
+import os
+from pathlib import Path
+from types import SimpleNamespace
+from typing import cast
+
+import pytest
+from kaos.path import KaosPath
+from pydantic import ValidationError
+
+from kimo_cli.soul.agent import Runtime
+from kimo_cli.soul.approval import Approval, ApprovalResult
+from kimo_cli.tools.file import managed_wiki
+from kimo_cli.tools.file.replace import Edit, Params, StrReplaceFile
+from kimo_cli.wiki.manager import WikiManager
+from kimo_cli.wire.types import DiffDisplayBlock
+
+
+class _AutoApproval:
+    async def request(self, *_args, **_kwargs):
+        return ApprovalResult(approved=True)
+
+
+def test_empty_old_string_is_rejected() -> None:
+    with pytest.raises(ValidationError, match="at least 1 character"):
+        Edit(old="", new="unexpected")
+
+
+async def test_replace_single_occurrence(
+    str_replace_file_tool: StrReplaceFile, temp_work_dir: KaosPath
+):
+    """Test replacing a single occurrence."""
+    file_path = temp_work_dir / "test.txt"
+    original_content = "Hello world! This is a test."
+    await file_path.write_text(original_content)
+
+    result = await str_replace_file_tool(
+        Params(path=str(file_path), edit=Edit(old="world", new="universe"))
+    )
+
+    assert not result.is_error
+    assert "successfully edited" in result.message
+    diff_block = next(block for block in result.display if block.type == "diff")
+    assert isinstance(diff_block, DiffDisplayBlock)
+    assert diff_block.path == str(file_path)
+    assert diff_block.old_text == original_content
+    assert diff_block.new_text == "Hello universe! This is a test."
+    assert await file_path.read_text() == "Hello universe! This is a test."
+
+
+async def test_replace_all_occurrences(
+    str_replace_file_tool: StrReplaceFile, temp_work_dir: KaosPath
+):
+    """Test replacing all occurrences."""
+    file_path = temp_work_dir / "test.txt"
+    original_content = "apple banana apple cherry apple"
+    await file_path.write_text(original_content)
+
+    result = await str_replace_file_tool(
+        Params(
+            path=str(file_path),
+            edit=Edit(old="apple", new="fruit", replace_all=True),
+        )
+    )
+
+    assert not result.is_error
+    assert "successfully edited" in result.message
+    assert await file_path.read_text() == "fruit banana fruit cherry fruit"
+
+
+async def test_replace_multiple_edits(
+    str_replace_file_tool: StrReplaceFile, temp_work_dir: KaosPath
+):
+    """Test applying multiple edits."""
+    file_path = temp_work_dir / "test.txt"
+    original_content = "Hello world! Goodbye world!"
+    await file_path.write_text(original_content)
+
+    result = await str_replace_file_tool(
+        Params(
+            path=str(file_path),
+            edit=[
+                Edit(old="Hello", new="Hi"),
+                Edit(old="Goodbye", new="See you"),
+            ],
+        )
+    )
+
+    assert not result.is_error
+    assert "successfully edited" in result.message
+    assert await file_path.read_text() == "Hi world! See you world!"
+
+
+async def test_replace_multiline_content(
+    str_replace_file_tool: StrReplaceFile, temp_work_dir: KaosPath
+):
+    """Test replacing multi-line content."""
+    file_path = temp_work_dir / "test.txt"
+    original_content = "Line 1\nLine 2\nLine 3\n"
+    await file_path.write_text(original_content)
+
+    result = await str_replace_file_tool(
+        Params(
+            path=str(file_path),
+            edit=Edit(old="Line 2\nLine 3", new="Modified line 2\nModified line 3"),
+        )
+    )
+
+    assert not result.is_error
+    assert "successfully edited" in result.message
+    assert await file_path.read_text() == "Line 1\nModified line 2\nModified line 3\n"
+
+
+async def test_replace_unicode_content(
+    str_replace_file_tool: StrReplaceFile, temp_work_dir: KaosPath
+):
+    """Test replacing unicode content."""
+    file_path = temp_work_dir / "test.txt"
+    original_content = "Hello 世界! café"
+    await file_path.write_text(original_content)
+
+    result = await str_replace_file_tool(
+        Params(path=str(file_path), edit=Edit(old="世界", new="地球"))
+    )
+
+    assert not result.is_error
+    assert "successfully edited" in result.message
+    assert await file_path.read_text() == "Hello 地球! café"
+
+
+async def test_replace_no_match(str_replace_file_tool: StrReplaceFile, temp_work_dir: KaosPath):
+    """Test replacing when the old string is not found."""
+    file_path = temp_work_dir / "test.txt"
+    original_content = "Hello world!"
+    await file_path.write_text(original_content)
+
+    result = await str_replace_file_tool(
+        Params(path=str(file_path), edit=Edit(old="notfound", new="replacement"))
+    )
+
+    assert result.is_error
+    assert "No replacements were made" in result.message
+    assert await file_path.read_text() == original_content  # Content unchanged
+
+
+async def test_replace_with_relative_path(
+    str_replace_file_tool: StrReplaceFile, temp_work_dir: KaosPath
+):
+    """Test replacing with a relative path inside the work directory."""
+    relative_dir = temp_work_dir / "relative" / "path"
+    await relative_dir.mkdir(parents=True, exist_ok=True)
+    file_path = relative_dir / "file.txt"
+    await file_path.write_text("old content")
+
+    result = await str_replace_file_tool(
+        Params(path="relative/path/file.txt", edit=Edit(old="old", new="new"))
+    )
+
+    assert not result.is_error
+    assert await file_path.read_text() == "new content"
+
+
+async def test_replace_outside_work_directory(
+    str_replace_file_tool: StrReplaceFile, outside_file: Path
+):
+    """Test replacing outside the working directory with an absolute path."""
+    outside_file.write_text("old content", encoding="utf-8")
+
+    result = await str_replace_file_tool(
+        Params(path=str(outside_file), edit=Edit(old="old", new="new"))
+    )
+
+    assert not result.is_error
+    assert outside_file.read_text(encoding="utf-8") == "new content"
+
+
+async def test_replace_outside_work_directory_with_prefix(
+    str_replace_file_tool: StrReplaceFile, temp_work_dir: KaosPath
+):
+    """Paths sharing the work dir prefix but outside should still be editable
+    with absolute paths."""
+    base = Path(str(temp_work_dir))
+    sneaky_dir = base.parent / f"{base.name}-sneaky"
+    sneaky_dir.mkdir(parents=True, exist_ok=True)
+    sneaky_file = sneaky_dir / "test.txt"
+    sneaky_file.write_text("content", encoding="utf-8")
+
+    result = await str_replace_file_tool(
+        Params(path=str(sneaky_file), edit=Edit(old="content", new="new"))
+    )
+
+    assert not result.is_error
+    assert sneaky_file.read_text() == "new"
+
+
+async def test_replace_nonexistent_file(
+    str_replace_file_tool: StrReplaceFile, temp_work_dir: KaosPath
+):
+    """Test replacing in a non-existent file."""
+    file_path = temp_work_dir / "nonexistent.txt"
+
+    result = await str_replace_file_tool(
+        Params(path=str(file_path), edit=Edit(old="old", new="new"))
+    )
+
+    assert result.is_error
+    assert "does not exist" in result.message
+
+
+async def test_replace_directory_instead_of_file(
+    str_replace_file_tool: StrReplaceFile, temp_work_dir: KaosPath
+):
+    """Test replacing in a directory instead of a file."""
+    dir_path = temp_work_dir / "directory"
+    await dir_path.mkdir()
+
+    result = await str_replace_file_tool(
+        Params(path=str(dir_path), edit=Edit(old="old", new="new"))
+    )
+
+    assert result.is_error
+    assert "is not a file" in result.message
+
+
+async def test_replace_mixed_multiple_edits(
+    str_replace_file_tool: StrReplaceFile, temp_work_dir: KaosPath
+):
+    """Test multiple edits with different replace_all settings."""
+    file_path = temp_work_dir / "test.txt"
+    original_content = "apple apple banana apple cherry"
+    await file_path.write_text(original_content)
+
+    result = await str_replace_file_tool(
+        Params(
+            path=str(file_path),
+            edit=[
+                Edit(old="apple", new="fruit", replace_all=False),  # Only first occurrence
+                Edit(
+                    old="banana", new="tasty", replace_all=True
+                ),  # All occurrences (though only one)
+            ],
+        )
+    )
+
+    assert not result.is_error
+    assert "successfully edited" in result.message
+    assert await file_path.read_text() == "fruit apple tasty apple cherry"
+
+
+async def test_replace_empty_strings(
+    str_replace_file_tool: StrReplaceFile, temp_work_dir: KaosPath
+):
+    """Test replacing with empty strings."""
+    file_path = temp_work_dir / "test.txt"
+    original_content = "Hello world!"
+    await file_path.write_text(original_content)
+
+    result = await str_replace_file_tool(
+        Params(path=str(file_path), edit=Edit(old="world", new=""))
+    )
+
+    assert not result.is_error
+    assert "successfully edited" in result.message
+    assert await file_path.read_text() == "Hello !"
+
+
+async def test_replace_file_cannot_mutate_managed_wiki(builtin_args, tmp_path: Path) -> None:
+    manager = WikiManager(tmp_path / "wiki", wal=False)
+    manager.layout.index.write_text("# Wiki Index\n", encoding="utf-8")
+    try:
+        runtime = SimpleNamespace(
+            builtin_args=builtin_args,
+            additional_dirs=[],
+            wiki=manager,
+        )
+        tool = StrReplaceFile(cast("Runtime", runtime), Approval(yolo=True))
+
+        result = await tool(
+            Params(path=str(manager.layout.index), edit=Edit(old="Wiki", new="Mutated"))
+        )
+
+        assert result.is_error
+        assert "Wiki tool" in result.message
+        assert "Mutated" not in manager.layout.index.read_text(encoding="utf-8")
+    finally:
+        manager.close()
+
+
+async def test_replace_file_rechecks_target_after_approval_symlink_swap(
+    builtin_args, tmp_path: Path
+) -> None:
+    manager = WikiManager(tmp_path / "wiki", wal=False)
+    manager.layout.index.write_text("old index", encoding="utf-8")
+    target = Path(str(builtin_args.KIMO_WORK_DIR)) / "target.txt"
+    target.write_text("old target", encoding="utf-8")
+
+    class SwapApproval:
+        async def request(self, *_args, **_kwargs):
+            replacement = target.with_name("replacement-link.txt")
+            replacement.symlink_to(manager.layout.index)
+            os.replace(replacement, target)
+            return ApprovalResult(approved=True)
+
+    try:
+        runtime = SimpleNamespace(builtin_args=builtin_args, additional_dirs=[], wiki=manager)
+        tool = StrReplaceFile(cast("Runtime", runtime), cast("Approval", SwapApproval()))
+
+        result = await tool(Params(path=str(target), edit=Edit(old="old", new="mutated")))
+
+        assert result.is_error
+        assert "Wiki tool" in result.message
+        assert manager.layout.index.read_text(encoding="utf-8") == "old index"
+    finally:
+        manager.close()
+
+
+async def test_replace_file_rechecks_target_after_approval_hardlink_swap(
+    builtin_args, tmp_path: Path
+) -> None:
+    manager = WikiManager(tmp_path / "wiki", wal=False)
+    manager.layout.index.write_text("old index", encoding="utf-8")
+    target = Path(str(builtin_args.KIMO_WORK_DIR)) / "target.txt"
+    target.write_text("old target", encoding="utf-8")
+
+    class SwapApproval:
+        async def request(self, *_args, **_kwargs):
+            replacement = target.with_name("replacement-hardlink.txt")
+            os.link(manager.layout.index, replacement)
+            os.replace(replacement, target)
+            return ApprovalResult(approved=True)
+
+    try:
+        runtime = SimpleNamespace(builtin_args=builtin_args, additional_dirs=[], wiki=manager)
+        tool = StrReplaceFile(cast("Runtime", runtime), cast("Approval", SwapApproval()))
+
+        result = await tool(Params(path=str(target), edit=Edit(old="old", new="mutated")))
+
+        assert result.is_error
+        assert "Wiki tool" in result.message
+        assert manager.layout.index.read_text(encoding="utf-8") == "old index"
+    finally:
+        manager.close()
+
+
+async def test_windows_replace_allows_regular_file_but_rejects_wiki_target(
+    builtin_args, tmp_path: Path, monkeypatch
+) -> None:
+    manager = WikiManager(tmp_path / "wiki", wal=False)
+    runtime = SimpleNamespace(builtin_args=builtin_args, additional_dirs=[], wiki=manager)
+    tool = StrReplaceFile(cast("Runtime", runtime), cast("Approval", _AutoApproval()))
+    normal = Path(str(builtin_args.KIMO_WORK_DIR)) / "normal.txt"
+    normal.write_text("old", encoding="utf-8")
+    manager.layout.index.write_text("old Wiki", encoding="utf-8")
+    monkeypatch.setattr(managed_wiki, "_is_windows", lambda: True)
+    try:
+        allowed = await tool(Params(path=str(normal), edit=Edit(old="old", new="new")))
+        blocked = await tool(
+            Params(path=str(manager.layout.index), edit=Edit(old="old", new="blocked"))
+        )
+
+        assert not allowed.is_error
+        assert normal.read_text(encoding="utf-8") == "new"
+        assert blocked.is_error and "Wiki tool" in blocked.message
+        assert "blocked" not in manager.layout.index.read_text(encoding="utf-8")
+    finally:
+        manager.close()
+
+
+async def test_nonlocal_replace_allows_regular_file_but_rejects_expressed_wiki_root(
+    builtin_args, tmp_path: Path, monkeypatch
+) -> None:
+    manager = WikiManager(tmp_path / "wiki", wal=False)
+    runtime = SimpleNamespace(builtin_args=builtin_args, additional_dirs=[], wiki=manager)
+    tool = StrReplaceFile(cast("Runtime", runtime), cast("Approval", _AutoApproval()))
+    normal = Path(str(builtin_args.KIMO_WORK_DIR)) / "normal-remote.txt"
+    normal.write_text("old", encoding="utf-8")
+    manager.layout.index.write_text("old Wiki", encoding="utf-8")
+
+    class RemoteKaos:
+        name = "ssh"
+
+    monkeypatch.setattr(managed_wiki, "get_current_kaos", lambda: RemoteKaos())
+    try:
+        allowed = await tool(Params(path=str(normal), edit=Edit(old="old", new="new")))
+        blocked = await tool(
+            Params(path=str(manager.layout.index), edit=Edit(old="old", new="blocked"))
+        )
+
+        assert not allowed.is_error
+        assert normal.read_text(encoding="utf-8") == "new"
+        assert blocked.is_error and "Wiki tool" in blocked.message
+        assert "blocked" not in manager.layout.index.read_text(encoding="utf-8")
+    finally:
+        manager.close()

@@ -1,0 +1,91 @@
+services:
+  gateway:
+    image: ghcr.io/goldenxingxing/kimo-agent-gateway:${KIMO_IMAGE_TAG:-latest}
+    pull_policy: if_not_present
+    build:
+      context: .
+      dockerfile: Dockerfile.gateway
+    container_name: kimo-gateway
+    restart: unless-stopped
+    ports:
+      - "${KIMO_WEB_PORT:-5494}:5494"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ${KIMO_SESSION_DATA_DIR:-./data/sessions}:/data/sessions
+      # Local UI plugins — drop .js files here, access at /plugins/<filename>
+      - ${UI_PLUGINS_DIR:-./plugins}:/app/src/kimo_cli/web/static/plugins
+    environment:
+      # LLM Configuration (at least one provider is required)
+      - KIMO_MODEL_MAX_CONTEXT_SIZE=${KIMO_MODEL_MAX_CONTEXT_SIZE:-}
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+      - OPENAI_BASE_URL=${OPENAI_BASE_URL:-https://api.openai.com/v1}
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
+      - ANTHROPIC_BASE_URL=${ANTHROPIC_BASE_URL:-https://api.anthropic.com}
+      - LLM_PROVIDER=${LLM_PROVIDER:-openai_legacy}
+      - LLM_THINKING=${LLM_THINKING:-false}
+      - LLM_TEMPERATURE=${LLM_TEMPERATURE:-0.7}
+
+      # Web Server Security
+      - KIMO_WEB_SESSION_TOKEN=${KIMO_WEB_SESSION_TOKEN}
+      - KIMO_WEB_ALLOWED_ORIGINS=${KIMO_WEB_ALLOWED_ORIGINS:-*}
+      - KIMO_WEB_ENFORCE_ORIGIN=${KIMO_WEB_ENFORCE_ORIGIN:-false}
+      - KIMO_WEB_RESTRICT_SENSITIVE_APIS=${KIMO_WEB_RESTRICT_SENSITIVE_APIS:-false}
+      - KIMO_WEB_MAX_PUBLIC_PATH_DEPTH=${KIMO_WEB_MAX_PUBLIC_PATH_DEPTH:-6}
+      - KIMO_WEB_LAN_ONLY=${KIMO_WEB_LAN_ONLY:-false}
+
+      # Container Orchestration
+      - DOCKER_NETWORK=kimo-agent-network
+      - SANDBOX_IMAGE=${SANDBOX_IMAGE:-ghcr.io/goldenxingxing/kimo-agent-sandbox:latest}
+      - SANDBOX_WORK_DIR=${SANDBOX_WORK_DIR:-/app}
+      - MAX_SESSION_CONTAINERS=${MAX_SESSION_CONTAINERS:-50}
+
+      # Session Container Resource Limits
+      - SANDBOX_CPU_LIMIT=${SANDBOX_CPU_LIMIT:-2}
+      - SANDBOX_MEMORY_LIMIT=${SANDBOX_MEMORY_LIMIT:-4g}
+      - SANDBOX_DISK_LIMIT=${SANDBOX_DISK_LIMIT:-10g}
+      - SANDBOX_PID_LIMIT=${SANDBOX_PID_LIMIT:-1000}
+      - SANDBOX_TIMEOUT_SECONDS=${SANDBOX_TIMEOUT_SECONDS:-86400}
+
+      # Feature Flags
+      - ENABLE_BROWSER=${ENABLE_BROWSER:-true}
+      - ENABLE_JUPYTER=${ENABLE_JUPYTER:-true}
+      - ENABLE_SHELL_SANDBOX=${ENABLE_SHELL_SANDBOX:-true}
+      - BLOCK_DANGEROUS_COMMANDS=${BLOCK_DANGEROUS_COMMANDS:-true}
+
+      # Container Mode
+      - KIMO_USE_CONTAINERS=true
+      - KIMO_SHARE_DIR=/data/sessions
+      # Host-side path for session data, forwarded so container.py can bind-mount
+      # the same directory into each sandbox container via the Docker socket.
+      #
+      # Must be ABSOLUTE. container.py passes this straight to `docker run -v
+      # <this>:/data/sessions`, and the docker CLI resolves a relative source
+      # against the *client's* cwd — which is /app inside this container, not
+      # the host. A relative value therefore mounts a different, empty
+      # directory into every sandbox: the worker silently cannot see the
+      # session and memory files the gateway writes. ${PWD} is substituted by
+      # Compose from the directory holding this file.
+      - KIMO_SESSION_DATA_DIR=${KIMO_SESSION_DATA_DIR:-${PWD}/data/sessions}
+
+      # Agent Output Directory (inside sandbox containers)
+      - KIMO_OUTPUT_DIR=${KIMO_OUTPUT_DIR:-/app/output}
+
+      # Custom Skills
+      - CUSTOM_SKILLS_HOST_PATH=${CUSTOM_SKILLS_HOST_PATH:-}
+
+      # HuggingFace Cache
+      - HF_CACHE_HOST_PATH=${HF_CACHE_HOST_PATH:-}
+    networks:
+      - kimo-agent-network
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:5494/healthz')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+networks:
+  kimo-agent-network:
+    driver: bridge
+    name: kimo-agent-network
+

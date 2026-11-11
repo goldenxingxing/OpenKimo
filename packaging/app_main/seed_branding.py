@@ -1,0 +1,208 @@
+"""Seed Web UI branding (logo / brand_name / version / …) from the bundle.
+
+The build step embeds a ``branding_seed`` block inside ``brand.json``
+(``Resources/`` on macOS, the install root on Windows). On every launch we
+reconcile per-field:
+
+* User-facing fields (``brand_name``, ``logo``, ``page_title``, ``favicon``)
+  are seeded only when the DB row is empty, so admin-panel customisations
+  survive upgrades.
+* Build-derived fields (``version``) are re-synced to the packaged value
+  every launch, so upgrading the app refreshes the displayed version and
+  installs that predate a field get it populated retroactively.
+
+Writes go straight to the ``branding`` key/value table in ``users.db`` via
+the stdlib ``sqlite3`` module. The previous approach imported the bundled
+``kimo_cli`` package for its CRUD helpers, which dragged kimo-cli's whole
+dependency chain into the tray process — any import failure there made the
+seed silently no-op (symptom: the web UI shows the upstream "Kimo Code"
+defaults instead of the packaged brand).
+"""
+
+from __future__ import annotations
+
+import base64
+import binascii
+import hashlib
+import json
+import logging
+import sqlite3
+from pathlib import Path
+
+from . import dotenv_io
+from .paths import AppPaths
+
+log = logging.getLogger(__name__)
+
+_BRANDING_FIELDS = ("brand_name", "version", "page_title", "logo", "favicon")
+
+# Build-derived fields the user cannot meaningfully customise via the admin
+# panel. We re-sync these to the packaged value on every launch so upgrading
+# the app updates the displayed version, and so installs that predate the
+# field (e.g. <= v0.1.5) get it populated retroactively.
+_BUILD_DERIVED_FIELDS = ("version",)
+_PACKAGED_ASSET_FIELDS = ("logo", "favicon")
+
+# Mirrors kimo_cli.web.db.database._CREATE_BRANDING_TABLE. Both sides use
+# CREATE TABLE IF NOT EXISTS, so whichever process touches users.db first
+# creates it and the other's DDL is a no-op.
+_CREATE_BRANDING_TABLE = """
+CREATE TABLE IF NOT EXISTS branding (
+    key   TEXT PRIMARY KEY,
+    value TEXT NOT NULL
+);
+"""
+
+
+def _db_path(p: AppPaths) -> Path:
+    """The users.db the web server will actually read.
+
+    Mirrors server._build_env: our sessions_dir default, unless the user's
+    .env overrides KIMO_SHARE_DIR (the .env layer wins there too).
+    """
+    share = ""
+    try:
+        share = (dotenv_io.read_env(p.env_file).get("KIMO_SHARE_DIR") or "").strip()
+    except Exception:
+        log.exception(".env unreadable; using default share dir")
+    root = Path(share) if share else p.sessions_dir
+    return root / "users.db"
+
+
+def _load_seed(p: AppPaths) -> dict[str, str] | None:
+    if not p.brand_json.exists():
+        return None
+    try:
+        data = json.loads(p.brand_json.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as e:
+        log.warning("brand.json unreadable: %s", e)
+        return None
+    seed = data.get("branding_seed")
+    if not isinstance(seed, dict):
+        return None
+    return {k: v for k, v in seed.items() if k in _BRANDING_FIELDS and v}
+
+
+def _load_legacy_asset_hashes(p: AppPaths) -> frozenset[str]:
+    try:
+        data = json.loads(p.brand_json.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return frozenset()
+    values = data.get("branding_legacy_asset_sha256")
+    if not isinstance(values, list):
+        return frozenset()
+    return frozenset(
+        value.lower()
+        for value in values
+        if isinstance(value, str)
+        and len(value) == 64
+        and all(char in "0123456789abcdefABCDEF" for char in value)
+    )
+
+
+def _data_url_sha256(value: str) -> str | None:
+    header, separator, payload = value.partition(",")
+    if not separator or not header.startswith("data:") or not header.endswith(";base64"):
+        return None
+    try:
+        decoded = base64.b64decode(payload, validate=True)
+    except (binascii.Error, ValueError):
+        log.warning("invalid packaged branding Data URL; preserving existing value")
+        return None
+    return hashlib.sha256(decoded).hexdigest()
+
+
+def _connect(db: Path) -> sqlite3.Connection:
+    db.parent.mkdir(parents=True, exist_ok=True)
+    conn = sqlite3.connect(str(db))
+    conn.execute(_CREATE_BRANDING_TABLE)
+    return conn
+
+
+def _upsert(conn: sqlite3.Connection, settings: dict[str, str]) -> None:
+    conn.executemany(
+        "INSERT INTO branding (key, value) VALUES (?, ?) "
+        "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+        list(settings.items()),
+    )
+
+
+def seed_if_needed(p: AppPaths) -> None:
+    """Idempotent seed; safe to call on every launch."""
+    seed = _load_seed(p)
+    if not seed:
+        log.warning("no usable branding_seed in %s; skipping", p.brand_json)
+        return
+    legacy_asset_hashes = _load_legacy_asset_hashes(p)
+
+    db = _db_path(p)
+    try:
+        conn = _connect(db)
+    except (sqlite3.Error, OSError):
+        # OSError too: _connect() does db.parent.mkdir(), which fails on a
+        # read-only volume or a bad KIMO_SHARE_DIR. This runs during launch,
+        # and the docstring promises it is safe to call every time.
+        log.exception("branding seed failed opening %s", db)
+        return
+    try:
+        existing = dict(conn.execute("SELECT key, value FROM branding").fetchall())
+        to_write: dict[str, str] = {}
+        for key, value in seed.items():
+            current = existing.get(key)
+            if key in _BUILD_DERIVED_FIELDS:
+                if current != value:
+                    to_write[key] = value
+            elif (
+                key in _PACKAGED_ASSET_FIELDS
+                and current
+                and current != value
+                and _data_url_sha256(current) in legacy_asset_hashes
+            ):
+                to_write[key] = value
+            elif not current:
+                to_write[key] = value
+        if not to_write:
+            return
+        _upsert(conn, to_write)
+        conn.commit()
+        log.info("seeded branding into %s (%s)", db, ", ".join(to_write))
+    except sqlite3.Error:
+        log.exception("branding seed failed (db=%s)", db)
+    finally:
+        conn.close()
+
+
+def reset_to_packaged(p: AppPaths) -> None:
+    """Wipe branding rows and re-apply the packaged seed (Settings button).
+
+    Refuses to run without a seed. The DELETE used to be unconditional and the
+    re-apply guarded by `if seed:`, so a missing, unreadable or
+    branding_seed-less brand.json turned "Reset Branding to Packaged Defaults"
+    into "delete all branding": every admin customisation gone, nothing put
+    back, and the button still reporting success. There is nothing to reset
+    *to* in that state, and doing nothing is the honest outcome.
+    """
+    seed = _load_seed(p)
+    if not seed:
+        log.warning(
+            "no usable branding_seed in %s; refusing to wipe branding with "
+            "nothing to restore", p.brand_json,
+        )
+        raise RuntimeError(
+            f"no packaged branding seed in {p.brand_json}; branding left unchanged"
+        )
+    db = _db_path(p)
+    try:
+        conn = _connect(db)
+    except (sqlite3.Error, OSError):
+        # OSError as well: _connect() creates the parent directory, so a
+        # read-only volume or an unwritable KIMO_SHARE_DIR fails here and used
+        # to propagate unlogged, past the one message that says what broke.
+        log.exception("branding reset failed opening %s", db)
+        raise
+    try:
+        conn.execute("DELETE FROM branding")
+        _upsert(conn, seed)
+        conn.commit()
+    finally:
+        conn.close()

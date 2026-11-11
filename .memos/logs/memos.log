@@ -1,0 +1,56 @@
+2026-08-19 11:47:10,450 | trace-id | path=None | env=prod | user_type=opensource | user_name=memos | memos.mem_reader.read_multi_modal.utils - WARNING - utils.py:142 - <module> - [FileContentParser] Failed to create text splitter: Missing required module - 'langchain_text_splitters'
+💡 Install command: pip install langchain_text_splitters==1.0.0
+💡 Install guide:   https://github.com/langchain-ai/langchain-text-splitters
+ will use simple splitter fallback
+2026-08-19 11:47:50,644 | trace-id | path=None | env=prod | user_type=opensource | user_name=memos | memos.mem_scheduler.schemas.task_schemas - INFO - task_schemas.py:81 - <module> - [TASK_SCHEMAS] Module imported. env_MEMSCHEDULER_STREAM_KEY_PREFIX=None, default_stream_prefix=scheduler:messages:stream:v2.0
+2026-08-19 11:47:50,651 | trace-id | path=None | env=prod | user_type=opensource | user_name=memos | memos.api.config - WARNING - config.py:207 - init - missing NACOS_SERVER_ADDR / AK / SK / DATA_ID
+2026-08-19 11:47:50,651 | trace-id | path=None | env=prod | user_type=opensource | user_name=memos | memos.api.config - INFO - config.py:181 - start_watch_if_enabled - NACOS_ENABLE_WATCH: False
+2026-08-19 11:49:56,029 | trace-id | path=None | env=prod | user_type=opensource | user_name=memos | memos.mem_reader.read_multi_modal.utils - WARNING - utils.py:142 - <module> - [FileContentParser] Failed to create text splitter: Missing required module - 'langchain_text_splitters'
+💡 Install command: pip install langchain_text_splitters==1.0.0
+💡 Install guide:   https://github.com/langchain-ai/langchain-text-splitters
+ will use simple splitter fallback
+2026-08-19 11:49:56,976 | trace-id | path=None | env=prod | user_type=opensource | user_name=memos | memos.mem_scheduler.schemas.task_schemas - INFO - task_schemas.py:81 - <module> - [TASK_SCHEMAS] Module imported. env_MEMSCHEDULER_STREAM_KEY_PREFIX=None, default_stream_prefix=scheduler:messages:stream:v2.0
+2026-08-19 11:49:56,982 | trace-id | path=None | env=prod | user_type=opensource | user_name=memos | memos.api.config - WARNING - config.py:207 - init - missing NACOS_SERVER_ADDR / AK / SK / DATA_ID
+2026-08-19 11:49:56,982 | trace-id | path=None | env=prod | user_type=opensource | user_name=memos | memos.api.config - INFO - config.py:181 - start_watch_if_enabled - NACOS_ENABLE_WATCH: False
+2026-08-19 12:10:14,046 | trace-id | path=None | env=prod | user_type=opensource | user_name=memos | memos.mem_reader.read_multi_modal.utils - WARNING - utils.py:142 - <module> - [FileContentParser] Failed to create text splitter: Missing required module - 'langchain_text_splitters'
+💡 Install command: pip install langchain_text_splitters==1.0.0
+💡 Install guide:   https://github.com/langchain-ai/langchain-text-splitters
+ will use simple splitter fallback
+2026-08-19 12:10:15,141 | trace-id | path=None | env=prod | user_type=opensource | user_name=memos | memos.mem_scheduler.schemas.task_schemas - INFO - task_schemas.py:81 - <module> - [TASK_SCHEMAS] Module imported. env_MEMSCHEDULER_STREAM_KEY_PREFIX=None, default_stream_prefix=scheduler:messages:stream:v2.0
+2026-08-19 12:10:15,149 | trace-id | path=None | env=prod | user_type=opensource | user_name=memos | memos.api.config - WARNING - config.py:207 - init - missing NACOS_SERVER_ADDR / AK / SK / DATA_ID
+2026-08-19 12:10:15,149 | trace-id | path=None | env=prod | user_type=opensource | user_name=memos | memos.api.config - INFO - config.py:181 - start_watch_if_enabled - NACOS_ENABLE_WATCH: False
+2026-08-19 12:10:32,534 | trace-id | path=None | env=prod | user_type=opensource | user_name=memos | memos.mem_reader.read_multi_modal.utils - WARNING - utils.py:142 - <module> - [FileContentParser] Failed to create text splitter: Missing required module - 'langchain_text_splitters'
+💡 Install command: pip install langchain_text_splitters==1.0.0
+💡 Install guide:   https://github.com/langchain-ai/langchain-text-splitters
+ will use simple splitter fallback
+2026-08-19 12:10:33,621 | trace-id | path=None | env=prod | user_type=opensource | user_name=memos | memos.mem_scheduler.schemas.task_schemas - INFO - task_schemas.py:81 - <module> - [TASK_SCHEMAS] Module imported. env_MEMSCHEDULER_STREAM_KEY_PREFIX=None, default_stream_prefix=scheduler:messages:stream:v2.0
+2026-08-19 12:10:33,627 | trace-id | path=None | env=prod | user_type=opensource | user_name=memos | memos.api.config - WARNING - config.py:207 - init - missing NACOS_SERVER_ADDR / AK / SK / DATA_ID
+2026-08-19 12:10:33,627 | trace-id | path=None | env=prod | user_type=opensource | user_name=memos | memos.api.config - INFO - config.py:181 - start_watch_if_enabled - NACOS_ENABLE_WATCH: False
+2026-08-19 12:10:51,745 | trace-id | path=None | env=prod | user_type=opensource | user_name=memos | memos.mem_reader.read_multi_modal.utils - WARNING - utils.py:142 - <module> - [FileContentParser] Failed to create text splitter: Missing required module - 'langchain_text_splitters'
+💡 Install command: pip install langchain_text_splitters==1.0.0
+💡 Install guide:   https://github.com/langchain-ai/langchain-text-splitters
+ will use simple splitter fallback
+2026-08-19 12:10:52,754 | trace-id | path=None | env=prod | user_type=opensource | user_name=memos | memos.mem_scheduler.schemas.task_schemas - INFO - task_schemas.py:81 - <module> - [TASK_SCHEMAS] Module imported. env_MEMSCHEDULER_STREAM_KEY_PREFIX=None, default_stream_prefix=scheduler:messages:stream:v2.0
+2026-08-19 12:10:52,761 | trace-id | path=None | env=prod | user_type=opensource | user_name=memos | memos.api.config - WARNING - config.py:207 - init - missing NACOS_SERVER_ADDR / AK / SK / DATA_ID
+2026-08-19 12:10:52,761 | trace-id | path=None | env=prod | user_type=opensource | user_name=memos | memos.api.config - INFO - config.py:181 - start_watch_if_enabled - NACOS_ENABLE_WATCH: False
+2026-08-19 12:11:20,561 | trace-id | path=None | env=prod | user_type=opensource | user_name=memos | memos.mem_reader.read_multi_modal.utils - WARNING - utils.py:142 - <module> - [FileContentParser] Failed to create text splitter: Missing required module - 'langchain_text_splitters'
+💡 Install command: pip install langchain_text_splitters==1.0.0
+💡 Install guide:   https://github.com/langchain-ai/langchain-text-splitters
+ will use simple splitter fallback
+2026-08-19 12:11:21,744 | trace-id | path=None | env=prod | user_type=opensource | user_name=memos | memos.mem_scheduler.schemas.task_schemas - INFO - task_schemas.py:81 - <module> - [TASK_SCHEMAS] Module imported. env_MEMSCHEDULER_STREAM_KEY_PREFIX=None, default_stream_prefix=scheduler:messages:stream:v2.0
+2026-08-19 12:11:21,751 | trace-id | path=None | env=prod | user_type=opensource | user_name=memos | memos.api.config - WARNING - config.py:207 - init - missing NACOS_SERVER_ADDR / AK / SK / DATA_ID
+2026-08-19 12:11:21,751 | trace-id | path=None | env=prod | user_type=opensource | user_name=memos | memos.api.config - INFO - config.py:181 - start_watch_if_enabled - NACOS_ENABLE_WATCH: False
+2026-08-19 12:14:47,136 | trace-id | path=None | env=prod | user_type=opensource | user_name=memos | memos.mem_reader.read_multi_modal.utils - WARNING - utils.py:142 - <module> - [FileContentParser] Failed to create text splitter: Missing required module - 'langchain_text_splitters'
+💡 Install command: pip install langchain_text_splitters==1.0.0
+💡 Install guide:   https://github.com/langchain-ai/langchain-text-splitters
+ will use simple splitter fallback
+2026-08-19 12:14:48,171 | trace-id | path=None | env=prod | user_type=opensource | user_name=memos | memos.mem_scheduler.schemas.task_schemas - INFO - task_schemas.py:81 - <module> - [TASK_SCHEMAS] Module imported. env_MEMSCHEDULER_STREAM_KEY_PREFIX=None, default_stream_prefix=scheduler:messages:stream:v2.0
+2026-08-19 12:14:48,179 | trace-id | path=None | env=prod | user_type=opensource | user_name=memos | memos.api.config - WARNING - config.py:207 - init - missing NACOS_SERVER_ADDR / AK / SK / DATA_ID
+2026-08-19 12:14:48,179 | trace-id | path=None | env=prod | user_type=opensource | user_name=memos | memos.api.config - INFO - config.py:181 - start_watch_if_enabled - NACOS_ENABLE_WATCH: False
+2026-08-19 13:19:57,613 | trace-id | path=None | env=prod | user_type=opensource | user_name=memos | memos.mem_reader.read_multi_modal.utils - WARNING - utils.py:142 - <module> - [FileContentParser] Failed to create text splitter: Missing required module - 'langchain_text_splitters'
+💡 Install command: pip install langchain_text_splitters==1.0.0
+💡 Install guide:   https://github.com/langchain-ai/langchain-text-splitters
+ will use simple splitter fallback
+2026-08-19 13:19:58,777 | trace-id | path=None | env=prod | user_type=opensource | user_name=memos | memos.mem_scheduler.schemas.task_schemas - INFO - task_schemas.py:81 - <module> - [TASK_SCHEMAS] Module imported. env_MEMSCHEDULER_STREAM_KEY_PREFIX=None, default_stream_prefix=scheduler:messages:stream:v2.0
+2026-08-19 13:19:58,784 | trace-id | path=None | env=prod | user_type=opensource | user_name=memos | memos.api.config - WARNING - config.py:207 - init - missing NACOS_SERVER_ADDR / AK / SK / DATA_ID
+2026-08-19 13:19:58,785 | trace-id | path=None | env=prod | user_type=opensource | user_name=memos | memos.api.config - INFO - config.py:181 - start_watch_if_enabled - NACOS_ENABLE_WATCH: False

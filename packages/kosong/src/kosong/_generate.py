@@ -1,0 +1,156 @@
+from collections.abc import Sequence
+from dataclasses import dataclass, field
+
+from loguru import logger
+
+from kosong.chat_provider import (
+    APIEmptyResponseError,
+    ChatProvider,
+    FinishReason,
+    StreamedMessagePart,
+    TokenUsage,
+)
+from kosong.message import ContentPart, Message, TextPart, ThinkPart, ToolCall
+from kosong.tooling import Tool
+from kosong.utils.aio import Callback, callback
+
+
+async def generate(
+    chat_provider: ChatProvider,
+    system_prompt: str,
+    tools: Sequence[Tool],
+    history: Sequence[Message],
+    *,
+    on_message_part: Callback[[StreamedMessagePart], None] | None = None,
+    on_tool_call: Callback[[ToolCall], None] | None = None,
+    on_trace_id: Callback[[str | None], None] | None = None,
+) -> "GenerateResult":
+    """
+    Generate one message based on the given context.
+    Parts of the message will be streamed to the specified callbacks if provided.
+
+    Args:
+        chat_provider: The chat provider to use for generation.
+        system_prompt: The system prompt to use for generation.
+        tools: The tools available for the model to call.
+        history: The message history to use for generation.
+        on_message_part: An optional callback to be called for each raw message part.
+        on_tool_call: An optional callback to be called for each complete tool call.
+        on_trace_id: An optional callback fired with the request's ``x-trace-id``
+            response header as soon as it is available (before streaming starts).
+
+    Returns:
+        A tuple of the generated message and the token usage (if available).
+        All parts in the message are guaranteed to be complete and merged as much as possible.
+
+    Raises:
+        APIConnectionError: If the API connection fails.
+        APITimeoutError: If the API request times out.
+        APIStatusError: If the API returns a status code of 4xx or 5xx.
+        APIEmptyResponseError: If the API returns an empty response.
+        ChatProviderError: If any other recognized chat provider error occurs.
+    """
+    message = Message(role="assistant", content=[])
+    pending_part: StreamedMessagePart | None = None  # message part that is currently incomplete
+
+    logger.trace("Generating with history: {history}", history=history)
+    stream = await chat_provider.generate(system_prompt, tools, history)
+    if on_trace_id:
+        # getattr for robustness against third-party StreamedMessage
+        # implementations that predate the trace_id property.
+        await callback(on_trace_id, getattr(stream, "trace_id", None))
+    try:
+        async for part in stream:
+            logger.trace("Received part: {part}", part=part)
+            if on_message_part:
+                await callback(on_message_part, part.model_copy(deep=True))
+
+            if pending_part is None:
+                pending_part = part
+            elif not pending_part.merge_in_place(part):  # try merge into the pending part
+                # unmergeable part must push the pending part to the buffer
+                _message_append(message, pending_part)
+                if isinstance(pending_part, ToolCall) and on_tool_call:
+                    await callback(on_tool_call, pending_part)
+                pending_part = part
+    finally:
+        # Close it here rather than leaving it to the GC: on a cancellation
+        # mid-stream the provider's HTTP response is still open, and nobody
+        # else is going to do it. getattr for robustness against third-party
+        # StreamedMessage implementations, like trace_id above.
+        aclose = getattr(stream, "aclose", None)
+        if aclose is not None:
+            await aclose()
+
+    # end of message
+    finish_reason: FinishReason | None = getattr(stream, "finish_reason", None)
+    undispatched_tool_calls: list[ToolCall] = []
+    if pending_part is not None:
+        _message_append(message, pending_part)
+        if isinstance(pending_part, ToolCall):
+            if finish_reason == "length":
+                # The output token limit cut this call off: its arguments are
+                # incomplete, so it must not run. Earlier calls in the message
+                # were complete when the next part arrived and have already
+                # been dispatched.
+                undispatched_tool_calls.append(pending_part)
+            elif on_tool_call:
+                await callback(on_tool_call, pending_part)
+
+    if not message.content and not message.tool_calls:
+        raise APIEmptyResponseError("The API returned an empty response.")
+
+    # A response with only ThinkPart (no TextPart, no tool calls) indicates an
+    # abnormal termination — typically a stream interruption or max_tokens
+    # exhaustion during reasoning.  The model should always produce visible
+    # output after thinking; a think-only response is never intentional.
+    has_think = any(isinstance(p, ThinkPart) for p in message.content)
+    has_text = any(isinstance(p, TextPart) and p.text.strip() for p in message.content)
+    if has_think and not has_text and not message.tool_calls:
+        raise APIEmptyResponseError(
+            "The API returned a response containing only thinking content "
+            "without any text or tool calls. This usually indicates the "
+            "stream was interrupted or the output token budget was exhausted "
+            "during reasoning."
+        )
+
+    return GenerateResult(
+        id=stream.id,
+        message=message,
+        usage=stream.usage,
+        trace_id=getattr(stream, "trace_id", None),
+        finish_reason=finish_reason,
+        undispatched_tool_calls=undispatched_tool_calls,
+    )
+
+
+@dataclass(frozen=True, slots=True)
+class GenerateResult:
+    """The result of a generation."""
+
+    id: str | None
+    """The ID of the generated message."""
+    message: Message
+    """The generated message."""
+    usage: TokenUsage | None
+    """The token usage of the generated message."""
+    trace_id: str | None = None
+    """The ``x-trace-id`` response header of the request, if the provider exposes it."""
+    finish_reason: FinishReason | None = None
+    """Why the model stopped, if the provider said; ``"length"`` means it was cut off."""
+    undispatched_tool_calls: list[ToolCall] = field(default_factory=list[ToolCall])
+    """Tool calls in `message` that were not passed to ``on_tool_call``: the one the
+    output token limit cut off. The caller still owes each of them a result."""
+
+
+def _message_append(message: Message, part: StreamedMessagePart) -> None:
+    match part:
+        case ContentPart():
+            message.content.append(part)
+        case ToolCall():
+            if message.tool_calls is None:
+                message.tool_calls = []
+            message.tool_calls.append(part)
+        case _:
+            # may be an orphaned `ToolCallPart`
+            return

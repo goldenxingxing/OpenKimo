@@ -1,0 +1,27 @@
+OpenKimo
+Copyright 2025-2026 The OpenKimo contributors
+
+OpenKimo is a modified version of Kimi Code CLI by Moonshot AI
+(https://github.com/MoonshotAI/kimi-cli), licensed under the Apache License 2.0.
+Files have been modified by the OpenKimo contributors; see the git history for
+details of the changes. "Kimi" and "Kimi Code" are names of Moonshot AI products
+and services; OpenKimo is not affiliated with or endorsed by Moonshot AI.
+
+The original notice of Kimi Code CLI follows.
+
+-------------------------------------------------------------------------------
+
+Kimi Code CLI
+Copyright 2025 Moonshot AI
+
+This product includes software developed at
+Moonshot AI (https://www.moonshot.ai/).
+
+The Kimi Code CLI project (formerly Kimi CLI) contains or reuses code
+that is licensed under the Apache 2.0 license from the following projects:
+- OpenAI Codex (https://github.com/openai/codex)
+
+  See: src/kimi_cli/skills/skill-creator/SKILL.md
+
+OpenAI Codex
+Copyright 2025 OpenAI

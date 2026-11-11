@@ -1,0 +1,40 @@
+{
+  "actions": {
+    "cancel": "取消",
+    "save": "保存",
+    "confirm": "确认",
+    "close": "关闭",
+    "retry": "重试",
+    "create": "创建",
+    "remove": "移除"
+  },
+  "states": {
+    "loading": "加载中…",
+    "loaderTitle": "加载中"
+  },
+  "lang": {
+    "switchToEn": "切换到英文",
+    "switchToZh": "切换到中文"
+  },
+  "sidebar": {
+    "expand": "展开侧边栏",
+    "collapse": "折叠侧边栏",
+    "close": "关闭会话侧边栏"
+  },
+  "user": {
+    "signOut": "退出登录",
+    "adminPanel": "管理面板"
+  },
+  "logo": "标志",
+  "carousel": {
+    "slide": "幻灯片",
+    "previous": "上一张",
+    "next": "下一张"
+  },
+  "relativeTime": {
+    "justNow": "刚刚",
+    "minutes": "{{count}}分钟前",
+    "hours": "{{count}}小时前",
+    "days": "{{count}}天前"
+  }
+}

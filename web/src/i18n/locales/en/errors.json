@@ -1,0 +1,13 @@
+{
+  "generic": "Something went wrong",
+  "unexpected": "An unexpected error occurred",
+  "copied": "Copied",
+  "copyError": "Copy error",
+  "tryAgain": "Try again",
+  "plugin": {
+    "loadFailed": "Failed to load module from \"{{url}}\": {{error}}",
+    "noExport": "Module at \"{{url}}\" does not export a plugin object as default or named \"plugin\" export.",
+    "missingField": "Plugin is missing required field \"{{field}}\".",
+    "missingEvents": "Plugin is missing required field \"events\" (array of event type strings)."
+  }
+}

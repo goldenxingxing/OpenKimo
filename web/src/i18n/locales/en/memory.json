@@ -1,0 +1,36 @@
+{
+  "kind": {
+    "user": "User",
+    "feedback": "Feedback",
+    "project": "Project",
+    "reference": "Reference"
+  },
+  "tabs": {
+    "persistent": "Persistent",
+    "suggested": "Suggested",
+    "recent": "Recent"
+  },
+  "suggested": {
+    "empty": "Nothing waiting. Facts noticed at the end of a session appear here until you keep or discard them; unanswered, they expire after a fortnight.",
+    "keep": "Keep",
+    "kept": "Kept",
+    "discard": "Discard",
+    "discarded": "Discarded"
+  },
+  "persistent": {
+    "added": "Added",
+    "addTitle": "Add a persistent memory",
+    "placeholder": "What should the agent remember across sessions?",
+    "add": "Add",
+    "entryCount_one": "{{count}} entry",
+    "entryCount_other": "{{count}} entries",
+    "updated": "Updated",
+    "deleted": "Deleted",
+    "delete": "Delete"
+  },
+  "refresh": "Refresh",
+  "recent": {
+    "summaryCount_one": "{{count}} summary",
+    "summaryCount_other": "{{count}} summaries"
+  }
+}

@@ -1,0 +1,52 @@
+{
+  "names": {
+    "readFile": "读取",
+    "readMediaFile": "读取媒体",
+    "writeFile": "写入",
+    "strReplaceFile": "编辑",
+    "glob": "查找文件",
+    "grep": "搜索",
+    "shell": "Shell",
+    "searchWeb": "网页搜索",
+    "fetchUrl": "获取 URL",
+    "task": "Agent 任务",
+    "createSubagent": "创建 Agent",
+    "think": "思考",
+    "setTodoList": "待办列表",
+    "sendDMail": "发送 D-Mail"
+  },
+  "header": {
+    "clickToOpenUrl": "{{modifier}}+点击打开 URL"
+  },
+  "media": {
+    "video": "视频",
+    "image": "图片",
+    "toolOutput": "工具输出",
+    "preview": "媒体预览",
+    "loadFailed": "媒体加载失败",
+    "fullSizePreview": "原尺寸预览"
+  },
+  "output": {
+    "error": "错误：",
+    "result": "结果：",
+    "message": "消息："
+  },
+  "display": {
+    "imageN": "图片 {{n}}",
+    "diffTooLarge": "文件过大，无法内联显示差异",
+    "loadingDiff": "正在加载差异...",
+    "noChanges": "无改动",
+    "showMoreLines_other": "显示其余 {{count}} 行...",
+    "generatedFile": "已生成：{{filename}}",
+    "imageLoadFailedNamed": "图片加载失败：{{filename}}",
+    "generatedImage": "生成的图片",
+    "fileLabel": "文件：{{filename}}",
+    "resource": "资源：",
+    "typeLabel": "类型：{{type}}",
+    "imageFallbackName": "图片",
+    "imageLoadFailed": "图片加载失败",
+    "generatedOutput": "生成的输出",
+    "generatedContent": "生成的内容",
+    "displayType": "显示类型：{{type}}"
+  }
+}

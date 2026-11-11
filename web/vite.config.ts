@@ -1,0 +1,72 @@
+import fs from "node:fs";
+import path from "node:path";
+import tailwindcss from "@tailwindcss/vite";
+import react from "@vitejs/plugin-react";
+import { visualizer } from "rollup-plugin-visualizer";
+import { defineConfig } from "vite";
+import { nodePolyfills } from "vite-plugin-node-polyfills";
+
+const PYPROJECT_VERSION_REGEX = /^\s*version\s*=\s*"([^"]+)"/m;
+
+function readKimoCliVersion(): string {
+  const fallback = process.env.KIMO_CLI_VERSION ?? "dev";
+  const pyprojectPath = path.resolve(import.meta.dirname, "../pyproject.toml");
+
+  try {
+    const pyproject = fs.readFileSync(pyprojectPath, "utf8");
+    const match = pyproject.match(PYPROJECT_VERSION_REGEX);
+    if (match?.[1]) {
+      return match[1];
+    }
+  } catch (error) {
+    console.warn("[vite] Unable to read version", pyprojectPath, error);
+  }
+
+  return fallback;
+}
+
+const kimoCliVersion = readKimoCliVersion();
+const shouldAnalyze = process.env.ANALYZE === "true";
+
+// https://vite.dev/config/
+export default defineConfig({
+  // Use absolute paths so assets work from any SPA route (e.g. /admin).
+  base: "/",
+  plugins: [
+    nodePolyfills({
+      include: ["path", "url"],
+    }),
+    react(),
+    tailwindcss(),
+    ...(shouldAnalyze
+      ? [
+          visualizer({
+            brotliSize: true,
+            filename: "dist/bundle-report.html",
+            gzipSize: true,
+            open: false,
+            template: "treemap",
+          }),
+        ]
+      : []),
+  ],
+  define: {
+    __KIMO_CLI_VERSION__: JSON.stringify(kimoCliVersion),
+  },
+  resolve: {
+    alias: {
+      "@": path.resolve(import.meta.dirname, "./src"),
+      "@ai-elements": path.resolve(import.meta.dirname, "./src/components/ai-elements"),
+    },
+  },
+  server: {
+    allowedHosts: true,
+    proxy: {
+      "/api": {
+        target: process.env.VITE_API_TARGET ?? "http://127.0.0.1:5495",
+        changeOrigin: true,
+        ws: true, // Enable WebSocket proxy
+      },
+    },
+  },
+});

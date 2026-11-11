@@ -1,0 +1,446 @@
+import {
+  memo,
+  type ReactElement,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
+import type { ChatStatus } from "ai";
+import { useTranslation } from "react-i18next";
+import type { PromptInputMessage } from "@ai-elements";
+import type { ApprovalResponseDecision, TokenUsage } from "@/hooks/wireTypes";
+import type { LiveMessage } from "@/hooks/types";
+import type { SessionFileEntry } from "@/hooks/useSessions";
+import type { SlashCommandDef } from "@/hooks/useSessionStream";
+import type { Session } from "@/lib/api/models";
+
+// Re-export SlashCommandDef for convenience
+export type { SlashCommandDef };
+import { toast } from "sonner";
+import { AlertCircleIcon, XIcon } from "lucide-react";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import { ChatWorkspaceHeader } from "./components/chat-workspace-header";
+import { GitBashBanner } from "./git-bash-banner";
+import { ChatConversation } from "./components/chat-conversation";
+import { ChatPromptComposer } from "./components/chat-prompt-composer";
+import { ApprovalDialog } from "./components/approval-dialog";
+import { QuestionDialog, usePendingQuestion } from "./components/question-dialog";
+import { SessionFilesPanel } from "./components/session-files-panel";
+import { useGitDiffStats } from "@/hooks/useGitDiffStats";
+import {
+  deriveActivityStatus,
+  type ActivityDetail,
+} from "./components/activity-status-indicator";
+
+// Re-export LiveMessage type from hooks for backward compatibility
+export type { LiveMessage } from "@/hooks/types";
+
+type ChatWorkspaceProps = {
+  status: ChatStatus;
+  onSubmit: (message: PromptInputMessage) => Promise<void>;
+  messages: LiveMessage[];
+  /** Selected session ID (may be set before session metadata loads) */
+  selectedSessionId?: string;
+  onApprovalResponse?: (
+    requestId: string,
+    decision: ApprovalResponseDecision,
+    reason?: string,
+  ) => Promise<void>;
+  onQuestionResponse?: (
+    requestId: string,
+    answers: Record<string, string>,
+  ) => Promise<void>;
+  /** Stop the current turn; wired to the same cancel as the stop button. */
+  onQuestionDismiss?: (requestId: string) => void;
+  sessionDescription?: string;
+  /** Context usage (0-1) */
+  contextUsage?: number;
+  /** Current step token usage from backend */
+  tokenUsage?: TokenUsage | null;
+  /** Current step number */
+  currentStep?: number;
+  /** Current session configuration */
+  currentSession?: Session;
+  /** Whether the stream is still replaying history */
+  isReplayingHistory?: boolean;
+  /** Whether this connection's history has fully arrived */
+  isHistoryLoaded?: boolean;
+  /** List files inside the session workspace */
+  onListSessionDirectory?: (
+    sessionId: string,
+    path?: string,
+  ) => Promise<SessionFileEntry[]>;
+  /** Build a direct download URL for a workspace file */
+  onGetSessionFileUrl?: (sessionId: string, path: string) => string;
+  /** Fetch a workspace file as a Blob for preview */
+  onGetSessionFile?: (sessionId: string, path: string) => Promise<Blob>;
+  /** Cancel the current streaming turn */
+  onCancel?: () => void;
+  /** Whether files are uploading before sending */
+  isUploadingFiles?: boolean;
+  /** Whether waiting for the first response after a prompt is sent */
+  isAwaitingFirstResponse?: boolean;
+  /** Create a new session when none is selected */
+  onCreateSession?: () => void;
+  /** Open sessions sidebar (mobile) */
+  onOpenSidebar?: () => void;
+  /** Rename session */
+  onRenameSession?: (sessionId: string, newTitle: string) => Promise<boolean>;
+  /** Available slash commands */
+  slashCommands?: SlashCommandDef[];
+  /** Whether plan mode is active */
+  planMode?: boolean;
+  yolo?: boolean;
+  onYoloChange?: (enabled: boolean) => void;
+  /** Callback to set plan mode */
+  onPlanModeChange?: (enabled: boolean) => void;
+  /** Persist a per-session model selection; resolves true on success */
+  onSelectSessionModel?: (sessionId: string, model: string) => Promise<boolean>;
+  /** Staged draft model shown when no session exists yet */
+  draftModel?: string | null;
+  /** Called when the draft (pre-session) model selection changes */
+  onDraftModelChange?: (model: string) => void;
+  /** Maximum context size for the current model (tokens) */
+  maxContextSize?: number;
+  /** Fork session at a specific turn */
+  onForkSession?: (turnIndex: number) => void;
+  /** Error message from the session stream */
+  errorMessage?: string;
+  /** The last reply error of this session, shown inside it until dismissed */
+  sessionError?: string;
+  onDismissSessionError?: () => void;
+};
+
+type ToolApproval = NonNullable<LiveMessage["toolCall"]>["approval"];
+
+export const ChatWorkspace = memo(function ChatWorkspaceComponent({
+  status,
+  onSubmit,
+  messages,
+  selectedSessionId,
+  onApprovalResponse,
+  onQuestionResponse,
+  onQuestionDismiss,
+  sessionDescription,
+  contextUsage = 0,
+  tokenUsage = null,
+  currentStep = 0,
+  currentSession,
+  isReplayingHistory = false,
+  isHistoryLoaded = true,
+  onListSessionDirectory,
+  onGetSessionFileUrl,
+  onGetSessionFile: _onGetSessionFile,
+  onCancel,
+  isUploadingFiles = false,
+  isAwaitingFirstResponse = false,
+  onCreateSession,
+  onOpenSidebar,
+  onRenameSession,
+  maxContextSize,
+  slashCommands = [],
+  planMode = false,
+  yolo = false,
+  onYoloChange,
+  onPlanModeChange,
+  onSelectSessionModel,
+  draftModel,
+  onDraftModelChange,
+  onForkSession,
+  errorMessage,
+  sessionError,
+  onDismissSessionError,
+}: ChatWorkspaceProps): ReactElement {
+  const { t } = useTranslation(["chat"]);
+  const [blocksExpanded, setBlocksExpanded] = useState(false);
+  const [isFilesPanelOpen, setIsFilesPanelOpen] = useState(false);
+  const [isSearchOpen, setIsSearchOpen] = useState(false);
+  const [pendingApprovalMap, setPendingApprovalMap] = useState<
+    Record<string, boolean>
+  >({});
+  const [pendingQuestionMap, setPendingQuestionMap] = useState<
+    Record<string, boolean>
+  >({});
+
+  // Check if there's a pending question to replace the prompt composer
+  const hasPendingQuestion = usePendingQuestion(messages) !== null;
+
+  // Fetch git diff stats for the current session
+  const { stats: gitDiffStats, isLoading: isGitDiffLoading } = useGitDiffStats(
+    currentSession?.sessionId ?? null
+  );
+
+  // Derive activity status for the header indicator
+  // Use ref to cache the previous result and avoid unnecessary object reference changes
+  const prevActivityRef = useRef<ActivityDetail | null>(null);
+
+  const activityStatus = useMemo(() => {
+    const newStatus = deriveActivityStatus({
+      chatStatus: status,
+      isAwaitingFirstResponse,
+      isReplayingHistory,
+      isUploadingFiles,
+      messages,
+      errorMessage,
+      t,
+    });
+
+    // If status and description haven't changed, return cached reference
+    // to avoid unnecessary re-renders in downstream components
+    if (
+      prevActivityRef.current &&
+      prevActivityRef.current.status === newStatus.status &&
+      prevActivityRef.current.description === newStatus.description
+    ) {
+      return prevActivityRef.current;
+    }
+
+    prevActivityRef.current = newStatus;
+    return newStatus;
+  }, [status, isAwaitingFirstResponse, isReplayingHistory, isUploadingFiles, messages, errorMessage, t]);
+
+  const maxTokens = maxContextSize ?? 1000000;
+  const usedTokens = Math.round(contextUsage * maxTokens);
+  const usagePercent = Math.round(contextUsage * 1000) / 10;
+
+  const canSendMessage = true;
+  const isStreaming = status === "streaming";
+  const isAwaitingIdle = status === "submitted";
+  const isUploading = isUploadingFiles;
+  const canShowFilesPanel = Boolean(
+    selectedSessionId &&
+      currentSession?.workDir &&
+      onListSessionDirectory &&
+      onGetSessionFileUrl,
+  );
+
+  useEffect(() => {
+    if (!(selectedSessionId && currentSession?.workDir)) {
+      setIsFilesPanelOpen(false);
+    }
+  }, [currentSession?.workDir, selectedSessionId]);
+
+  const handleToggleFilesPanel = useCallback(() => {
+    setIsFilesPanelOpen((previous) => !previous);
+  }, []);
+
+  const handleCloseFilesPanel = useCallback(() => {
+    setIsFilesPanelOpen(false);
+  }, []);
+
+  const handleApprovalAction = useCallback(
+    async (approval: ToolApproval, decision: ApprovalResponseDecision, reason?: string) => {
+      if (!(approval?.id && onApprovalResponse)) {
+        return;
+      }
+
+      setPendingApprovalMap((prev) => ({
+        ...prev,
+        [approval.id]: true,
+      }));
+
+      try {
+        await onApprovalResponse(approval.id, decision, reason);
+      } catch (error) {
+        console.error("[ChatWorkspace] Failed to respond to approval", error);
+        toast.error(t("approval.actionFailed"), {
+          description: error instanceof Error ? error.message : String(error),
+        });
+      } finally {
+        setPendingApprovalMap((prev) => {
+          const next = { ...prev };
+          delete next[approval.id];
+          return next;
+        });
+      }
+    },
+    [onApprovalResponse, t],
+  );
+
+  // Wrapper for ApprovalDialog that routes through handleApprovalAction
+  // so pendingApprovalMap is properly managed (prevents duplicate requests)
+  const handleDialogApprovalResponse = useCallback(
+    async (requestId: string, decision: ApprovalResponseDecision, reason?: string) => {
+      for (const message of messages) {
+        if (
+          message.variant === "tool" &&
+          message.toolCall?.approval?.id === requestId
+        ) {
+          await handleApprovalAction(message.toolCall.approval, decision, reason);
+          return;
+        }
+      }
+    },
+    [messages, handleApprovalAction],
+  );
+
+  const handleQuestionResponse = useCallback(
+    async (requestId: string, answers: Record<string, string>) => {
+      if (!onQuestionResponse) return;
+
+      setPendingQuestionMap((prev) => ({
+        ...prev,
+        [requestId]: true,
+      }));
+
+      try {
+        await onQuestionResponse(requestId, answers);
+      } catch (error) {
+        console.error("[ChatWorkspace] Failed to respond to question", error);
+        toast.error(t("question.responseFailed"), {
+          description: error instanceof Error ? error.message : String(error),
+        });
+      } finally {
+        setPendingQuestionMap((prev) => {
+          const next = { ...prev };
+          delete next[requestId];
+          return next;
+        });
+      }
+    },
+    [onQuestionResponse, t],
+  );
+
+  return (
+    <div className="flex h-full min-h-0 w-full flex-col overflow-hidden lg:sticky lg:top-4 lg:min-h-[560px]">
+      <div className="relative flex h-full flex-col">
+        <ChatWorkspaceHeader
+          currentStep={currentStep}
+          sessionDescription={sessionDescription}
+          currentSession={currentSession}
+          selectedSessionId={selectedSessionId}
+          isFilesPanelOpen={isFilesPanelOpen}
+          blocksExpanded={blocksExpanded}
+          onToggleBlocks={() => setBlocksExpanded((prev) => !prev)}
+          onToggleFilesPanel={canShowFilesPanel ? handleToggleFilesPanel : undefined}
+          onOpenSearch={() => setIsSearchOpen(true)}
+          onOpenSidebar={onOpenSidebar}
+          onRenameSession={onRenameSession}
+        />
+
+        <GitBashBanner />
+
+        <div className="relative flex min-h-0 flex-1 overflow-hidden">
+          <div className="flex min-w-0 flex-1 flex-col">
+            <div className="min-h-0 flex-1 overflow-hidden">
+              <ChatConversation
+                messages={messages}
+                status={status}
+                selectedSessionId={selectedSessionId}
+                currentSession={currentSession}
+                isReplayingHistory={isReplayingHistory}
+                isHistoryLoaded={isHistoryLoaded}
+                pendingApprovalMap={pendingApprovalMap}
+                onApprovalAction={
+                  onApprovalResponse ? handleApprovalAction : undefined
+                }
+                canRespondToApproval={Boolean(onApprovalResponse)}
+                blocksExpanded={blocksExpanded}
+                onCreateSession={onCreateSession}
+                isSearchOpen={isSearchOpen}
+                onSearchOpenChange={setIsSearchOpen}
+                onForkSession={onForkSession}
+              />
+            </div>
+
+            <ApprovalDialog
+              messages={messages}
+              onApprovalResponse={handleDialogApprovalResponse}
+              pendingApprovalMap={pendingApprovalMap}
+              canRespondToApproval={Boolean(onApprovalResponse)}
+            />
+
+            {currentSession && (
+              <div className="mt-auto flex-shrink-0">
+                {sessionError ? (
+                  <div className="px-2 pb-2 sm:px-3">
+                    <Alert className="relative pr-10" variant="destructive">
+                      <AlertCircleIcon />
+                      <AlertTitle>{t("sessionError.title")}</AlertTitle>
+                      <AlertDescription className="max-h-32 overflow-auto whitespace-pre-wrap break-words">
+                        {sessionError}
+                      </AlertDescription>
+                      {onDismissSessionError ? (
+                        <button
+                          aria-label={t("sessionError.dismiss")}
+                          className="absolute top-2 right-2 rounded p-1 text-muted-foreground hover:text-foreground"
+                          onClick={onDismissSessionError}
+                          type="button"
+                        >
+                          <XIcon className="size-4" />
+                        </button>
+                      ) : null}
+                    </Alert>
+                  </div>
+                ) : null}
+                {hasPendingQuestion ? (
+                  <QuestionDialog
+                    messages={messages}
+                    onQuestionResponse={handleQuestionResponse}
+                    onQuestionDismiss={onQuestionDismiss}
+                    pendingQuestionMap={pendingQuestionMap}
+                  />
+                ) : (
+                  <div className="px-0 pb-0 pt-0 sm:px-3 sm:pb-3">
+                    <ChatPromptComposer
+                      status={status}
+                      onSubmit={onSubmit}
+                      canSendMessage={canSendMessage}
+                      currentSession={currentSession}
+                      isUploading={isUploading}
+                      isStreaming={isStreaming}
+                      isAwaitingIdle={isAwaitingIdle}
+                      isReplayingHistory={isReplayingHistory}
+                      onCancel={onCancel}
+                      onListSessionDirectory={onListSessionDirectory}
+                      gitDiffStats={gitDiffStats}
+                      isGitDiffLoading={isGitDiffLoading}
+                      slashCommands={slashCommands}
+                      planMode={planMode}
+                      yolo={yolo}
+                      onYoloChange={onYoloChange}
+                      onPlanModeChange={onPlanModeChange}
+                      onSelectSessionModel={onSelectSessionModel}
+                      draftModel={draftModel}
+                      onDraftModelChange={onDraftModelChange}
+                      activityStatus={activityStatus}
+                      usagePercent={usagePercent}
+                      usedTokens={usedTokens}
+                      maxTokens={maxTokens}
+                      tokenUsage={tokenUsage}
+                    />
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+
+          {canShowFilesPanel && isFilesPanelOpen ? (
+            <>
+              <button
+                type="button"
+                aria-label={t("files.close")}
+                className="absolute inset-0 z-10 bg-background/40 backdrop-blur-[1px] lg:hidden"
+                onClick={handleCloseFilesPanel}
+              />
+
+              <div className="absolute inset-y-0 right-0 z-20 flex h-full min-h-0 w-[min(24rem,92vw)] lg:static lg:z-auto lg:w-[320px] lg:shrink-0 xl:w-[360px]">
+                <SessionFilesPanel
+                  key={`files:${selectedSessionId ?? "none"}`}
+                  className="w-full border-l shadow-2xl lg:shadow-none"
+                  sessionId={selectedSessionId ?? ""}
+                  workDir={currentSession?.workDir}
+                  onClose={handleCloseFilesPanel}
+                  onListSessionDirectory={onListSessionDirectory}
+                  onGetSessionFileUrl={onGetSessionFileUrl}
+                />
+              </div>
+            </>
+          ) : null}
+        </div>
+      </div>
+    </div>
+  );
+});

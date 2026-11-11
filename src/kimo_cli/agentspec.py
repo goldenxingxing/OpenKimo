@@ -1,0 +1,277 @@
+from __future__ import annotations
+
+from dataclasses import dataclass, field
+from pathlib import Path
+from typing import Any, Literal, NamedTuple
+
+import yaml
+from pydantic import BaseModel, Field, ValidationError
+
+from kimo_cli.exception import AgentSpecError
+
+DEFAULT_AGENT_SPEC_VERSION = "1"
+SUPPORTED_AGENT_SPEC_VERSIONS = (DEFAULT_AGENT_SPEC_VERSION,)
+
+
+def get_agents_dir() -> Path:
+    return Path(__file__).parent / "agents"
+
+
+DEFAULT_AGENT_FILE = get_agents_dir() / "default" / "agent.yaml"
+OKABE_AGENT_FILE = get_agents_dir() / "okabe" / "agent.yaml"
+
+
+class Inherit(NamedTuple):
+    """Marker class for inheritance in agent spec."""
+
+
+inherit = Inherit()
+
+
+class AgentSpec(BaseModel):
+    """Agent specification."""
+
+    extend: str | None = Field(default=None, description="Agent file to extend")
+    name: str | Inherit = Field(default=inherit, description="Agent name")  # required
+    system_prompt_path: Path | Inherit = Field(
+        default=inherit, description="System prompt path"
+    )  # required
+    system_prompt_args: dict[str, str] = Field(
+        default_factory=dict, description="System prompt arguments"
+    )
+    model: str | None = Field(default=None, description="Default model alias")
+    when_to_use: str | None = Field(default=None, description="Usage guidance")
+    tools: list[str] | None | Inherit = Field(default=inherit, description="Tools")  # required
+    allowed_tools: list[str] | None | Inherit = Field(default=inherit, description="Allowed tools")
+    exclude_tools: list[str] | None | Inherit = Field(
+        default=inherit, description="Tools to exclude"
+    )
+    subagents: dict[str, SubagentSpec] | None | Inherit = Field(
+        default=inherit, description="Subagents"
+    )
+    # ``None`` = no allowlist filter; ``[]`` = strict empty (nothing passes).
+    allowed_skills: list[str] | None | Inherit = Field(
+        default=inherit, description="Skills allowlist"
+    )
+    excluded_skills: list[str] | None | Inherit = Field(
+        default=inherit, description="Skills to exclude"
+    )
+    allowed_mcp_servers: list[str] | None | Inherit = Field(
+        default=inherit, description="MCP servers allowlist"
+    )
+    allowed_mcp_tools: list[str] | None | Inherit = Field(
+        default=inherit, description='MCP tools allowlist ("server:tool")'
+    )
+    excluded_mcp_tools: list[str] | None | Inherit = Field(
+        default=inherit, description='MCP tools to exclude ("server:tool")'
+    )
+
+
+class SubagentSpec(BaseModel):
+    """Subagent specification."""
+
+    path: Path = Field(description="Subagent file path")
+    description: str = Field(description="Subagent description")
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class ResolvedAgentSpec:
+    """Resolved agent specification."""
+
+    name: str
+    system_prompt_path: Path
+    system_prompt_args: dict[str, str]
+    model: str | None
+    when_to_use: str
+    tools: list[str]
+    allowed_tools: list[str] | None
+    exclude_tools: list[str]
+    subagents: dict[str, SubagentSpec]
+    allowed_skills: list[str] | None = None
+    excluded_skills: list[str] = field(default_factory=list[str])
+    allowed_mcp_servers: list[str] | None = None
+    allowed_mcp_tools: list[str] | None = None
+    excluded_mcp_tools: list[str] = field(default_factory=list[str])
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class DiscoveredSpec:
+    """A user-discovered agent spec file."""
+
+    name: str
+    path: Path
+    source: Literal["user", "project"]
+
+
+def load_agent_spec(agent_file: Path) -> ResolvedAgentSpec:
+    """
+    Load agent specification from file.
+
+    Raises:
+        FileNotFoundError: If the agent spec file is not found.
+        AgentSpecError: If the agent spec is not valid.
+    """
+    agent_spec = _load_agent_spec(agent_file)
+    assert agent_spec.extend is None, "agent extension should be recursively resolved"
+    if isinstance(agent_spec.name, Inherit):
+        raise AgentSpecError("Agent name is required")
+    if isinstance(agent_spec.system_prompt_path, Inherit):
+        raise AgentSpecError("System prompt path is required")
+    if isinstance(agent_spec.tools, Inherit):
+        raise AgentSpecError("Tools are required")
+    if isinstance(agent_spec.allowed_tools, Inherit):
+        agent_spec.allowed_tools = None
+    if isinstance(agent_spec.exclude_tools, Inherit):
+        agent_spec.exclude_tools = []
+    if isinstance(agent_spec.subagents, Inherit):
+        agent_spec.subagents = {}
+    if isinstance(agent_spec.allowed_skills, Inherit):
+        agent_spec.allowed_skills = None
+    if isinstance(agent_spec.excluded_skills, Inherit):
+        agent_spec.excluded_skills = []
+    if isinstance(agent_spec.allowed_mcp_servers, Inherit):
+        agent_spec.allowed_mcp_servers = None
+    if isinstance(agent_spec.allowed_mcp_tools, Inherit):
+        agent_spec.allowed_mcp_tools = None
+    if isinstance(agent_spec.excluded_mcp_tools, Inherit):
+        agent_spec.excluded_mcp_tools = []
+    return ResolvedAgentSpec(
+        name=agent_spec.name,
+        system_prompt_path=agent_spec.system_prompt_path,
+        system_prompt_args=agent_spec.system_prompt_args,
+        model=agent_spec.model,
+        when_to_use=agent_spec.when_to_use or "",
+        tools=agent_spec.tools or [],
+        allowed_tools=agent_spec.allowed_tools,
+        exclude_tools=agent_spec.exclude_tools or [],
+        subagents=agent_spec.subagents or {},
+        allowed_skills=agent_spec.allowed_skills,
+        excluded_skills=agent_spec.excluded_skills or [],
+        allowed_mcp_servers=agent_spec.allowed_mcp_servers,
+        allowed_mcp_tools=agent_spec.allowed_mcp_tools,
+        excluded_mcp_tools=agent_spec.excluded_mcp_tools or [],
+    )
+
+
+def _load_agent_spec(agent_file: Path, _seen: frozenset[Path] | None = None) -> AgentSpec:
+    seen = _seen or frozenset()
+    identity = agent_file.resolve()
+    if identity in seen:
+        raise AgentSpecError(f"Circular agent spec extension detected at: {agent_file}")
+    seen = seen | {identity}
+
+    if not agent_file.exists():
+        raise AgentSpecError(f"Agent spec file not found: {agent_file}")
+    if not agent_file.is_file():
+        raise AgentSpecError(f"Agent spec path is not a file: {agent_file}")
+    try:
+        with open(agent_file, encoding="utf-8") as f:
+            data: Any = yaml.safe_load(f)
+    except yaml.YAMLError as e:
+        raise AgentSpecError(f"Invalid YAML in agent spec file: {e}") from e
+    if not isinstance(data, dict):
+        raise AgentSpecError(f"Agent spec file must be a YAML mapping: {agent_file}")
+
+    version = str(data.get("version", DEFAULT_AGENT_SPEC_VERSION))
+    if version not in SUPPORTED_AGENT_SPEC_VERSIONS:
+        raise AgentSpecError(f"Unsupported agent spec version: {version}")
+
+    raw_agent = data.get("agent", {})
+    if not isinstance(raw_agent, dict):
+        # `agent:` with an empty body parses as ``None``; `**None` would raise a
+        # bare TypeError instead of the documented AgentSpecError.
+        raise AgentSpecError(f"`agent` section must be a YAML mapping: {agent_file}")
+    try:
+        agent_spec = AgentSpec(**raw_agent)
+    except ValidationError as e:
+        raise AgentSpecError(f"Invalid agent spec in {agent_file}: {e}") from e
+
+    if isinstance(agent_spec.extend, str) and not agent_spec.extend.strip():
+        # ``extend: ""`` must mean "no base", not a truthiness hole that skips
+        # merging and then trips the ``extend is None`` assert downstream.
+        agent_spec.extend = None
+
+    if isinstance(agent_spec.system_prompt_path, Path):
+        agent_spec.system_prompt_path = (
+            agent_file.parent / agent_spec.system_prompt_path
+        ).absolute()
+    if isinstance(agent_spec.subagents, dict):
+        for v in agent_spec.subagents.values():
+            v.path = (agent_file.parent / v.path).absolute()
+    if agent_spec.extend:
+        if agent_spec.extend == "default":
+            base_agent_file = DEFAULT_AGENT_FILE
+        else:
+            base_agent_file = (agent_file.parent / agent_spec.extend).absolute()
+        base_agent_spec = _load_agent_spec(base_agent_file, seen)
+        if not isinstance(agent_spec.name, Inherit):
+            base_agent_spec.name = agent_spec.name
+        if not isinstance(agent_spec.system_prompt_path, Inherit):
+            base_agent_spec.system_prompt_path = agent_spec.system_prompt_path
+        for k, v in agent_spec.system_prompt_args.items():
+            # system prompt args should be merged instead of overwritten
+            base_agent_spec.system_prompt_args[k] = v
+        if agent_spec.model is not None:
+            base_agent_spec.model = agent_spec.model
+        if agent_spec.when_to_use is not None:
+            base_agent_spec.when_to_use = agent_spec.when_to_use
+        if not isinstance(agent_spec.tools, Inherit):
+            base_agent_spec.tools = agent_spec.tools
+        if not isinstance(agent_spec.allowed_tools, Inherit):
+            base_agent_spec.allowed_tools = agent_spec.allowed_tools
+        if not isinstance(agent_spec.exclude_tools, Inherit):
+            base_agent_spec.exclude_tools = agent_spec.exclude_tools
+        if not isinstance(agent_spec.subagents, Inherit):
+            base_agent_spec.subagents = agent_spec.subagents
+        if not isinstance(agent_spec.allowed_skills, Inherit):
+            base_agent_spec.allowed_skills = agent_spec.allowed_skills
+        if not isinstance(agent_spec.excluded_skills, Inherit):
+            base_agent_spec.excluded_skills = agent_spec.excluded_skills
+        if not isinstance(agent_spec.allowed_mcp_servers, Inherit):
+            base_agent_spec.allowed_mcp_servers = agent_spec.allowed_mcp_servers
+        if not isinstance(agent_spec.allowed_mcp_tools, Inherit):
+            base_agent_spec.allowed_mcp_tools = agent_spec.allowed_mcp_tools
+        if not isinstance(agent_spec.excluded_mcp_tools, Inherit):
+            base_agent_spec.excluded_mcp_tools = agent_spec.excluded_mcp_tools
+        agent_spec = base_agent_spec
+    return agent_spec
+
+
+def discover_user_agent_specs(work_dir: Path) -> list[DiscoveredSpec]:
+    """Discover agent spec YAMLs in <work_dir>/.kimo/agents and ~/.kimo/agents.
+
+    Project entries shadow user entries with the same name.
+    """
+    seen: dict[str, DiscoveredSpec] = {}
+    sources: tuple[tuple[Path, Literal["user", "project"]], ...] = (
+        (work_dir / ".kimo" / "agents", "project"),
+        (Path.home() / ".kimo" / "agents", "user"),
+    )
+    for root, source in sources:
+        if not root.is_dir():
+            continue
+        for path in sorted(root.glob("*.yaml")):
+            if not path.is_file():
+                continue
+            name = _read_spec_name(path) or path.stem
+            seen.setdefault(name, DiscoveredSpec(name=name, path=path, source=source))
+    return list(seen.values())
+
+
+def _read_spec_name(path: Path) -> str | None:
+    try:
+        with open(path, encoding="utf-8") as f:
+            raw = yaml.safe_load(f)
+    except (OSError, yaml.YAMLError):
+        return None
+    if not isinstance(raw, dict):
+        return None
+    data: dict[str, Any] = raw  # type: ignore[assignment]
+    agent_raw = data.get("agent")
+    if not isinstance(agent_raw, dict):
+        return None
+    agent: dict[str, Any] = agent_raw  # type: ignore[assignment]
+    name = agent.get("name")
+    if isinstance(name, str) and name.strip():
+        return name.strip()
+    return None

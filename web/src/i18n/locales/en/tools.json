@@ -1,0 +1,53 @@
+{
+  "names": {
+    "readFile": "Read",
+    "readMediaFile": "Read Media",
+    "writeFile": "Write",
+    "strReplaceFile": "Edit",
+    "glob": "Find Files",
+    "grep": "Search",
+    "shell": "Shell",
+    "searchWeb": "Web Search",
+    "fetchUrl": "Fetch URL",
+    "task": "Agent Task",
+    "createSubagent": "Create Agent",
+    "think": "Think",
+    "setTodoList": "Todo List",
+    "sendDMail": "Send D-Mail"
+  },
+  "header": {
+    "clickToOpenUrl": "{{modifier}}+Click to open URL"
+  },
+  "media": {
+    "video": "Video",
+    "image": "Image",
+    "toolOutput": "Tool output",
+    "preview": "Media preview",
+    "loadFailed": "Failed to load media",
+    "fullSizePreview": "Full size preview"
+  },
+  "output": {
+    "error": "error:",
+    "result": "result:",
+    "message": "message:"
+  },
+  "display": {
+    "imageN": "Image {{n}}",
+    "diffTooLarge": "File too large for inline diff",
+    "loadingDiff": "Loading diff...",
+    "noChanges": "No changes",
+    "showMoreLines_one": "Show {{count}} more line...",
+    "showMoreLines_other": "Show {{count}} more lines...",
+    "generatedFile": "Generated: {{filename}}",
+    "imageLoadFailedNamed": "Failed to load image: {{filename}}",
+    "generatedImage": "Generated image",
+    "fileLabel": "File: {{filename}}",
+    "resource": "Resource:",
+    "typeLabel": "Type: {{type}}",
+    "imageFallbackName": "image",
+    "imageLoadFailed": "Failed to load image",
+    "generatedOutput": "Generated output",
+    "generatedContent": "Generated content",
+    "displayType": "Display type: {{type}}"
+  }
+}

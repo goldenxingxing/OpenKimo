@@ -1,0 +1,82 @@
+# The suite on the platforms this fork ships to, not only the one it is
+# developed on.
+#
+# OpenKimo builds a Windows artifact and every other job here runs on ubuntu,
+# so twenty-three `sys.platform == "win32"` branches were never executed by
+# anything. One of them was wrong: msvcrt.locking holds for the whole process,
+# so a second thread asking for a range this process already had was refused
+# with "Resource deadlock avoided" where fcntl.flock would have queued it —
+# concurrent writes to one memory store failed on Windows and passed
+# everywhere else. It was found by carryover's own matrix, after shipping.
+#
+# A separate file from ci-kimo-cli.yml, which is upstream's: this fork syncs
+# from the upstream repository, and edits to shared workflow files come back as
+# conflicts.
+#
+# e2e is excluded. It drives a PTY and is timing-sensitive; on three operating
+# systems that buys flakes rather than coverage, and what broke there has so
+# far been a symptom of causes this tier already catches.
+name: CI (cross-platform)
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+      - "openkimo-**"
+
+concurrency:
+  group: cross-platform-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    # Windows reports without blocking. Its first honest run was 91 failed /
+    # 3608 passed: assumptions about paths, terminal rendering and shell
+    # semantics that have been there for as long as nothing ran them. Gating on
+    # that would mean every branch is red for reasons unrelated to its change,
+    # and a check that is always red is one people stop reading — which is how
+    # the suite reached forty-four failures in the first place.
+    #
+    # So the count is the debt, and it is meant to come down. ubuntu and macos
+    # gate; Windows is the number to watch.
+    continue-on-error: ${{ matrix.os == 'windows-latest' }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        # Windows is not listed here: `include` adds to a combination that
+        # already exists rather than replacing it, so naming it in both places
+        # produced two Windows jobs — one of them without the exclusion below,
+        # which is the one that hangs.
+        os: [ubuntu-latest, macos-latest]
+        exclude_args: [""]
+        include:
+          # tests/acp hangs on Windows: the third test of the run sat in
+          # asyncio/runners.py until the job timed out — two tests passed in
+          # twenty-nine and a half minutes, where the other two platforms
+          # finish the whole tier in five. Cause not yet found, and it is not
+          # the locking defect this matrix was added for. Excluded so the rest
+          # of the tier reports; putting it back is the next Windows job.
+          - os: windows-latest
+            exclude_args: "--ignore=tests/acp"
+    env:
+      # What release.yml builds the shipped artifact on. `uv sync` would
+      # otherwise take 3.14 from .python-version, and a suite green there says
+      # nothing about the binary users get.
+      UV_PYTHON: "3.12"
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v4
+
+      - name: Install dependencies
+        run: uv sync --frozen
+
+      - name: Tests
+        run: uv run pytest tests --ignore=tests/e2e ${{ matrix.exclude_args }} -q

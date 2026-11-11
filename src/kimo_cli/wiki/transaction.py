@@ -1,0 +1,1181 @@
+"""Durable, recoverable transaction boundary for authoritative Wiki Markdown."""
+
+from __future__ import annotations
+
+import json
+import os
+import shutil
+import stat
+import tempfile
+from collections.abc import Iterable, Iterator, Mapping
+from contextlib import contextmanager, suppress
+from dataclasses import dataclass, replace
+from pathlib import Path
+from typing import Any, Literal, cast
+from uuid import uuid4
+
+from kimo_cli.wiki.initialize import WikiLayout
+from kimo_cli.wiki.locking import WikiLock
+from kimo_cli.wiki.models import PageChange, PageDeletion
+from kimo_cli.wiki.schema import content_hash, parse_page, render_page, validate_logical_page
+
+_JOURNAL_VERSION = 1
+_QUARANTINE_MARKER = "QUARANTINED"
+_REINDEX_MARKER = "search.invalid"
+_LOCK_TIMEOUT_SECONDS = 5.0
+_HASH_PREFIX = "sha256:"
+
+
+class WikiConflictError(RuntimeError):
+    """Raised when the authoritative files changed after a proposal was prepared."""
+
+
+class WikiRecoveryRequired(RuntimeError):
+    """Raised when journal damage requires operator review before another write."""
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        retryable: bool = False,
+        action: str = "Repair or remove the quarantined journal before retrying.",
+    ) -> None:
+        self.retryable = retryable
+        self.action = action
+        super().__init__(message)
+
+
+@dataclass(frozen=True, slots=True)
+class RecoveryResult:
+    """Summary of durable journal processing."""
+
+    recovered_transactions: int = 0
+    discarded_transactions: int = 0
+    rolled_back_transactions: int = 0
+    needs_reindex: bool = False
+    required_reindex_revision: int | None = None
+    post_commit_cleanup_pending: int = 0
+    writes_quarantined: bool = False
+
+
+@dataclass(frozen=True, slots=True)
+class ReindexAcknowledgement:
+    """Result of conditionally clearing the independent cache-invalid marker."""
+
+    acknowledged: bool
+    required_revision: int | None
+
+
+@dataclass(frozen=True, slots=True)
+class _TargetPlan:
+    kind: Literal["page", "index", "log", "revision"]
+    relative_target: str
+    target: Path
+    old_hash: str | None
+    #: ``None`` for a page the transaction removes.
+    new_hash: str | None
+    new_bytes: bytes | None
+    expected_page_revision: int | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class _JournalTarget:
+    kind: Literal["page", "index", "log", "revision"]
+    relative_target: str
+    target: Path
+    old_hash: str | None
+    #: ``None`` for a page the transaction removes; it then has no new artifact.
+    new_hash: str | None
+    old_artifact: Path | None
+    new_artifact: Path | None
+    expected_page_revision: int | None
+    old_bytes: bytes | None = None
+    new_bytes: bytes | None = None
+
+    @property
+    def removes(self) -> bool:
+        return self.new_hash is None
+
+
+@dataclass(frozen=True, slots=True)
+class _Journal:
+    directory: Path
+    record_path: Path
+    transaction_id: str
+    state: Literal["prepared", "committed"]
+    expected_global_revision: int
+    new_revision: int
+    targets: tuple[_JournalTarget, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class WikiTransaction:
+    """One fully prepared Wiki change set with optimistic revision checks."""
+
+    layout: WikiLayout
+    changes: tuple[PageChange, ...]
+    deletions: tuple[PageDeletion, ...]
+    expected_global_revision: int
+    new_revision: int
+    targets: tuple[_TargetPlan, ...]
+
+    @classmethod
+    def prepare(
+        cls,
+        *,
+        layout: WikiLayout,
+        changes: Iterable[PageChange],
+        expected_global_revision: int,
+        index_bytes: bytes,
+        log_bytes: bytes,
+        deletions: Iterable[PageDeletion] = (),
+    ) -> WikiTransaction:
+        """Validate and capture the complete pre-approval change set in memory."""
+        if type(expected_global_revision) is not int or expected_global_revision < 0:
+            raise ValueError("expected global revision must be a non-negative integer")
+        materialized = tuple(changes)
+        removals = tuple(deletions)
+        if not materialized and not removals:
+            raise ValueError("a Wiki transaction must change at least one page")
+        logical_paths = [change.page.logical_path for change in materialized] + [
+            deletion.logical_path for deletion in removals
+        ]
+        if len(logical_paths) != len(set(logical_paths)):
+            raise ValueError("a Wiki transaction cannot change the same page twice")
+        for name, data in (("index", index_bytes), ("log", log_bytes)):
+            if type(data) is not bytes:
+                raise TypeError(f"{name} content must be bytes")
+            try:
+                data.decode("utf-8")
+            except UnicodeDecodeError as exc:
+                raise ValueError(f"{name} content must be valid UTF-8") from exc
+
+        recovery: list[RecoveryResult] = []
+        lock = _wiki_lock(layout, recovery)
+        with lock.shared(_LOCK_TIMEOUT_SECONDS):
+            if recovery and recovery[0].post_commit_cleanup_pending:
+                raise _cleanup_pending_error()
+            if recovery and recovery[0].writes_quarantined:
+                # Reads stay available, but do not prepare a write that can never
+                # safely commit without explicit operator repair.
+                raise WikiRecoveryRequired("Wiki writes are quarantined pending journal repair")
+            current_revision = _read_global_revision(layout)
+            if current_revision != expected_global_revision:
+                raise WikiConflictError(
+                    f"global revision changed: expected {expected_global_revision}, "
+                    f"found {current_revision}"
+                )
+            targets = _capture_targets(layout, materialized, removals, index_bytes, log_bytes)
+
+        return cls(
+            layout=layout,
+            changes=materialized,
+            deletions=removals,
+            expected_global_revision=expected_global_revision,
+            new_revision=expected_global_revision + 1,
+            targets=targets,
+        )
+
+    def commit(self) -> int:
+        """Serialize, revalidate, durably replace, and journal one Wiki mutation."""
+        lock = WikiLock(_lock_path(self.layout))
+        with lock.exclusive(_LOCK_TIMEOUT_SECONDS):
+            recovery = _recover_transactions_locked(self.layout)
+            if recovery.post_commit_cleanup_pending:
+                raise _cleanup_pending_error()
+            if recovery.writes_quarantined:
+                raise WikiRecoveryRequired("Wiki writes are quarantined pending journal repair")
+            self._revalidate()
+            journal: _Journal | None = None
+            try:
+                journal = self._write_prepared_journal()
+            except BaseException:
+                # No target can be replaced until record.json is durable. Debris
+                # without that record is therefore safe to discard immediately.
+                if journal is not None and not journal.record_path.exists():
+                    _remove_tree_durably(journal.directory)
+                raise
+
+            journal = _read_journal(self.layout, journal.directory)
+            for target in journal.targets:
+                if target.removes:
+                    _durable_remove(target.target, boundary=target.kind)
+                    continue
+                if target.new_bytes is None:
+                    raise WikiRecoveryRequired(
+                        f"prepared artifact is missing: {target.relative_target}"
+                    )
+                _durable_replace(
+                    target.target,
+                    target.new_bytes,
+                    boundary=target.kind,
+                )
+            self._mark_committed(journal)
+            _finalize_committed_journal(journal)
+            return self.new_revision
+
+    @contextmanager
+    def shared_read(self, timeout: float = _LOCK_TIMEOUT_SECONDS) -> Iterator[RecoveryResult]:
+        """Recover under exclusive lock, then expose only a committed shared view."""
+        with wiki_read_lock(self.layout, timeout=timeout) as result:
+            yield result
+
+    def _revalidate(self) -> None:
+        current_revision = _read_global_revision(self.layout)
+        # Validate pages first so a retried new-page transaction reports the
+        # concrete collision, while still refusing all writes before journaling.
+        for target in self.targets:
+            current_hash = _target_hash(target.target)
+            if target.kind == "page":
+                if target.old_hash is None and current_hash is not None:
+                    raise WikiConflictError(f"page already exists: {target.relative_target}")
+                if target.old_hash is not None and current_hash != target.old_hash:
+                    raise WikiConflictError(f"page revision changed: {target.relative_target}")
+                if target.expected_page_revision is not None:
+                    current = _read_page(target.target, target.relative_target)
+                    if current.revision != target.expected_page_revision:
+                        raise WikiConflictError(f"page revision changed: {target.relative_target}")
+            elif current_hash != target.old_hash:
+                if target.kind == "revision":
+                    raise WikiConflictError(
+                        f"global revision changed: expected {self.expected_global_revision}, "
+                        f"found {current_revision}"
+                    )
+                raise WikiConflictError(f"{target.kind} changed since transaction preparation")
+        if current_revision != self.expected_global_revision:
+            raise WikiConflictError(
+                f"global revision changed: expected {self.expected_global_revision}, "
+                f"found {current_revision}"
+            )
+
+    def _write_prepared_journal(self) -> _Journal:
+        journal_root = _journal_root(self.layout)
+        transaction_id = uuid4().hex
+        directory = journal_root / transaction_id
+        directory.mkdir(mode=0o700)
+        (directory / "old").mkdir(mode=0o700)
+        (directory / "new").mkdir(mode=0o700)
+        fsync_directory(directory)
+        _hit_failpoint("journal_directory_fsync")
+        fsync_directory(journal_root)
+        _hit_failpoint("journal_directory_fsync")
+        journal_targets: list[_JournalTarget] = []
+        record_path = directory / "record.json"
+        journal = _Journal(
+            directory=directory,
+            record_path=record_path,
+            transaction_id=transaction_id,
+            state="prepared",
+            expected_global_revision=self.expected_global_revision,
+            new_revision=self.new_revision,
+            targets=(),
+        )
+        try:
+            for index, target in enumerate(self.targets):
+                artifact_name = f"{index:04d}"
+                new_artifact: Path | None = None
+                if target.new_bytes is not None:
+                    new_artifact = directory / "new" / artifact_name
+                    _durable_create(new_artifact, target.new_bytes, boundary="artifact")
+                old_artifact: Path | None = None
+                if target.old_hash is not None:
+                    old_bytes = _read_regular(target.target)
+                    if content_hash(old_bytes) != target.old_hash:
+                        raise WikiConflictError(f"{target.kind} changed during journal preparation")
+                    old_artifact = directory / "old" / artifact_name
+                    _durable_create(old_artifact, old_bytes, boundary="artifact")
+                journal_targets.append(
+                    _JournalTarget(
+                        kind=target.kind,
+                        relative_target=target.relative_target,
+                        target=target.target,
+                        old_hash=target.old_hash,
+                        new_hash=target.new_hash,
+                        old_artifact=old_artifact,
+                        new_artifact=new_artifact,
+                        expected_page_revision=target.expected_page_revision,
+                    )
+                )
+            journal = replace(journal, targets=tuple(journal_targets))
+            _write_journal_record(journal, boundary="prepared_record")
+            _hit_failpoint("journal_fsync")
+            return journal
+        except BaseException:
+            if not record_path.exists():
+                _remove_tree_durably(directory)
+            raise
+
+    @staticmethod
+    def _mark_committed(journal: _Journal) -> None:
+        _write_journal_record(
+            replace(journal, state="committed"),
+            boundary="commit_record",
+        )
+
+
+def recover_transactions(
+    layout: WikiLayout,
+    *,
+    timeout: float = _LOCK_TIMEOUT_SECONDS,
+) -> RecoveryResult:
+    """Recover durable journals under the global exclusive writer lock.
+
+    A corrupt journal sets a persistent quarantine marker and is reported rather
+    than raised, keeping callers able to take a shared read-only view. Search
+    cache rebuild and acknowledgement are intentionally a separate protocol.
+    """
+    with WikiLock(_lock_path(layout)).exclusive(timeout):
+        return _recover_transactions_locked(layout)
+
+
+def acknowledge_reindex(
+    layout: WikiLayout,
+    *,
+    rebuilt_revision: int,
+    timeout: float = _LOCK_TIMEOUT_SECONDS,
+) -> ReindexAcknowledgement:
+    """Clear cache invalidation only when it covers the current required revision."""
+    if type(rebuilt_revision) is not int or rebuilt_revision < 0:
+        raise ValueError("rebuilt revision must be a non-negative integer")
+    with WikiLock(_lock_path(layout)).exclusive(timeout):
+        required = _read_reindex_marker(layout)
+        if required is None:
+            return ReindexAcknowledgement(acknowledged=True, required_revision=None)
+        current = _read_global_revision(layout)
+        if rebuilt_revision < required or rebuilt_revision != current:
+            return ReindexAcknowledgement(
+                acknowledged=False,
+                required_revision=required,
+            )
+        _remove_reindex_marker(_reindex_marker_path(layout))
+        return ReindexAcknowledgement(acknowledged=True, required_revision=None)
+
+
+@contextmanager
+def wiki_read_lock(
+    layout: WikiLayout,
+    *,
+    timeout: float = _LOCK_TIMEOUT_SECONDS,
+) -> Iterator[RecoveryResult]:
+    """Recover first, atomically downgrade, then hold the shared reader lock."""
+    recovered: list[RecoveryResult] = []
+    lock = _wiki_lock(layout, recovered)
+    with lock.shared(timeout):
+        yield recovered[0]
+
+
+def _wiki_lock(layout: WikiLayout, recovered: list[RecoveryResult]) -> WikiLock:
+    def recover() -> None:
+        recovered.append(_recover_transactions_locked(layout))
+
+    return WikiLock(_lock_path(layout), before_shared=recover)
+
+
+def _capture_targets(
+    layout: WikiLayout,
+    changes: tuple[PageChange, ...],
+    deletions: tuple[PageDeletion, ...],
+    index_bytes: bytes,
+    log_bytes: bytes,
+) -> tuple[_TargetPlan, ...]:
+    targets: list[_TargetPlan] = []
+    for change in sorted(changes, key=lambda item: item.page.logical_path):
+        logical_path = validate_logical_page(change.page.logical_path).as_posix()
+        if change.expected_revision is None:
+            if change.page.revision != 1:
+                raise ValueError("new Wiki pages must start at revision one")
+        elif change.page.revision != change.expected_revision + 1:
+            raise ValueError("updated Wiki pages must increment revision exactly once")
+        target = layout.root / logical_path
+        old_hash = _target_hash(target)
+        if change.expected_revision is None:
+            if old_hash is not None:
+                raise WikiConflictError(f"page already exists: {logical_path}")
+        else:
+            if old_hash is None:
+                raise WikiConflictError(f"page is missing: {logical_path}")
+            current = _read_page(target, logical_path)
+            if current.revision != change.expected_revision:
+                raise WikiConflictError(f"page revision changed: {logical_path}")
+        new_bytes = render_page(change.page).encode("utf-8")
+        targets.append(
+            _TargetPlan(
+                kind="page",
+                relative_target=logical_path,
+                target=target,
+                old_hash=old_hash,
+                new_hash=content_hash(new_bytes),
+                new_bytes=new_bytes,
+                expected_page_revision=change.expected_revision,
+            )
+        )
+    for deletion in deletions:
+        logical_path = deletion.logical_path
+        target = layout.root / logical_path
+        old_hash = _target_hash(target)
+        if old_hash is None:
+            raise WikiConflictError(f"page is missing: {logical_path}")
+        current = _read_page(target, logical_path)
+        if current.revision != deletion.expected_revision:
+            raise WikiConflictError(f"page revision changed: {logical_path}")
+        targets.append(
+            _TargetPlan(
+                kind="page",
+                relative_target=logical_path,
+                target=target,
+                old_hash=old_hash,
+                new_hash=None,
+                new_bytes=None,
+                expected_page_revision=deletion.expected_revision,
+            )
+        )
+    # The journal records pages in path order, whether they are written or removed.
+    targets.sort(key=lambda item: item.relative_target)
+
+    for kind, relative_target, target, new_bytes in (
+        ("index", "index.md", layout.index, index_bytes),
+        ("log", "log.md", layout.log, log_bytes),
+        ("revision", ".openkimo/revision", layout.revision, b""),
+    ):
+        data = (
+            f"{_read_global_revision(layout) + 1}\n".encode("ascii")
+            if kind == "revision"
+            else new_bytes
+        )
+        targets.append(
+            _TargetPlan(
+                kind=cast(Literal["index", "log", "revision"], kind),
+                relative_target=relative_target,
+                target=target,
+                old_hash=_target_hash(target),
+                new_hash=content_hash(data),
+                new_bytes=data,
+            )
+        )
+    return tuple(targets)
+
+
+def _recover_transactions_locked(layout: WikiLayout) -> RecoveryResult:
+    journal_root = _journal_root(layout)
+    quarantine_marker = journal_root / _QUARANTINE_MARKER
+    result = RecoveryResult(writes_quarantined=quarantine_marker.exists())
+    for entry in sorted(journal_root.iterdir(), key=lambda path: path.name):
+        if entry.name == _QUARANTINE_MARKER:
+            continue
+        if entry.is_symlink() or not entry.is_dir():
+            _quarantine(journal_root, entry.name)
+            result = replace(result, writes_quarantined=True)
+            continue
+        record_path = entry / "record.json"
+        if not record_path.exists():
+            _remove_tree_durably(entry, boundary="journal_cleanup")
+            result = replace(
+                result,
+                discarded_transactions=result.discarded_transactions + 1,
+            )
+            continue
+        try:
+            journal = _read_journal(layout, entry)
+        except (OSError, UnicodeDecodeError, json.JSONDecodeError, TypeError, ValueError):
+            _quarantine(journal_root, entry.name)
+            result = replace(result, writes_quarantined=True)
+            continue
+        try:
+            result = _recover_journal(journal, result)
+        except ValueError:
+            _quarantine(journal_root, entry.name)
+            result = replace(result, writes_quarantined=True)
+    try:
+        required_revision = _read_reindex_marker(layout)
+    except (OSError, ValueError):
+        required_revision = _read_global_revision(layout)
+        with suppress(OSError):
+            _write_reindex_marker(layout, required_revision)
+    if required_revision is not None:
+        result = replace(
+            result,
+            needs_reindex=True,
+            required_reindex_revision=required_revision,
+        )
+    return result
+
+
+def _recover_journal(journal: _Journal, result: RecoveryResult) -> RecoveryResult:
+    current_bytes = tuple(_read_optional_regular(target.target) for target in journal.targets)
+    current_hashes = tuple(
+        content_hash(data) if data is not None else None for data in current_bytes
+    )
+    old_hashes = tuple(target.old_hash for target in journal.targets)
+    new_hashes = tuple(target.new_hash for target in journal.targets)
+    current_known = all(
+        current in {old, new}
+        for current, old, new in zip(current_hashes, old_hashes, new_hashes, strict=True)
+    )
+    if not current_known:
+        raise ValueError("Wiki transaction found an unknown authoritative file hash")
+
+    if journal.state == "committed":
+        if current_hashes != new_hashes:
+            raise ValueError("committed Wiki journal does not match authoritative files")
+        _validate_target_bytes(journal, current_bytes, new=True)
+        finalized = _finalize_committed_journal(journal)
+        return _record_reindex_requirement(
+            result,
+            journal.new_revision,
+            cleanup_pending=not finalized,
+        )
+
+    if current_hashes == old_hashes:
+        _remove_tree_durably(journal.directory, boundary="journal_cleanup")
+        return replace(
+            result,
+            discarded_transactions=result.discarded_transactions + 1,
+        )
+    if current_hashes == new_hashes:
+        _validate_target_bytes(journal, current_bytes, new=True)
+        committed = replace(journal, state="committed")
+        _write_journal_record(committed, boundary="commit_record")
+        finalized = _finalize_committed_journal(committed)
+        return _record_reindex_requirement(
+            replace(
+                result,
+                recovered_transactions=result.recovered_transactions + 1,
+            ),
+            journal.new_revision,
+            cleanup_pending=not finalized,
+        )
+
+    if all(target.removes or target.new_bytes is not None for target in journal.targets):
+        for target in journal.targets:
+            if target.removes:
+                _durable_remove(target.target, boundary=target.kind)
+                continue
+            assert target.new_bytes is not None
+            _durable_replace(
+                target.target,
+                target.new_bytes,
+                boundary=target.kind,
+            )
+        committed = replace(journal, state="committed")
+        _write_journal_record(committed, boundary="commit_record")
+        finalized = _finalize_committed_journal(committed)
+        return _record_reindex_requirement(
+            replace(
+                result,
+                recovered_transactions=result.recovered_transactions + 1,
+            ),
+            journal.new_revision,
+            cleanup_pending=not finalized,
+        )
+
+    if any(target.old_hash is not None and target.old_bytes is None for target in journal.targets):
+        raise ValueError("Wiki transaction cannot roll forward or restore its backups")
+    for target in reversed(journal.targets):
+        if target.old_hash is None:
+            _durable_remove(target.target, boundary="rollback")
+        else:
+            assert target.old_bytes is not None
+            _durable_replace(target.target, target.old_bytes, boundary="rollback")
+    _remove_tree_durably(journal.directory, boundary="journal_cleanup")
+    return replace(
+        result,
+        rolled_back_transactions=result.rolled_back_transactions + 1,
+    )
+
+
+def _read_journal(layout: WikiLayout, directory: Path) -> _Journal:
+    record_path = directory / "record.json"
+    raw = json.loads(_read_regular(record_path).decode("utf-8"))
+    if not isinstance(raw, dict):
+        raise ValueError("Wiki journal record must be an object")
+    record = cast(dict[str, Any], raw)
+    if set(record) != {
+        "version",
+        "transaction_id",
+        "state",
+        "expected_global_revision",
+        "new_revision",
+        "targets",
+    }:
+        raise ValueError("Wiki journal has an invalid shape")
+    transaction_id = _strict_identifier(record["transaction_id"])
+    if transaction_id != directory.name:
+        raise ValueError("Wiki journal transaction ID does not match its directory")
+    version = _strict_non_negative_int(record["version"])
+    if version != _JOURNAL_VERSION:
+        raise ValueError("Wiki journal version is unsupported")
+    state = record["state"]
+    if state not in {"prepared", "committed"}:
+        raise ValueError("Wiki journal state is invalid")
+    expected_revision = _strict_non_negative_int(record["expected_global_revision"])
+    new_revision = _strict_non_negative_int(record["new_revision"])
+    if new_revision != expected_revision + 1:
+        raise ValueError("Wiki journal revision sequence is invalid")
+    raw_targets = record["targets"]
+    if not isinstance(raw_targets, list) or not raw_targets:
+        raise ValueError("Wiki journal targets are invalid")
+    target_values = cast(list[object], raw_targets)
+    targets = tuple(
+        _parse_journal_target(
+            layout,
+            directory,
+            index,
+            value,
+            expected_global_revision=expected_revision,
+            new_global_revision=new_revision,
+            validate_artifacts=state == "prepared",
+        )
+        for index, value in enumerate(target_values)
+    )
+    expected_order = sorted(
+        target.relative_target for target in targets if target.kind == "page"
+    ) + ["index.md", "log.md", ".openkimo/revision"]
+    if [target.relative_target for target in targets] != expected_order:
+        raise ValueError("Wiki journal target order is invalid")
+    return _Journal(
+        directory=directory,
+        record_path=record_path,
+        transaction_id=transaction_id,
+        state=cast(Literal["prepared", "committed"], state),
+        expected_global_revision=expected_revision,
+        new_revision=new_revision,
+        targets=targets,
+    )
+
+
+def _parse_journal_target(
+    layout: WikiLayout,
+    directory: Path,
+    index: int,
+    raw: object,
+    *,
+    expected_global_revision: int,
+    new_global_revision: int,
+    validate_artifacts: bool,
+) -> _JournalTarget:
+    if not isinstance(raw, dict):
+        raise ValueError("Wiki journal target must be an object")
+    value = cast(dict[str, Any], raw)
+    if set(value) != {
+        "kind",
+        "target",
+        "old_hash",
+        "new_hash",
+        "old_artifact",
+        "new_artifact",
+        "expected_page_revision",
+    }:
+        raise ValueError("Wiki journal target has an invalid shape")
+    kind = value["kind"]
+    if kind not in {"page", "index", "log", "revision"}:
+        raise ValueError("Wiki journal target kind is invalid")
+    relative_target = value["target"]
+    if not isinstance(relative_target, str):
+        raise ValueError("Wiki journal target path is invalid")
+    target = _resolve_recorded_target(layout, cast(str, kind), relative_target)
+    old_hash = _optional_hash(value["old_hash"])
+    new_hash = _optional_hash(value["new_hash"])
+    expected_page_revision = value["expected_page_revision"]
+    if expected_page_revision is not None:
+        expected_page_revision = _strict_non_negative_int(expected_page_revision)
+        if expected_page_revision < 1:
+            raise ValueError("expected page revision must be positive")
+    if kind != "page" and expected_page_revision is not None:
+        raise ValueError("special Wiki targets cannot have page revisions")
+    if kind == "page":
+        if old_hash is None and expected_page_revision is not None:
+            raise ValueError("new Wiki page cannot have an expected revision")
+        if old_hash is not None and expected_page_revision is None:
+            raise ValueError("updated Wiki page requires an expected revision")
+        if new_hash is None and old_hash is None:
+            raise ValueError("removed Wiki page must have an original")
+    elif new_hash is None:
+        raise ValueError("special Wiki targets cannot be removed")
+    expected_artifact = f"{index:04d}"
+    new_artifact: Path | None = None
+    if new_hash is None:
+        if value["new_artifact"] is not None:
+            raise ValueError("removed Wiki page cannot have a new artifact")
+    else:
+        new_artifact = _resolve_artifact(directory, value["new_artifact"], "new", expected_artifact)
+    old_artifact: Path | None = None
+    if old_hash is None:
+        if value["old_artifact"] is not None:
+            raise ValueError("missing original cannot have a backup")
+    else:
+        old_artifact = _resolve_artifact(directory, value["old_artifact"], "old", expected_artifact)
+    new_bytes = (
+        _read_optional_artifact(new_artifact)
+        if validate_artifacts and new_artifact is not None
+        else None
+    )
+    old_bytes = (
+        _read_optional_artifact(old_artifact)
+        if validate_artifacts and old_artifact is not None
+        else None
+    )
+    if new_bytes is not None and new_hash is not None and content_hash(new_bytes) != new_hash:
+        raise ValueError("new Wiki journal artifact hash does not match")
+    if old_hash is not None and old_bytes is not None and content_hash(old_bytes) != old_hash:
+        raise ValueError("old Wiki journal artifact hash does not match")
+    target_record = _JournalTarget(
+        kind=cast(Literal["page", "index", "log", "revision"], kind),
+        relative_target=relative_target,
+        target=target,
+        old_hash=old_hash,
+        new_hash=new_hash,
+        old_artifact=old_artifact,
+        new_artifact=new_artifact,
+        expected_page_revision=cast(int | None, expected_page_revision),
+        old_bytes=old_bytes,
+        new_bytes=new_bytes,
+    )
+    if validate_artifacts:
+        _validate_journal_artifact_semantics(
+            target_record,
+            expected_global_revision=expected_global_revision,
+            new_global_revision=new_global_revision,
+        )
+    return target_record
+
+
+def _write_journal_record(journal: _Journal, *, boundary: str) -> None:
+    targets: list[dict[str, object]] = []
+    for target in journal.targets:
+        targets.append(
+            {
+                "kind": target.kind,
+                "target": target.relative_target,
+                "old_hash": target.old_hash,
+                "new_hash": target.new_hash,
+                "old_artifact": (
+                    target.old_artifact.relative_to(journal.directory).as_posix()
+                    if target.old_artifact is not None
+                    else None
+                ),
+                "new_artifact": (
+                    target.new_artifact.relative_to(journal.directory).as_posix()
+                    if target.new_artifact is not None
+                    else None
+                ),
+                "expected_page_revision": target.expected_page_revision,
+            }
+        )
+    record: Mapping[str, object] = {
+        "version": _JOURNAL_VERSION,
+        "transaction_id": journal.transaction_id,
+        "state": journal.state,
+        "expected_global_revision": journal.expected_global_revision,
+        "new_revision": journal.new_revision,
+        "targets": targets,
+    }
+    data = json.dumps(record, separators=(",", ":"), sort_keys=False).encode("utf-8")
+    _durable_replace(journal.record_path, data, boundary=boundary)
+
+
+def _resolve_recorded_target(layout: WikiLayout, kind: str, relative_target: str) -> Path:
+    if kind == "page":
+        return layout.root / validate_logical_page(relative_target)
+    special = {
+        ("index", "index.md"): layout.index,
+        ("log", "log.md"): layout.log,
+        ("revision", ".openkimo/revision"): layout.revision,
+    }
+    try:
+        return special[(kind, relative_target)]
+    except KeyError as exc:
+        raise ValueError("Wiki journal special target is invalid") from exc
+
+
+def _resolve_artifact(
+    directory: Path,
+    raw: object,
+    expected_parent: str,
+    expected_name: str,
+) -> Path:
+    expected = f"{expected_parent}/{expected_name}"
+    if raw != expected:
+        raise ValueError("Wiki journal artifact path is invalid")
+    return directory / expected_parent / expected_name
+
+
+def _read_optional_artifact(path: Path) -> bytes | None:
+    return _read_optional_regular(path)
+
+
+def _validate_journal_artifact_semantics(
+    target: _JournalTarget,
+    *,
+    expected_global_revision: int,
+    new_global_revision: int,
+) -> None:
+    _validate_one_target_version(
+        target,
+        target.old_bytes,
+        new=False,
+        expected_global_revision=expected_global_revision,
+        new_global_revision=new_global_revision,
+    )
+    _validate_one_target_version(
+        target,
+        target.new_bytes,
+        new=True,
+        expected_global_revision=expected_global_revision,
+        new_global_revision=new_global_revision,
+    )
+
+
+def _validate_target_bytes(
+    journal: _Journal,
+    values: tuple[bytes | None, ...],
+    *,
+    new: bool,
+) -> None:
+    for target, data in zip(journal.targets, values, strict=True):
+        _validate_one_target_version(
+            target,
+            data,
+            new=new,
+            expected_global_revision=journal.expected_global_revision,
+            new_global_revision=journal.new_revision,
+        )
+
+
+def _validate_one_target_version(
+    target: _JournalTarget,
+    data: bytes | None,
+    *,
+    new: bool,
+    expected_global_revision: int,
+    new_global_revision: int,
+) -> None:
+    if data is None:
+        return
+    if target.kind == "page":
+        page = _parse_page_bytes(data, target.relative_target)
+        if new:
+            expected = (
+                1 if target.expected_page_revision is None else target.expected_page_revision + 1
+            )
+        else:
+            if target.expected_page_revision is None:
+                raise ValueError("new Wiki page cannot have old page bytes")
+            expected = target.expected_page_revision
+        if page.revision != expected:
+            raise ValueError("Wiki journal page revision does not match its record")
+        return
+    if target.kind in {"index", "log"}:
+        try:
+            data.decode("utf-8")
+        except UnicodeDecodeError as exc:
+            raise ValueError("Wiki journal special Markdown must be valid UTF-8") from exc
+        return
+    expected_revision = new_global_revision if new else expected_global_revision
+    if data != f"{expected_revision}\n".encode("ascii"):
+        raise ValueError("Wiki journal revision artifact does not match its record")
+
+
+def _record_reindex_requirement(
+    result: RecoveryResult,
+    revision: int,
+    *,
+    cleanup_pending: bool,
+) -> RecoveryResult:
+    required = max(result.required_reindex_revision or 0, revision)
+    return replace(
+        result,
+        needs_reindex=True,
+        required_reindex_revision=required,
+        post_commit_cleanup_pending=(
+            result.post_commit_cleanup_pending + (1 if cleanup_pending else 0)
+        ),
+    )
+
+
+def _cleanup_pending_error() -> WikiRecoveryRequired:
+    return WikiRecoveryRequired(
+        "Wiki committed-journal cleanup is still pending",
+        retryable=True,
+        action="Retry Wiki recovery after the cleanup I/O condition is resolved.",
+    )
+
+
+def _finalize_committed_journal(journal: _Journal) -> bool:
+    """Best-effort cache invalidation and authority-journal cleanup.
+
+    Failure never turns a committed Markdown revision into a write quarantine.
+    The committed journal remains retryable on the next recovery.
+    """
+    try:
+        _mark_reindex_required(journal)
+        _remove_tree_durably(journal.directory, boundary="journal_cleanup")
+    except OSError:
+        return False
+    return True
+
+
+def _mark_reindex_required(journal: _Journal) -> None:
+    metadata = journal.directory.parent.parent
+    marker = _reindex_marker_path_for_metadata(metadata)
+    if marker.exists() or marker.is_symlink():
+        try:
+            existing = _read_reindex_marker_path(marker)
+        except ValueError:
+            existing = None
+    else:
+        existing = None
+    required = max(existing or 0, journal.new_revision)
+    _write_reindex_marker_path(marker, required)
+
+
+def _reindex_marker_path(layout: WikiLayout) -> Path:
+    return _reindex_marker_path_for_metadata(layout.metadata)
+
+
+def _reindex_marker_path_for_metadata(metadata: Path) -> Path:
+    return metadata / _REINDEX_MARKER
+
+
+def _write_reindex_marker(layout: WikiLayout, revision: int) -> None:
+    _write_reindex_marker_path(_reindex_marker_path(layout), revision)
+
+
+def _write_reindex_marker_path(marker: Path, revision: int) -> None:
+    data = json.dumps({"revision": revision}, separators=(",", ":")).encode("utf-8")
+    _durable_replace(marker, data, boundary="reindex_marker")
+
+
+def _read_reindex_marker(layout: WikiLayout) -> int | None:
+    marker = _reindex_marker_path(layout)
+    if not marker.exists() and not marker.is_symlink():
+        return None
+    return _read_reindex_marker_path(marker)
+
+
+def _read_reindex_marker_path(marker: Path) -> int:
+    raw = cast(object, json.loads(_read_regular(marker).decode("utf-8")))
+    if not isinstance(raw, dict):
+        raise ValueError("Wiki cache invalidation marker has an invalid shape")
+    marker_data = cast(dict[object, object], raw)
+    if set(marker_data) != {"revision"}:
+        raise ValueError("Wiki cache invalidation marker has an invalid shape")
+    value = marker_data["revision"]
+    return _strict_non_negative_int(value)
+
+
+def _remove_reindex_marker(path: Path) -> None:
+    _read_regular(path)
+    path.unlink()
+    _hit_failpoint("reindex_ack_delete")
+    fsync_directory(path.parent)
+    _hit_failpoint("reindex_ack_directory_fsync")
+
+
+def _quarantine(journal_root: Path, transaction_name: str) -> None:
+    marker = journal_root / _QUARANTINE_MARKER
+    if marker.exists():
+        return
+    data = json.dumps(
+        {"reason": "unreadable-journal", "transaction": transaction_name},
+        separators=(",", ":"),
+    ).encode("utf-8")
+    with suppress(FileExistsError):
+        _durable_create(marker, data, boundary="quarantine")
+
+
+def _lock_path(layout: WikiLayout) -> Path:
+    return layout.metadata / "locks" / "writer.lock"
+
+
+def _journal_root(layout: WikiLayout) -> Path:
+    root = layout.metadata / "journal"
+    if root.is_symlink() or not root.is_dir():
+        raise ValueError("Wiki journal root must be a real directory")
+    return root
+
+
+def _read_global_revision(layout: WikiLayout) -> int:
+    try:
+        raw = _read_regular(layout.revision).decode("ascii").strip()
+    except UnicodeDecodeError as exc:
+        raise ValueError("Wiki revision must be ASCII") from exc
+    if not raw or not raw.isascii() or not raw.isdecimal():
+        raise ValueError("Wiki revision must be a non-negative integer")
+    return int(raw)
+
+
+def _read_page(path: Path, logical_path: str):
+    try:
+        return parse_page(_read_regular(path).decode("utf-8"), logical_path)
+    except UnicodeDecodeError as exc:
+        raise ValueError(f"Wiki page is not valid UTF-8: {logical_path}") from exc
+
+
+def _target_hash(path: Path) -> str | None:
+    data = _read_optional_regular(path)
+    return content_hash(data) if data is not None else None
+
+
+def _read_optional_regular(path: Path) -> bytes | None:
+    if not path.exists() and not path.is_symlink():
+        return None
+    return _read_regular(path)
+
+
+def _parse_page_bytes(data: bytes, logical_path: str):
+    try:
+        return parse_page(data.decode("utf-8"), logical_path)
+    except UnicodeDecodeError as exc:
+        raise ValueError(f"Wiki page is not valid UTF-8: {logical_path}") from exc
+
+
+def _read_regular(path: Path) -> bytes:
+    flags = os.O_RDONLY
+    if hasattr(os, "O_NOFOLLOW"):
+        flags |= os.O_NOFOLLOW
+    try:
+        descriptor = os.open(path, flags)
+    except OSError:
+        if path.is_symlink():
+            raise ValueError(f"Wiki transaction path must be a regular file: {path.name}") from None
+        raise
+    try:
+        file_stat = os.fstat(descriptor)
+        path_stat = path.stat(follow_symlinks=False)
+        if (
+            not stat.S_ISREG(file_stat.st_mode)
+            or not stat.S_ISREG(path_stat.st_mode)
+            or (file_stat.st_dev, file_stat.st_ino) != (path_stat.st_dev, path_stat.st_ino)
+        ):
+            raise ValueError(f"Wiki transaction path must be a regular file: {path.name}")
+        chunks: list[bytes] = []
+        while chunk := os.read(descriptor, 1024 * 1024):
+            chunks.append(chunk)
+        return b"".join(chunks)
+    finally:
+        os.close(descriptor)
+
+
+def _durable_create(path: Path, data: bytes, *, boundary: str | None = None) -> None:
+    descriptor = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    with os.fdopen(descriptor, "wb") as stream:
+        if boundary is not None:
+            _hit_failpoint(f"{boundary}_create")
+        stream.write(data)
+        stream.flush()
+        os.fsync(stream.fileno())
+        if boundary is not None:
+            _hit_failpoint(f"{boundary}_fsync")
+    fsync_directory(path.parent)
+    if boundary is not None:
+        _hit_failpoint(f"{boundary}_directory_fsync")
+
+
+def _durable_replace(
+    target: Path,
+    data: bytes,
+    *,
+    boundary: str | None = None,
+) -> None:
+    target.parent.mkdir(parents=False, exist_ok=True)
+    if target.parent.is_symlink() or not target.parent.is_dir():
+        raise ValueError(f"Wiki transaction parent must be a real directory: {target.parent.name}")
+    descriptor, raw_path = tempfile.mkstemp(prefix=f".{target.name}.", dir=target.parent)
+    temporary = Path(raw_path)
+    try:
+        with os.fdopen(descriptor, "wb") as stream:
+            if boundary is not None:
+                _hit_failpoint(f"{boundary}_temp_create")
+            stream.write(data)
+            stream.flush()
+            if boundary is not None:
+                _hit_failpoint(f"{boundary}_temp_write")
+            os.fsync(stream.fileno())
+            if boundary is not None:
+                _hit_failpoint(f"{boundary}_temp_fsync")
+        if boundary is not None:
+            _hit_failpoint(f"{boundary}_pre_replace")
+        os.replace(temporary, target)
+        if boundary is not None:
+            _hit_failpoint(f"{boundary}_replace")
+        fsync_directory(target.parent)
+        if boundary is not None:
+            _hit_failpoint(f"{boundary}_directory_fsync")
+    finally:
+        temporary.unlink(missing_ok=True)
+
+
+def _durable_remove(path: Path, *, boundary: str | None = None) -> None:
+    if not path.exists() and not path.is_symlink():
+        return
+    if path.is_symlink() or not path.is_file():
+        raise ValueError(f"Wiki transaction removal target must be a regular file: {path.name}")
+    path.unlink()
+    if boundary is not None:
+        _hit_failpoint(f"{boundary}_remove")
+    fsync_directory(path.parent)
+    if boundary is not None:
+        _hit_failpoint(f"{boundary}_directory_fsync")
+
+
+def _remove_tree_durably(path: Path, *, boundary: str | None = None) -> None:
+    parent = path.parent
+    if path.exists():
+        if path.is_symlink() or not path.is_dir():
+            raise ValueError("Wiki journal cleanup target must be a real directory")
+        if boundary is not None:
+            _hit_failpoint(f"{boundary}_pre_delete")
+        shutil.rmtree(path)
+        if boundary is not None:
+            _hit_failpoint(f"{boundary}_delete")
+        fsync_directory(parent)
+        if boundary is not None:
+            _hit_failpoint(f"{boundary}_directory_fsync")
+
+
+def fsync_directory(path: Path) -> None:
+    """Flush directory metadata where the host exposes that durability boundary."""
+    if os.name == "nt":
+        return
+    flags = os.O_RDONLY
+    if hasattr(os, "O_DIRECTORY"):
+        flags |= os.O_DIRECTORY
+    descriptor = os.open(path, flags)
+    try:
+        os.fsync(descriptor)
+    finally:
+        os.close(descriptor)
+
+
+def _required_hash(value: object) -> str:
+    if not isinstance(value, str) or not value.startswith(_HASH_PREFIX):
+        raise ValueError("Wiki journal hash is invalid")
+    digest = value.removeprefix(_HASH_PREFIX)
+    if len(digest) != 64 or any(character not in "0123456789abcdef" for character in digest):
+        raise ValueError("Wiki journal hash is invalid")
+    return value
+
+
+def _optional_hash(value: object) -> str | None:
+    return None if value is None else _required_hash(value)
+
+
+def _strict_non_negative_int(value: object) -> int:
+    if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+        raise ValueError("Wiki journal integer is invalid")
+    return value
+
+
+def _strict_identifier(value: object) -> str:
+    if (
+        not isinstance(value, str)
+        or not value
+        or len(value) > 64
+        or any(character not in "0123456789abcdef" for character in value)
+    ):
+        raise ValueError("Wiki journal transaction identifier is invalid")
+    return value
+
+
+def _hit_failpoint(_name: str) -> None:
+    """Test seam for simulating a process interruption after durable boundaries."""

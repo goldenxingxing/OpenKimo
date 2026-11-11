@@ -1,0 +1,813 @@
+from __future__ import annotations
+
+import asyncio
+import os
+from dataclasses import asdict, dataclass
+from datetime import datetime
+from pathlib import Path
+from typing import TYPE_CHECKING, Any, Literal
+from uuid import NAMESPACE_URL, UUID, uuid5
+
+import pydantic
+from jinja2 import Environment as JinjaEnvironment
+from jinja2 import FileSystemLoader, StrictUndefined, TemplateError, UndefinedError
+from kaos.local import local_kaos
+from kaos.path import KaosPath
+from kosong.tooling import Toolset
+
+from kimo_cli.agentspec import ResolvedAgentSpec, load_agent_spec
+from kimo_cli.approval_runtime import ApprovalRuntime
+from kimo_cli.auth.oauth import OAuthManager
+from kimo_cli.background import BackgroundTaskManager
+from kimo_cli.config import Config
+from kimo_cli.exception import MCPConfigError, SystemPromptTemplateError
+from kimo_cli.llm import LLM
+from kimo_cli.memory import get_user_memory_dir
+from kimo_cli.notifications import NotificationEvent, NotificationManager
+from kimo_cli.session import Session
+from kimo_cli.skill import (
+    ScopedSkillsRoot,
+    Skill,
+    discover_skills_from_roots,
+    filter_skills,
+    format_skills_for_prompt,
+    index_skills,
+    resolve_skills_roots,
+)
+from kimo_cli.soul.approval import Approval, ApprovalState
+from kimo_cli.soul.denwarenji import DenwaRenji
+from kimo_cli.soul.offload import ToolOutputOffloader
+from kimo_cli.soul.toolset import KimoToolset
+from kimo_cli.subagents.models import AgentTypeDefinition, ToolPolicy
+from kimo_cli.subagents.registry import LaborMarket
+from kimo_cli.subagents.store import SubagentStore
+from kimo_cli.utils.environment import Environment
+from kimo_cli.utils.logging import logger
+from kimo_cli.utils.path import find_project_root, is_within_directory, list_directory
+from kimo_cli.wire.root_hub import RootWireHub
+
+if TYPE_CHECKING:
+    from fastmcp.mcp_config import MCPConfig
+
+    from kimo_cli.tools.wiki import WikiToolContext
+    from kimo_cli.wiki.evidence import WikiEvidenceReporter
+    from kimo_cli.wiki.manager import WikiManager
+    from kimo_cli.wiki.triggers import WikiTurnCoordinator
+    from kimo_cli.wiki.trusted_paths import UserTrustedPaths
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class BuiltinSystemPromptArgs:
+    """Builtin system prompt arguments."""
+
+    KIMO_NOW: str
+    """The current datetime."""
+    KIMO_WORK_DIR: KaosPath
+    """The absolute path of current working directory."""
+    KIMO_WORK_DIR_LS: str
+    """The directory listing of current working directory."""
+    KIMO_AGENTS_MD: str  # TODO: move to first message from system prompt
+    """The merged content of AGENTS.md files (from project root to work_dir)."""
+    KIMO_SKILLS: str
+    """Formatted information about available skills."""
+    KIMO_ADDITIONAL_DIRS_INFO: str
+    """Formatted information about additional directories in the workspace."""
+    KIMO_OS: str
+    """The operating system kind, e.g. 'Windows', 'macOS', 'Linux'."""
+    KIMO_SHELL: str
+    """The shell executable used by the Shell tool, e.g. 'bash (`/bin/bash`)'."""
+    KIMO_OUTPUT_DIR: str
+    """The directory where the agent must save all output and intermediate files."""
+    KIMO_WIKI_CONTEXT: str = ""
+    """Bounded awareness of the shared global Wiki."""
+    KIMO_AGENT_NAME: str = "OpenKimo"
+    """The product identity the agent presents to users (brandable via KIMO_AGENT_NAME env)."""
+
+
+_AGENTS_MD_MAX_BYTES = 32 * 1024  # 32 KiB
+_WIKI_SESSION_NAMESPACE = uuid5(NAMESPACE_URL, "openkimo.global-wiki.session")
+
+
+async def _dirs_root_to_leaf(work_dir: KaosPath, project_root: KaosPath) -> list[KaosPath]:
+    """Return the list of directories from *project_root* down to *work_dir* (inclusive)."""
+    dirs: list[KaosPath] = []
+    current = work_dir
+    while True:
+        dirs.append(current)
+        if current == project_root:
+            break
+        parent = current.parent
+        if parent == current:
+            break
+        current = parent
+    dirs.reverse()  # root → leaf
+    return dirs
+
+
+async def load_agents_md(work_dir: KaosPath) -> str | None:
+    """Discover and merge ``AGENTS.md`` files from the project root down to *work_dir*.
+
+    For each directory on the path, the following candidates are checked in order:
+
+    1. ``.kimo/AGENTS.md``  — project-local kimo config (highest priority)
+    2. ``AGENTS.md``        — standard location
+    3. ``agents.md``        — lowercase variant (mutually exclusive with 2)
+
+    Within a single directory, ``.kimo/AGENTS.md`` and ``AGENTS.md``/``agents.md``
+    are **both** loaded (with ``.kimo/`` first), but ``AGENTS.md`` and ``agents.md``
+    are mutually exclusive (uppercase wins).
+
+    All discovered files are concatenated root→leaf, separated by ``\\n\\n``, with
+    source annotations.  Total size is capped at :data:`_AGENTS_MD_MAX_BYTES`.
+    Budget is allocated leaf-first so deeper (more specific) files are never
+    truncated in favour of shallower ones.
+    """
+    project_root = await find_project_root(work_dir)
+    dirs = await _dirs_root_to_leaf(work_dir, project_root)
+
+    # Phase 1: collect all candidate files (root → leaf order)
+    discovered: list[tuple[KaosPath, str]] = []  # (path, content)
+    for d in dirs:
+        # .kimo/AGENTS.md is always checked independently (can coexist with root-level file)
+        kimo_path = d / ".kimo" / "AGENTS.md"
+        # AGENTS.md and agents.md are mutually exclusive (uppercase wins)
+        root_candidates = [d / "AGENTS.md", d / "agents.md"]
+
+        candidates: list[KaosPath] = []
+        if await kimo_path.is_file():
+            candidates.append(kimo_path)
+        for rc in root_candidates:
+            if await rc.is_file():
+                candidates.append(rc)
+                break
+
+        for path in candidates:
+            content = (await path.read_text()).strip()
+            if content:
+                discovered.append((path, content))
+                logger.info("Loaded agents.md: {path}", path=path)
+
+    if not discovered:
+        logger.info(
+            "No AGENTS.md found from {root} to {cwd}",
+            root=project_root,
+            cwd=work_dir,
+        )
+        return None
+
+    # Phase 2: allocate budget leaf-first so deeper (more specific) files
+    # are never truncated in favour of shallower ones.
+    # The annotation overhead (<!-- From: ... -->\n and \n\n separators)
+    # is included in the budget so the final output never exceeds the limit.
+    remaining = _AGENTS_MD_MAX_BYTES
+    budgeted: list[tuple[KaosPath, str]] = [None] * len(discovered)  # type: ignore[list-item]
+    for i in reversed(range(len(discovered))):
+        path, content = discovered[i]
+        annotation = f"<!-- From: {path} -->\n"
+        # Reserve space for the annotation and the \n\n separator between parts
+        separator_cost = len(b"\n\n") if i < len(discovered) - 1 else 0
+        overhead = len(annotation.encode()) + separator_cost
+        remaining -= overhead
+        if remaining <= 0:
+            budgeted[i] = (path, "")
+            remaining = 0
+            continue
+        encoded = content.encode()
+        if len(encoded) > remaining:
+            content = encoded[:remaining].decode(errors="ignore").strip()
+            logger.warning("AGENTS.md truncated due to size limit: {path}", path=path)
+        remaining -= len(content.encode())
+        budgeted[i] = (path, content)
+
+    # Phase 3: assemble in root → leaf order, skipping entries emptied by truncation
+    parts: list[str] = []
+    for path, content in budgeted:
+        if content:
+            parts.append(f"<!-- From: {path} -->\n{content}")
+
+    return "\n\n".join(parts) if parts else None
+
+
+@dataclass(slots=True, kw_only=True)
+class Runtime:
+    """Agent runtime."""
+
+    config: Config
+    oauth: OAuthManager
+    llm: LLM | None  # we do not freeze the `Runtime` dataclass because LLM can be changed
+    session: Session
+    builtin_args: BuiltinSystemPromptArgs
+    denwa_renji: DenwaRenji
+    approval: Approval
+    labor_market: LaborMarket
+    environment: Environment
+    notifications: NotificationManager
+    background_tasks: BackgroundTaskManager
+    skills: dict[str, Skill]
+    additional_dirs: list[KaosPath]
+    skills_dirs: list[KaosPath]
+    user_memory_dir: Path
+    """User-private memory directory ({KIMO_SHARE_DIR}/users/<owner_id>/memory/).
+    Derived from KIMO_USER_ID env var (set by sandbox runner) or session owner_id."""
+    subagent_store: SubagentStore | None = None
+    approval_runtime: ApprovalRuntime | None = None
+    root_wire_hub: RootWireHub | None = None
+    subagent_id: str | None = None
+    subagent_type: str | None = None
+    role: Literal["root", "subagent"] = "root"
+    ui_mode: str = "shell"
+    resumed: bool = False
+    hook_engine: Any = None
+    """HookEngine instance, set by KimoCLI after soul creation."""
+    managed_skill_revision: int = 0
+    skills_prompt: str = ""
+    requested_skills_dirs: list[KaosPath] | None = None
+    wiki: WikiManager | None = None
+    workspace_id: UUID | None = None
+    wiki_tool_context: WikiToolContext | None = None
+    wiki_coordinator: WikiTurnCoordinator | None = None
+    wiki_evidence_reporter: WikiEvidenceReporter | None = None
+    wiki_trusted_paths: UserTrustedPaths | None = None
+    """Folders and files the user named this session, trusted as Wiki evidence roots."""
+    tool_output_offloader: ToolOutputOffloader | None = None
+    """Overflowing tool output is persisted here so truncation loses nothing."""
+
+    def __post_init__(self) -> None:
+        if self.subagent_store is None:
+            self.subagent_store = SubagentStore(self.session)
+        if self.tool_output_offloader is None:
+            self.tool_output_offloader = ToolOutputOffloader(self.session.dir / "offload")
+        if self.root_wire_hub is None:
+            self.root_wire_hub = RootWireHub()
+        if self.approval_runtime is None:
+            self.approval_runtime = ApprovalRuntime()
+        self.approval_runtime.bind_root_wire_hub(self.root_wire_hub)
+        self.approval.set_runtime(self.approval_runtime)
+        self.background_tasks.bind_runtime(self)
+
+    @staticmethod
+    async def create(
+        config: Config,
+        oauth: OAuthManager,
+        llm: LLM | None,
+        session: Session,
+        yolo: bool,
+        afk: bool = False,
+        runtime_afk: bool = False,
+        skills_dirs: list[KaosPath] | None = None,
+    ) -> Runtime:
+        ls_output, agents_md, environment = await asyncio.gather(
+            list_directory(session.work_dir),
+            load_agents_md(session.work_dir),
+            Environment.detect(),
+        )
+
+        # Resolve the user-private memory directory.  KIMO_USER_ID is set by
+        # the sandbox runner from SessionState.owner_id; in local-mode CLI use
+        # we fall back to the loaded session state.
+        owner_id = os.environ.get("KIMO_USER_ID") or session.state.owner_id
+        user_memory_dir = get_user_memory_dir(owner_id)
+
+        # Discover a revision-consistent snapshot. If mutations keep racing
+        # initialization, store -1 so the next turn is guaranteed to refresh.
+        from kimo_cli.skill.manager import SkillManager
+
+        managed_skill_revision = -1
+        scoped_roots: list[ScopedSkillsRoot] = []
+        skills: list[Skill] = []
+        for _attempt in range(3):
+            revision_before = SkillManager().revision
+            from kimo_cli.evolution.library import applied_skill_dirs
+
+            evolution_skill_dirs = applied_skill_dirs(config)
+            extra_skill_dirs = list(config.extra_skill_dirs or []) + [
+                str(p) for p in evolution_skill_dirs
+            ]
+            scoped_roots = await resolve_skills_roots(
+                session.work_dir,
+                skills_dirs=skills_dirs,
+                merge_brands=config.merge_all_available_skills,
+                brands=config.skill_brands,
+                extra_skill_dirs=extra_skill_dirs or None,
+                skip_skill_dirs=config.skip_skill_dirs or None,
+            )
+            skills = await discover_skills_from_roots(scoped_roots)
+            revision_after = SkillManager().revision
+            if revision_before == revision_after:
+                managed_skill_revision = revision_after
+                break
+        # Canonicalize so symlinked skill directories match resolved paths
+        skills_roots_canonical = [s.root.canonical() for s in scoped_roots]
+        skills_by_name = index_skills(skills)
+        logger.info("Discovered {count} skill(s)", count=len(skills))
+        skills_formatted = format_skills_for_prompt(skills)
+
+        # Restore additional directories from session state, pruning stale entries
+        additional_dirs: list[KaosPath] = []
+        pruned = False
+        valid_dir_strs: list[str] = []
+        for dir_str in session.state.additional_dirs:
+            d = KaosPath(dir_str).canonical()
+            if await d.is_dir():
+                additional_dirs.append(d)
+                valid_dir_strs.append(dir_str)
+            else:
+                logger.warning(
+                    "Additional directory no longer exists, removing from state: {dir}",
+                    dir=dir_str,
+                )
+                pruned = True
+        if pruned:
+            session.state.additional_dirs = valid_dir_strs
+            session.save_state()
+
+        # Format additional dirs info for system prompt
+        additional_dirs_info = ""
+        if additional_dirs:
+            parts: list[str] = []
+            for d in additional_dirs:
+                try:
+                    dir_ls = await list_directory(d)
+                except OSError:
+                    logger.warning(
+                        "Cannot list additional directory, skipping listing: {dir}", dir=d
+                    )
+                    dir_ls = "[directory not readable]"
+                parts.append(f"### `{d}`\n\n```\n{dir_ls}\n```")
+            additional_dirs_info = "\n\n".join(parts)
+
+        # Merge invocation flags with persisted session state.
+        effective_yolo = yolo or session.state.approval.yolo
+        if afk and not session.state.approval.afk:
+            session.state.approval.afk = True
+            session.save_state()
+        saved_actions = set(session.state.approval.auto_approve_actions)
+
+        def _on_approval_change() -> None:
+            session.state.approval.yolo = approval_state.yolo
+            session.state.approval.afk = approval_state.afk
+            session.state.approval.auto_approve_actions = set(approval_state.auto_approve_actions)
+            session.save_state()
+
+        approval_state = ApprovalState(
+            yolo=effective_yolo,
+            afk=session.state.approval.afk,
+            runtime_afk=runtime_afk,
+            auto_approve_actions=saved_actions,
+            on_change=_on_approval_change,
+        )
+        notifications = NotificationManager(
+            session.context_file.parent / "notifications",
+            config.notifications,
+        )
+        (
+            wiki,
+            workspace_id,
+            wiki_tool_context,
+            wiki_context,
+            wiki_unavailable,
+        ) = await _initialize_global_wiki(
+            session,
+            owner_id=owner_id,
+        )
+        if wiki_unavailable:
+            try:
+                await asyncio.to_thread(
+                    notifications.publish,
+                    NotificationEvent(
+                        id=notifications.new_id(),
+                        category="system",
+                        type="wiki.unavailable",
+                        source_kind="wiki",
+                        source_id="global",
+                        title="Wiki 暂不可用",
+                        body="本地 Wiki 初始化失败；当前会话仍可继续。",
+                        severity="warning",
+                        targets=["wire", "shell"],
+                        dedupe_key="wiki:startup:unavailable",
+                    ),
+                )
+            except Exception:
+                logger.exception("Failed to publish global Wiki unavailable notification")
+
+        wiki_coordinator = None
+        if wiki is not None and wiki_tool_context is not None:
+            from kimo_cli.wiki.triggers import WikiTurnCoordinator
+
+            wiki_coordinator = WikiTurnCoordinator(
+                provenance_session_id=wiki_tool_context.provenance_session_id,
+                workspace_id=workspace_id,
+            )
+
+        runtime = Runtime(
+            config=config,
+            oauth=oauth,
+            llm=llm,
+            session=session,
+            builtin_args=BuiltinSystemPromptArgs(
+                KIMO_NOW=datetime.now().astimezone().isoformat(),
+                KIMO_WORK_DIR=session.work_dir,
+                KIMO_WORK_DIR_LS=ls_output,
+                KIMO_AGENTS_MD=agents_md or "",
+                KIMO_SKILLS=skills_formatted or "No skills found.",
+                KIMO_ADDITIONAL_DIRS_INFO=additional_dirs_info,
+                KIMO_OS=environment.os_kind,
+                KIMO_SHELL=environment.shell_description,
+                KIMO_OUTPUT_DIR=os.environ.get("KIMO_OUTPUT_DIR", "/app/output"),
+                KIMO_WIKI_CONTEXT=wiki_context,
+                KIMO_AGENT_NAME=os.environ.get("KIMO_AGENT_NAME") or "OpenKimo",
+            ),
+            denwa_renji=DenwaRenji(),
+            approval=Approval(state=approval_state),
+            labor_market=LaborMarket(),
+            environment=environment,
+            notifications=notifications,
+            background_tasks=BackgroundTaskManager(
+                session,
+                config.background,
+                notifications=notifications,
+            ),
+            skills=skills_by_name,
+            additional_dirs=additional_dirs,
+            # Only expose skills roots outside the workspace for Glob access;
+            # project-level roots are already within work_dir.
+            skills_dirs=[
+                r for r in skills_roots_canonical if not is_within_directory(r, session.work_dir)
+            ],
+            user_memory_dir=user_memory_dir,
+            subagent_store=SubagentStore(session),
+            approval_runtime=ApprovalRuntime(),
+            root_wire_hub=RootWireHub(),
+            role="root",
+            managed_skill_revision=managed_skill_revision,
+            skills_prompt=skills_formatted or "No skills found.",
+            requested_skills_dirs=skills_dirs,
+            wiki=wiki,
+            workspace_id=workspace_id,
+            wiki_tool_context=wiki_tool_context,
+            wiki_coordinator=wiki_coordinator,
+        )
+        if wiki_coordinator is not None:
+            from kimo_cli.wiki.evidence import WikiEvidenceReporter
+
+            runtime.wiki_evidence_reporter = WikiEvidenceReporter(wiki_coordinator, runtime)
+        return runtime
+
+    def copy_for_subagent(
+        self,
+        *,
+        agent_id: str,
+        subagent_type: str,
+        llm_override: LLM | None = None,
+        run_generation: int = 0,
+    ) -> Runtime:
+        """Clone runtime for a subagent.
+
+        A subagent gets no Wiki authority of any kind: no manager, no tool
+        context, and no coordinator.  It only gets an evidence reporter, which
+        can observe its own tool results but cannot open turns, create
+        checkpoints, or reach Wiki content.  The reporter resolves sources
+        against the root runtime because the workspace is shared, while the
+        subagent runtime it is attached to stays Wiki-free.
+        """
+        copy = Runtime(
+            config=self.config,
+            oauth=self.oauth,
+            llm=llm_override if llm_override is not None else self.llm,
+            session=self.session,
+            builtin_args=self.builtin_args,
+            denwa_renji=DenwaRenji(),  # subagent must have its own DenwaRenji
+            approval=self.approval.share(),
+            labor_market=self.labor_market,
+            environment=self.environment,
+            notifications=self.notifications,
+            background_tasks=self.background_tasks.copy_for_role("subagent"),
+            skills=self.skills,
+            # Share the same list reference so /add-dir mutations propagate to all agents
+            additional_dirs=self.additional_dirs,
+            skills_dirs=self.skills_dirs,
+            user_memory_dir=self.user_memory_dir,
+            subagent_store=self.subagent_store,
+            approval_runtime=self.approval_runtime,
+            root_wire_hub=self.root_wire_hub,
+            subagent_id=agent_id,
+            subagent_type=subagent_type,
+            role="subagent",
+            managed_skill_revision=self.managed_skill_revision,
+            skills_prompt=self.skills_prompt,
+            requested_skills_dirs=self.requested_skills_dirs,
+            wiki=None,
+            workspace_id=self.workspace_id,
+            wiki_tool_context=None,
+            wiki_coordinator=None,
+            wiki_evidence_reporter=None,
+        )
+        if self.role == "root" and self.wiki_coordinator is not None:
+            from kimo_cli.wiki.evidence import WikiEvidenceReporter
+
+            copy.wiki_evidence_reporter = WikiEvidenceReporter(
+                self.wiki_coordinator,
+                self,
+                producer_role="subagent",
+                producer_id=agent_id,
+                run_generation=max(run_generation, 0),
+            )
+        return copy
+
+    async def close(self) -> None:
+        """Close root-owned Wiki resources once; subagents only borrow them.
+
+        Shutdown never resolves a pending checkpoint by calling the model or
+        writing a page — it only invalidates outstanding authority. The
+        coordinator closes first so no grant can outlive the manager, and a
+        failure in either step still lets the other run.
+        """
+        if self.role != "root":
+            return
+        if self.wiki_coordinator is not None:
+            try:
+                await self.wiki_coordinator.close()
+            except Exception:
+                logger.warning("Wiki coordinator shutdown failed; closing the manager anyway")
+        if self.wiki is not None:
+            manager, self.wiki = self.wiki, None
+            try:
+                await asyncio.to_thread(manager.close)
+            except Exception:
+                logger.warning("Wiki manager shutdown failed")
+
+
+async def _initialize_global_wiki(
+    session: Session,
+    *,
+    owner_id: str | None,
+) -> tuple[WikiManager | None, UUID | None, WikiToolContext | None, str, bool]:
+    """Initialize shared Wiki state without making session creation depend on it."""
+    from kimo_cli.tools.wiki import WikiToolContext
+    from kimo_cli.wiki.context import build_wiki_context
+    from kimo_cli.wiki.manager import WikiManager
+
+    manager: WikiManager | None = None
+    try:
+        construction_task = asyncio.create_task(asyncio.to_thread(WikiManager))
+        try:
+            manager = await asyncio.shield(construction_task)
+        except asyncio.CancelledError:
+            try:
+                manager_after_cancel = await construction_task
+            except Exception:
+                logger.exception("Global Wiki construction failed during cancellation cleanup")
+            else:
+                try:
+                    await asyncio.to_thread(manager_after_cancel.close)
+                except Exception:
+                    logger.exception("Failed to close cancelled global Wiki construction")
+            raise
+        assert manager is not None
+        layout = await asyncio.to_thread(manager.ensure)
+        workspace_id = None
+        if session.work_dir_meta.kaos == local_kaos.name:
+            work_dir_local = Path(str(session.work_dir))
+            workspace_id = await asyncio.to_thread(manager.registry.register, work_dir_local)
+        workspace_hint = Path(str(session.work_dir).replace("\\", "/")).name
+        index_text = await asyncio.to_thread(layout.index.read_text, encoding="utf-8")
+        wiki_context = await asyncio.to_thread(
+            build_wiki_context,
+            index_text,
+            hints=(workspace_hint,),
+        )
+        provenance_session_id = uuid5(
+            _WIKI_SESSION_NAMESPACE,
+            "\0".join(
+                (
+                    owner_id or "",
+                    session.work_dir_meta.kaos,
+                    str(workspace_id or session.work_dir_meta.path),
+                    session.id,
+                )
+            ),
+        )
+        tool_context = WikiToolContext(
+            provenance_session_id=provenance_session_id,
+            conversation_hashes=frozenset(),
+            allowed_workspace_ids=(
+                frozenset({workspace_id}) if workspace_id is not None else frozenset()
+            ),
+            candidate_high_value=False,
+            stable=False,
+            user_confirmed=False,
+            reliable_source=False,
+        )
+        return manager, workspace_id, tool_context, wiki_context, False
+    except asyncio.CancelledError:
+        if manager is not None:
+            try:
+                await asyncio.to_thread(manager.close)
+            except Exception:
+                logger.exception("Failed to close unavailable global Wiki")
+        raise
+    except Exception:
+        logger.exception("Global Wiki unavailable; continuing without Wiki")
+        if manager is not None:
+            try:
+                await asyncio.to_thread(manager.close)
+            except Exception:
+                logger.exception("Failed to close unavailable global Wiki")
+        return None, None, None, "", True
+
+
+@dataclass(frozen=True, slots=True, kw_only=True)
+class Agent:
+    """The loaded agent."""
+
+    name: str
+    system_prompt: str
+    toolset: Toolset
+    runtime: Runtime
+    """Each agent has its own runtime, which should be derived from its main agent."""
+
+
+async def load_agent(
+    agent_file: Path,
+    runtime: Runtime,
+    *,
+    mcp_configs: list[MCPConfig] | list[dict[str, Any]],
+    start_mcp_loading: bool = True,
+) -> Agent:
+    """
+    Load agent from specification file.
+
+    Raises:
+        FileNotFoundError: When the agent file is not found.
+        AgentSpecError(KimoCLIException, ValueError): When the agent specification is invalid.
+        SystemPromptTemplateError(KimoCLIException, ValueError): When the system prompt template
+            is invalid.
+        InvalidToolError(KimoCLIException, ValueError): When any tool cannot be loaded.
+        MCPConfigError(KimoCLIException, ValueError): When any MCP configuration is invalid.
+        MCPRuntimeError(KimoCLIException, RuntimeError): When any MCP server cannot be connected.
+    """
+    logger.info("Loading agent: {agent_file}", agent_file=agent_file)
+    agent_spec = load_agent_spec(agent_file)
+
+    prompt_builtin_args = _apply_spec_to_builtin_args(runtime, agent_spec)
+    system_prompt = _load_system_prompt(
+        agent_spec.system_prompt_path,
+        agent_spec.system_prompt_args,
+        prompt_builtin_args,
+    )
+
+    # Self-evolution application channel: append adopted harness improvements
+    # when the global switch is on, or a verify-time candidate injected via
+    # KIMO_EVOLUTION_PATCH. Zero-cost no-op when neither applies.
+    from kimo_cli.evolution.library import applied_system_append
+
+    evolution_append = applied_system_append(runtime.config)
+    if evolution_append:
+        system_prompt = system_prompt + "\n\n" + evolution_append
+
+    # Register built-in subagent types before loading tools because some tools render
+    # descriptions from the labor market on initialization.
+    for subagent_name, subagent_spec in agent_spec.subagents.items():
+        logger.debug(
+            "Registering builtin subagent type: {subagent_name}", subagent_name=subagent_name
+        )
+        builtin_spec = load_agent_spec(subagent_spec.path)
+        tool_policy = (
+            ToolPolicy(mode="allowlist", tools=tuple(builtin_spec.allowed_tools))
+            if builtin_spec.allowed_tools is not None
+            else ToolPolicy(mode="inherit")
+        )
+        runtime.labor_market.add_builtin_type(
+            AgentTypeDefinition(
+                name=subagent_name,
+                description=subagent_spec.description,
+                agent_file=subagent_spec.path,
+                when_to_use=builtin_spec.when_to_use,
+                default_model=builtin_spec.model,
+                tool_policy=tool_policy,
+            )
+        )
+
+    toolset = KimoToolset(runtime)
+    tool_deps = {
+        KimoToolset: toolset,
+        Runtime: runtime,
+        # TODO: remove all the following dependencies and use Runtime instead
+        Config: runtime.config,
+        BuiltinSystemPromptArgs: runtime.builtin_args,
+        Session: runtime.session,
+        DenwaRenji: runtime.denwa_renji,
+        Approval: runtime.approval,
+        LaborMarket: runtime.labor_market,
+        Environment: runtime.environment,
+    }
+    tools = agent_spec.allowed_tools if agent_spec.allowed_tools is not None else agent_spec.tools
+    if agent_spec.exclude_tools:
+        logger.debug("Excluding tools: {tools}", tools=agent_spec.exclude_tools)
+        tools = [tool for tool in tools if tool not in agent_spec.exclude_tools]
+    toolset.load_tools(tools, tool_deps)
+
+    # Load plugin tools
+    from kimo_cli.plugin.manager import get_plugins_dir
+    from kimo_cli.plugin.tool import load_plugin_tools
+
+    plugin_tools = load_plugin_tools(get_plugins_dir(), runtime.config, approval=runtime.approval)
+    for plugin_tool in plugin_tools:
+        if toolset.find(plugin_tool.name) is not None:
+            logger.warning(
+                "Plugin tool '{name}' conflicts with an existing tool, skipping",
+                name=plugin_tool.name,
+            )
+            continue
+        toolset.add(plugin_tool)
+
+    if mcp_configs:
+        validated_mcp_configs: list[MCPConfig] = []
+        from fastmcp.mcp_config import MCPConfig
+
+        for mcp_config in mcp_configs:
+            try:
+                validated_mcp_configs.append(
+                    mcp_config
+                    if isinstance(mcp_config, MCPConfig)
+                    else MCPConfig.model_validate(mcp_config)
+                )
+            except pydantic.ValidationError as e:
+                raise MCPConfigError(f"Invalid MCP config: {e}") from e
+        # Stage filter before loading so deferred startup also picks it up.
+        if (
+            agent_spec.allowed_mcp_servers is not None
+            or agent_spec.allowed_mcp_tools is not None
+            or agent_spec.excluded_mcp_tools
+        ):
+            toolset.set_pending_mcp_filter(
+                allowed_servers=agent_spec.allowed_mcp_servers,
+                allowed_tools=agent_spec.allowed_mcp_tools,
+                excluded_tools=agent_spec.excluded_mcp_tools,
+            )
+        if start_mcp_loading:
+            await toolset.load_mcp_tools(validated_mcp_configs, runtime, in_background=True)
+        else:
+            toolset.defer_mcp_tool_loading(validated_mcp_configs, runtime)
+
+    return Agent(
+        name=agent_spec.name,
+        system_prompt=system_prompt,
+        toolset=toolset,
+        runtime=runtime,
+    )
+
+
+def _apply_spec_to_builtin_args(
+    runtime: Runtime, spec: ResolvedAgentSpec
+) -> BuiltinSystemPromptArgs:
+    """Return builtin args overridden per *spec*'s skill filter and KB toggle.
+
+    Returns the original ``runtime.builtin_args`` unchanged when no override applies,
+    keeping the no-op path allocation-free.
+    """
+    base = runtime.builtin_args
+    overrides: dict[str, Any] = {}
+    if runtime.role != "root" and base.KIMO_WIKI_CONTEXT:
+        # No subagent — builtin or custom — may see Wiki index or retrieval context.
+        overrides["KIMO_WIKI_CONTEXT"] = ""
+    if spec.allowed_skills is not None or spec.excluded_skills:
+        filtered = filter_skills(
+            list(runtime.skills.values()),
+            allowed=spec.allowed_skills,
+            excluded=spec.excluded_skills,
+        )
+        overrides["KIMO_SKILLS"] = format_skills_for_prompt(filtered) or "No skills found."
+    if not overrides:
+        return base
+    data: dict[str, Any] = {f: getattr(base, f) for f in base.__dataclass_fields__}
+    data.update(overrides)
+    return BuiltinSystemPromptArgs(**data)
+
+
+def _load_system_prompt(
+    path: Path, args: dict[str, str], builtin_args: BuiltinSystemPromptArgs
+) -> str:
+    logger.info("Loading system prompt: {path}", path=path)
+    system_prompt = path.read_text(encoding="utf-8").strip()
+    logger.debug(
+        "Substituting system prompt with builtin args: {builtin_args}, spec args: {spec_args}",
+        builtin_args=builtin_args,
+        spec_args=args,
+    )
+    env = JinjaEnvironment(
+        loader=FileSystemLoader(path.parent),
+        keep_trailing_newline=True,
+        lstrip_blocks=True,
+        trim_blocks=True,
+        variable_start_string="${",
+        variable_end_string="}",
+        undefined=StrictUndefined,
+    )
+    try:
+        template = env.from_string(system_prompt)
+        return template.render(asdict(builtin_args), **args)
+    except UndefinedError as exc:
+        raise SystemPromptTemplateError(f"Missing system prompt arg in {path}: {exc}") from exc
+    except TemplateError as exc:
+        raise SystemPromptTemplateError(f"Invalid system prompt template: {path}: {exc}") from exc

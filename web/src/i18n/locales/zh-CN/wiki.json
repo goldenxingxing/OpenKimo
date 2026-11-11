@@ -1,0 +1,108 @@
+{
+  "categories": {
+    "entities": "实体",
+    "concepts": "概念",
+    "comparisons": "对比",
+    "sources": "来源",
+    "queries": "查询",
+    "lint": "检查"
+  },
+  "errors": {
+    "loadWiki": "加载 Wiki 失败。",
+    "loadPage": "加载页面失败。",
+    "search": "搜索失败。",
+    "health": "健康检查失败。",
+    "history": "加载历史记录失败。",
+    "finishEditFirst": "请先保存或放弃正在进行的编辑。",
+    "invalidSlug": "页面名称只能包含字母、数字、_ 和 -，且不能以 - 开头。",
+    "pageExists": "同名页面已存在。",
+    "editConflict": "此页面在你打开后已被修改。请先复制你的修改内容，放弃本次编辑，再在最新版本上重新应用。",
+    "save": "保存页面失败。",
+    "deleteConflict": "此页面在你打开后已被修改，请重新加载后再删除。",
+    "delete": "删除页面失败。"
+  },
+  "toasts": {
+    "created": "页面已创建",
+    "saved": "页面已保存",
+    "deleted": "页面已删除"
+  },
+  "header": {
+    "title": "全局知识库",
+    "description": "所有会话和工作区共享的长期知识。Agent 通过 <code>Wiki</code> 工具写入；在此处的编辑走同一事务，索引和变更日志始终保持同步。",
+    "revision": "版本 {{revision}}",
+    "pages_other": "{{count}} 个页面",
+    "unreadable_other": "{{count}} 个无法读取",
+    "refresh": "刷新",
+    "newPage": "新建页面"
+  },
+  "views": {
+    "pages": "页面",
+    "health": "健康检查",
+    "history": "历史记录"
+  },
+  "list": {
+    "searchPlaceholder": "搜索标题和内容",
+    "all": "全部",
+    "searching": "搜索中…",
+    "noMatches": "没有匹配结果。",
+    "empty": "知识库还是空的。让 Agent 记住某件事时它会添加页面，你也可以在这里新建。",
+    "emptyCategory": "此分类下没有页面。"
+  },
+  "editor": {
+    "newPage": "新建页面",
+    "editTitle": "编辑 {{path}}",
+    "discard": "放弃",
+    "save": "保存",
+    "title": "标题",
+    "titlePlaceholder": "这个页面讲的是什么",
+    "category": "分类",
+    "pageName": "页面名称",
+    "tags": "标签（用逗号分隔）",
+    "tagsPlaceholder": "流程, 发布",
+    "body": "内容（Markdown；用 [[category/page-name]] 链接其他页面）",
+    "rules": "页面中不能包含凭据、本地文件路径或 file:// 链接。编辑时会保留已有来源。"
+  },
+  "page": {
+    "unreadableTitle": "无法读取此页面",
+    "unreadableHint": "请修复或删除 <code>{{root}}</code> 下的该文件；在能正确解析之前，它不会出现在搜索和索引中。",
+    "loading": "加载中…",
+    "meta": "{{path}} · r{{revision}} · 更新于 {{updated}} · 创建于 {{created}}",
+    "edit": "编辑",
+    "delete": "删除",
+    "links": "链接：",
+    "noSuchPage": "页面不存在",
+    "sources": "来源（{{count}}）",
+    "noSources": "无，为手动编写。",
+    "selectPrompt": "选择一个页面进行阅读，或新建一个页面。"
+  },
+  "health": {
+    "title": "健康检查",
+    "description": "无法读取的页面、失效链接、孤立页面、重复内容、未解决的冲突，以及已变更或已消失的来源。",
+    "recheck": "重新检查",
+    "checking": "检查中…",
+    "noIssues_other": "已检查 {{count}} 个页面，未发现问题。",
+    "issues": {
+      "malformed_page": "页面格式错误",
+      "dead_link": "失效链接",
+      "missing_provenance": "缺少来源",
+      "stale_provenance": "来源已过期",
+      "conflict_marker": "冲突标记",
+      "orphan": "孤立页面",
+      "duplicate_hash": "内容重复",
+      "duplicate_claim": "陈述重复"
+    }
+  },
+  "history": {
+    "title": "历史记录",
+    "description": "所有已提交的变更，最新的在前，来自 <code>log.md</code>。",
+    "refresh": "刷新",
+    "loading": "加载中…",
+    "empty": "暂无变更。"
+  },
+  "deleteDialog": {
+    "title": "删除此页面？",
+    "description": "<path>{{path}}</path> 将从 Wiki 及其索引中移除。删除操作会记录在历史中，但内容不会保留。",
+    "cancel": "取消",
+    "delete": "删除"
+  }
+}

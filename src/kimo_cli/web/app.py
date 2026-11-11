@@ -1,0 +1,705 @@
+"""OpenKimo Web UI application."""
+
+import asyncio
+import contextlib
+import os
+import secrets
+import sys
+import time
+import webbrowser
+from collections.abc import Callable
+from contextlib import asynccontextmanager
+from http.cookies import CookieError, SimpleCookie
+from pathlib import Path
+from typing import Any, cast
+from urllib.parse import quote
+
+import scalar_fastapi
+from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.middleware.gzip import GZipMiddleware
+from fastapi.staticfiles import StaticFiles
+from starlette.datastructures import Headers, MutableHeaders
+from starlette.responses import HTMLResponse, Response
+from starlette.types import ASGIApp, Message, Receive, Scope, Send
+
+from kimo_cli import logger
+from kimo_cli.utils.server import (
+    find_available_port,
+    format_url,
+    get_network_addresses,
+    is_local_host,
+)
+from kimo_cli.web.api import (
+    admin_evolution_router,
+    admin_router,
+    admin_wiki_router,
+    agents_router,
+    auth_router,
+    branding_admin_router,
+    branding_public_router,
+    capabilities_router,
+    config_router,
+    mcp_router,
+    memory_router,
+    open_in_router,
+    sessions_router,
+    work_dirs_router,
+)
+from kimo_cli.web.auth import (
+    DEFAULT_ALLOWED_ORIGIN_REGEX,
+    AuthMiddleware,
+    is_private_ip,
+    normalize_allowed_origins,
+)
+from kimo_cli.web.config_reload import reload_signal_path, watch_for_reload
+from kimo_cli.web.runner.process import KimoCLIRunner
+from kimo_cli.web.session_policy import (
+    COOKIE_NAME as SESSION_COOKIE_NAME,
+)
+from kimo_cli.web.session_policy import (
+    build_cookie_header,
+    next_expiry,
+    session_absolute_max_age,
+    session_max_age,
+)
+
+# Container mode imports
+try:
+    from kimo_cli.web.runner.container import ContainerRunner
+except Exception:
+    ContainerRunner = None  # type: ignore[misc,assignment]
+
+# Configure logging based on LOG_LEVEL environment variable
+_log_level = os.environ.get("LOG_LEVEL", "WARNING").upper()
+logger.remove()
+logger.enable("kimo_cli")
+logger.add(sys.stderr, level=_log_level)
+
+# scalar-fastapi does not ship typing stubs.
+get_scalar_api_reference = cast(  # pyright: ignore[reportUnknownMemberType]
+    Callable[..., HTMLResponse],
+    scalar_fastapi.get_scalar_api_reference,  # pyright: ignore[reportUnknownMemberType]
+)
+
+# Constants
+STATIC_DIR = Path(__file__).parent / "static"
+GZIP_MINIMUM_SIZE = 1024
+GZIP_COMPRESSION_LEVEL = 6
+DEFAULT_PORT = 5494
+MAX_PORT_ATTEMPTS = 10
+ENV_SESSION_TOKEN = "KIMO_WEB_SESSION_TOKEN"
+ENV_ALLOWED_ORIGINS = "KIMO_WEB_ALLOWED_ORIGINS"
+ENV_ENFORCE_ORIGIN = "KIMO_WEB_ENFORCE_ORIGIN"
+ENV_RESTRICT_SENSITIVE_APIS = "KIMO_WEB_RESTRICT_SENSITIVE_APIS"
+ENV_MAX_PUBLIC_PATH_DEPTH = "KIMO_WEB_MAX_PUBLIC_PATH_DEPTH"
+ENV_LOCAL_OWNER = "KIMO_WEB_LOCAL_OWNER"
+
+# Cache durations
+_IMMUTABLE_MAX_AGE = 365 * 24 * 3600  # 1 year for content-hashed assets
+
+
+class _StaticCacheHeadersMiddleware:
+    """Inject Cache-Control headers for static assets served by Starlette.
+
+    * ``index.html`` (and any non-hashed HTML) → ``no-cache`` so the browser
+      always revalidates, preventing stale references to renamed chunks after a
+      CLI upgrade (see #1602).
+    * Hashed assets under ``/assets/`` → long-lived ``immutable`` cache because
+      the content hash in the filename already guarantees uniqueness.
+    """
+
+    def __init__(self, app: ASGIApp) -> None:
+        self.app = app
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+
+        path: str = scope.get("path", "")
+
+        async def _send_with_cache_headers(message: Message) -> None:
+            if message["type"] == "http.response.start":
+                headers = MutableHeaders(scope=message)
+                if path.startswith("/assets/"):
+                    headers["cache-control"] = f"public, max-age={_IMMUTABLE_MAX_AGE}, immutable"
+                elif path == "/" or path.endswith(".html"):
+                    headers["cache-control"] = "no-cache, no-store, must-revalidate"
+            await send(message)
+
+        await self.app(scope, receive, _send_with_cache_headers)
+
+
+class _SessionRenewalMiddleware:
+    """Slide a live session's deadline forward while it is being used.
+
+    Without this the session is a fixed window from login: a tab open across
+    the 24-hour mark is thrown back to the login page mid-use, and the first
+    sign of it is a refresh. The renewal has to happen out here rather than in
+    the auth dependency because only a middleware can still add a header to
+    the response on the way out — and because a request that never touches an
+    authenticated route should still count as "you are using this".
+
+    Cost is one primary-key SELECT on requests that carry the cookie; the
+    UPDATE and the ``Set-Cookie`` only happen once the window is more than
+    half spent. Static assets are skipped: they are the bulk of the requests
+    and none of them mean anything about whether a person is present.
+    """
+
+    def __init__(self, app: ASGIApp) -> None:
+        self.app = app
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+
+        token = _session_token_from_scope(scope)
+        path: str = scope.get("path", "")
+        if not token or path.startswith("/assets/"):
+            await self.app(scope, receive, send)
+            return
+
+        max_age = session_max_age()
+        renewed = await asyncio.to_thread(_renew_session, token, max_age)
+        if not renewed:
+            await self.app(scope, receive, send)
+            return
+
+        cookie = build_cookie_header(token, max_age)
+
+        async def _send_with_cookie(message: Message) -> None:
+            if message["type"] == "http.response.start":
+                MutableHeaders(scope=message).append("set-cookie", cookie)
+            await send(message)
+
+        await self.app(scope, receive, _send_with_cookie)
+
+
+def _session_token_from_scope(scope: Scope) -> str | None:
+    """Pull the session cookie out of a raw ASGI scope, or ``None``."""
+    raw = Headers(scope=scope).get("cookie")
+    if not raw:
+        return None
+    jar: SimpleCookie = SimpleCookie()
+    try:
+        jar.load(raw)
+    except CookieError:
+        return None
+    morsel = jar.get(SESSION_COOKIE_NAME)
+    return morsel.value if morsel is not None else None
+
+
+def _renew_session(token: str, max_age: int) -> bool:
+    """Extend the session behind *token* if it is due. Returns whether it was.
+
+    Runs in a worker thread: sqlite here is a local file, but the event loop
+    serves streaming responses and websockets that should not wait on it.
+    """
+    from kimo_cli.web.db.crud import get_user_session_row, set_user_session_expiry
+    from kimo_cli.web.db.database import get_db
+
+    try:
+        db = get_db()
+        try:
+            row = get_user_session_row(db, token)
+            if row is None:
+                return False
+            new_expiry = next_expiry(
+                now=time.time(),
+                created_at=float(row["created_at"]),
+                expires_at=float(row["expires_at"]),
+                max_age=max_age,
+                absolute_max_age=session_absolute_max_age(),
+            )
+            if new_expiry is None:
+                return False
+            set_user_session_expiry(db, token, new_expiry)
+            return True
+        finally:
+            db.close()
+    except Exception as e:  # pragma: no cover - renewal must never break a request
+        logger.debug("Session renewal skipped: {err}", err=e)
+        return False
+
+
+def _get_private_addresses(addresses: list[str]) -> list[str]:
+    """Filter addresses to only include private IPs."""
+    return [ip for ip in addresses if is_private_ip(ip)]
+
+
+def _load_env_flag(key: str) -> bool:
+    return os.environ.get(key, "").strip().lower() in {"1", "true", "yes", "on"}
+
+
+ENV_LAN_ONLY = "KIMO_WEB_LAN_ONLY"
+
+
+def create_app(
+    session_token: str | None = None,
+    allowed_origins: list[str] | None = None,
+    enforce_origin: bool | None = None,
+    restrict_sensitive_apis: bool | None = None,
+    max_public_path_depth: int | None = None,
+    lan_only: bool | None = None,
+    local_owner: bool | None = None,
+) -> FastAPI:
+    """Create the FastAPI application for the OpenKimo web UI."""
+
+    env_token = os.environ.get(ENV_SESSION_TOKEN) or None
+    env_origins = normalize_allowed_origins(os.environ.get(ENV_ALLOWED_ORIGINS))
+    env_enforce_origin = _load_env_flag(ENV_ENFORCE_ORIGIN)
+    env_restrict_sensitive = _load_env_flag(ENV_RESTRICT_SENSITIVE_APIS)
+    env_max_depth_str = os.environ.get(ENV_MAX_PUBLIC_PATH_DEPTH)
+    env_max_depth = (
+        int(env_max_depth_str) if env_max_depth_str and env_max_depth_str.isdigit() else None
+    )
+    env_lan_only = _load_env_flag(ENV_LAN_ONLY)
+    env_local_owner = _load_env_flag(ENV_LOCAL_OWNER)
+
+    session_token = session_token if session_token is not None else env_token
+    allowed_origins = allowed_origins if allowed_origins is not None else env_origins
+    enforce_origin = enforce_origin if enforce_origin is not None else env_enforce_origin
+    restrict_sensitive_apis = (
+        restrict_sensitive_apis if restrict_sensitive_apis is not None else env_restrict_sensitive
+    )
+    max_public_path_depth = (
+        max_public_path_depth if max_public_path_depth is not None else env_max_depth
+    )
+    lan_only = lan_only if lan_only is not None else env_lan_only
+    local_owner = local_owner if local_owner is not None else env_local_owner
+
+    @asynccontextmanager
+    async def lifespan(app: FastAPI):
+        # Initialise user database (creates tables + default admin if needed)
+        from kimo_cli.web.db.database import init_db
+
+        try:
+            await asyncio.to_thread(init_db)
+        except Exception as _e:  # pragma: no cover
+            logger.warning("Failed to initialise user database: {err}", err=_e)
+
+        # Local-owner mode: a loopback deployment may run without a login page.
+        # The owner is a real user row so sessions and memory get a stable
+        # owner_id instead of the unauthenticated sentinel; see
+        # user_auth.user_from_connection.
+        app.state.local_owner = None
+        if local_owner:
+            try:
+                from kimo_cli.web.db.database import ensure_local_owner
+
+                app.state.local_owner = await asyncio.to_thread(ensure_local_owner)
+            except Exception as _e:  # pragma: no cover
+                logger.warning("Failed to initialise local owner: {err}", err=_e)
+
+        # Prefer the user-configured default work dir over the process CWD.
+        # When launched via the macOS .app bundle, uvicorn runs with cwd set
+        # to ~/Library/Application Support/<AppName>, which is not what the
+        # user thinks of as their starting directory.
+        app.state.startup_dir = os.environ.get("KIMO_DEFAULT_WORK_DIR") or os.getcwd()
+        app.state.session_token = session_token
+        app.state.allowed_origins = allowed_origins
+        app.state.enforce_origin = enforce_origin
+        app.state.restrict_sensitive_apis = restrict_sensitive_apis
+        app.state.max_public_path_depth = max_public_path_depth
+        app.state.lan_only = lan_only
+
+        # Start KimoCLI runner (containerized or local)
+        use_containers = _load_env_flag("KIMO_USE_CONTAINERS")
+        if use_containers and ContainerRunner is not None:
+            runner = ContainerRunner(
+                image=os.environ.get("SANDBOX_IMAGE", "kimo-agent-sandbox:latest"),
+                network=os.environ.get("DOCKER_NETWORK"),
+                resource_limits={
+                    "cpus": os.environ.get("SANDBOX_CPU_LIMIT", "2"),
+                    "memory": os.environ.get("SANDBOX_MEMORY_LIMIT", "4g"),
+                    "pids": os.environ.get("SANDBOX_PID_LIMIT", "1000"),
+                },
+            )
+        else:
+            runner = KimoCLIRunner()
+        app.state.runner = runner
+        runner.start()
+
+        # A settings change reaches this process through a signal file rather
+        # than a restart, so nothing has to be killed to deliver it.
+        reload_task: asyncio.Task[None] | None = None
+        if reload_signal_path() is not None:
+            reload_task = asyncio.create_task(watch_for_reload(app, runner))
+
+        try:
+            yield
+        finally:
+            if reload_task is not None:
+                reload_task.cancel()
+                with contextlib.suppress(asyncio.CancelledError):
+                    await reload_task
+            await runner.stop()
+
+    application = FastAPI(
+        title="OpenKimo Web Interface",
+        docs_url=None,
+        lifespan=lifespan,
+        separate_input_output_schemas=False,
+    )
+
+    application.add_middleware(
+        cast(Any, GZipMiddleware),
+        minimum_size=GZIP_MINIMUM_SIZE,
+        compresslevel=GZIP_COMPRESSION_LEVEL,
+    )
+
+    application.add_middleware(cast(Any, _StaticCacheHeadersMiddleware))
+
+    application.add_middleware(cast(Any, _SessionRenewalMiddleware))
+
+    application.add_middleware(
+        cast(Any, AuthMiddleware),
+        session_token=session_token,
+        allowed_origins=allowed_origins,
+        enforce_origin=enforce_origin,
+        lan_only=lan_only,
+    )
+
+    cors_kwargs: dict[str, Any] = {
+        "allow_credentials": True,
+        "allow_methods": ["*"],
+        "allow_headers": ["*"],
+    }
+    if allowed_origins:
+        cors_kwargs["allow_origins"] = allowed_origins
+    else:
+        cors_kwargs["allow_origin_regex"] = DEFAULT_ALLOWED_ORIGIN_REGEX.pattern
+
+    # CORS middleware for local development
+    application.add_middleware(cast(Any, CORSMiddleware), **cors_kwargs)
+
+    application.include_router(auth_router)
+    application.include_router(admin_router)
+    application.include_router(admin_evolution_router)
+    application.include_router(admin_wiki_router)
+    application.include_router(branding_public_router)
+    application.include_router(branding_admin_router)
+    application.include_router(config_router)
+    application.include_router(sessions_router)
+    application.include_router(work_dirs_router)
+    application.include_router(agents_router)
+    application.include_router(mcp_router)
+    application.include_router(memory_router)
+    application.include_router(capabilities_router)
+    if not restrict_sensitive_apis:
+        application.include_router(open_in_router)
+
+    @application.get("/scalar", include_in_schema=False)
+    @application.get("/docs", include_in_schema=False)
+    async def scalar_html() -> HTMLResponse:  # pyright: ignore[reportUnusedFunction]
+        return get_scalar_api_reference(
+            openapi_url=application.openapi_url or "",
+            title=application.title,
+        )
+
+    @application.get("/healthz")
+    async def health_probe() -> dict[str, Any]:  # pyright: ignore[reportUnusedFunction]
+        """Health check endpoint.
+
+        ``pid`` lets a supervisor tell "my server is up" from "*a* server is up
+        on that port". Without it, a second copy of the app reads someone
+        else's 200 as proof that its own child started, and keeps respawning a
+        child that dies on a port conflict every time.
+        """
+        return {"status": "ok", "pid": os.getpid()}
+
+    # SPA catch-all: handles both static assets and client-side routes.
+    #
+    # Why not StaticFiles mount alone:
+    #   @app.get routes always take priority over application.mount() in
+    #   FastAPI/Starlette, so once a catch-all route exists the mount is never
+    #   reached. We therefore serve static files directly here and fall back to
+    #   index.html for any path that isn't a real file (SPA client routes like
+    #   /admin).
+    _index_html = STATIC_DIR / "index.html"
+    if _index_html.exists():
+        from fastapi.responses import FileResponse as _FileResponse
+
+        _spa_html_response = HTMLResponse(
+            content=_index_html.read_text(encoding="utf-8"),
+            headers={"cache-control": "no-cache, no-store, must-revalidate"},
+        )
+
+        # Explicit root route: /{full_path:path} does NOT match "/" in Starlette
+        # because the path converter requires at least one character.
+        @application.get("/", include_in_schema=False)
+        async def spa_root() -> Response:  # pyright: ignore[reportUnusedFunction]
+            return _spa_html_response
+
+        _static_root = STATIC_DIR.resolve()
+
+        @application.get("/{full_path:path}", include_in_schema=False)
+        async def spa_fallback(full_path: str) -> Response:  # pyright: ignore[reportUnusedFunction]
+            # Serve real static files (JS, CSS, images, etc.) directly.
+            #
+            # `full_path` is the decoded request path, so `..` segments arrive
+            # here intact (%2e%2e%2f included) and `STATIC_DIR / full_path`
+            # cheerfully walks out of the static tree. These routes are not
+            # behind the API auth middleware, so without this check the whole
+            # filesystem was readable, unauthenticated, from any deployment
+            # that is not LAN-restricted. Starlette's own StaticFiles carries
+            # the same containment check for the same reason.
+            candidate = STATIC_DIR / full_path
+            try:
+                resolved = candidate.resolve()
+            except OSError:
+                resolved = None
+            inside = resolved is not None and (
+                resolved == _static_root or _static_root in resolved.parents
+            )
+            if inside and resolved.is_file():
+                return _FileResponse(resolved)
+            # Path with an extension that doesn't exist → true 404
+            # (avoids serving index.html with wrong MIME type for missing assets).
+            if "." in full_path.split("/")[-1]:
+                from fastapi import HTTPException
+
+                raise HTTPException(status_code=404)
+            # No extension → SPA client-side route (e.g. /admin) → index.html
+            return _spa_html_response
+
+    # Mount static files as secondary fallback (reached only when the
+    # catch-all above is absent, i.e. index.html does not exist yet).
+    elif STATIC_DIR.exists():
+        application.mount("/", StaticFiles(directory=STATIC_DIR, html=True), name="static")
+
+    return application
+
+
+def run_web_server(
+    host: str = "127.0.0.1",
+    port: int = DEFAULT_PORT,
+    reload: bool = False,
+    open_browser: bool = True,
+    auth_token: str | None = None,
+    allowed_origins: str | None = None,
+    dangerously_omit_auth: bool = False,
+    restrict_sensitive_apis: bool | None = None,
+    lan_only: bool = True,
+    local_owner: bool = True,
+) -> None:
+    """Run the web server."""
+    import sys
+    import threading
+
+    import uvicorn
+
+    from kimo_cli.utils.server import print_banner
+
+    public_mode = not is_local_host(host)
+    parsed_allowed_origins = normalize_allowed_origins(allowed_origins)
+    auto_populate_origins = public_mode and not parsed_allowed_origins
+
+    if restrict_sensitive_apis is None:
+        # Only restrict sensitive APIs in public mode (non-LAN-only)
+        restrict_sensitive_apis = public_mode and not lan_only
+
+    if public_mode and dangerously_omit_auth:
+        warning_lines = [
+            "SECURITY WARNING",
+            "",
+            "Authentication is DISABLED while running on a public host.",
+            "Anyone on the network can access your sessions and files.",
+            "",
+            "Type 'I UNDERSTAND THE RISKS' to continue:",
+        ]
+        print_banner(warning_lines)
+        if not sys.stdin.isatty():
+            raise RuntimeError("Refusing to start without auth in non-interactive mode.")
+        response = input("> ").strip()
+        if response != "I UNDERSTAND THE RISKS":
+            raise RuntimeError("Aborted by user.")
+
+    if dangerously_omit_auth:
+        session_token = None
+    elif auth_token:
+        session_token = auth_token
+    elif public_mode:
+        session_token = secrets.token_urlsafe(32)
+    else:
+        session_token = None
+
+    if session_token:
+        os.environ[ENV_SESSION_TOKEN] = session_token
+    else:
+        os.environ.pop(ENV_SESSION_TOKEN, None)
+
+    # Local-owner mode: a loopback deployment (127.0.0.1) may run without a
+    # login page.  Only for a local host with no explicit token — LAN/public
+    # deployments keep their auth.  create_app() reads this env in the uvicorn
+    # factory, so it must be set before uvicorn.run() starts.
+    enable_local_owner = local_owner and not public_mode and not auth_token
+    os.environ[ENV_LOCAL_OWNER] = "1" if enable_local_owner else "0"
+
+    # Find available port first (needed for auto-populating origins)
+    actual_port = find_available_port(host, port)
+    if actual_port != port:
+        print(f"Port {port} is in use, using port {actual_port} instead")
+
+    # Auto-populate allowed origins with detected network addresses + port
+    if auto_populate_origins:
+        auto_origins = [
+            f"http://localhost:{actual_port}",
+            f"http://127.0.0.1:{actual_port}",
+        ]
+        if host == "0.0.0.0":
+            # Binding to all interfaces: add all network addresses
+            network_addrs = get_network_addresses()
+            for addr in network_addrs:
+                auto_origins.append(format_url(addr, actual_port))
+        else:
+            # Explicit host specified: only add that host
+            auto_origins.append(format_url(host, actual_port))
+        parsed_allowed_origins = auto_origins
+
+    if parsed_allowed_origins:
+        os.environ[ENV_ALLOWED_ORIGINS] = ",".join(parsed_allowed_origins)
+    else:
+        os.environ.pop(ENV_ALLOWED_ORIGINS, None)
+
+    os.environ[ENV_ENFORCE_ORIGIN] = "1" if (public_mode and not lan_only) else "0"
+    os.environ[ENV_RESTRICT_SENSITIVE_APIS] = "1" if restrict_sensitive_apis else "0"
+    os.environ[ENV_LAN_ONLY] = "1" if lan_only else "0"
+
+    # Determine display URLs
+    display_hosts: list[tuple[str, str]] = []
+    if host == "0.0.0.0":
+        # Show localhost as "Local" and network interfaces
+        display_hosts.append(("Local", "localhost"))
+        network_addrs = get_network_addresses()
+
+        # In lan_only mode, only show private IPs
+        if lan_only:
+            network_addrs = _get_private_addresses(network_addrs)
+
+        for addr in network_addrs:
+            display_hosts.append(("Network", addr))
+    else:
+        # Show the specified host
+        label = "Local" if is_local_host(host) else "Network"
+        display_hosts.append((label, host))
+
+    # Build URLs with token if needed
+    def make_url(host_addr: str) -> tuple[str, str]:
+        """Returns (url, browser_url) tuple."""
+        url = format_url(host_addr, actual_port)
+        browser_url = f"{url}/?token={quote(session_token)}" if session_token else url
+        return url, browser_url
+
+    # For browser opening, prefer localhost, then first network address
+    browser_host = "localhost" if host == "0.0.0.0" else host
+    _, browser_url = make_url(browser_host)
+
+    if open_browser:
+
+        def open_browser_after_delay():
+            time.sleep(1.5)
+            webbrowser.open(browser_url)
+
+        # Start browser opener in a daemon thread
+        thread = threading.Thread(target=open_browser_after_delay, daemon=True)
+        thread.start()
+
+    banner_lines = [
+        "<center>██╗  ██╗██╗███╗   ███╗██╗     ██████╗ ██████╗ ██████╗ ███████╗",
+        "<center>██║ ██╔╝██║████╗ ████║██║    ██╔════╝██╔═══██╗██╔══██╗██╔════╝",
+        "<center>█████╔╝ ██║██╔████╔██║██║    ██║     ██║   ██║██║  ██║█████╗  ",
+        "<center>██╔═██╗ ██║██║╚██╔╝██║██║    ██║     ██║   ██║██║  ██║██╔══╝  ",
+        "<center>██║  ██╗██║██║ ╚═╝ ██║██║    ╚██████╗╚██████╔╝██████╔╝███████╗",
+        "<center>╚═╝  ╚═╝╚═╝╚═╝     ╚═╝╚═╝     ╚═════╝ ╚═════╝ ╚═════╝ ╚══════╝",
+        "",
+        "<center>WEB UI (Technical Preview)",
+        "",
+        "<hr>",
+        "",
+    ]
+
+    # Add URLs for each host (nowrap to keep URLs on single line for easy copying)
+    for label, host_addr in display_hosts:
+        url, url_with_token = make_url(host_addr)
+        if session_token:
+            banner_lines.append(f"<nowrap>  ➜  {label:8} {url_with_token}")
+        else:
+            banner_lines.append(f"<nowrap>  ➜  {label:8} {url}")
+
+    # Auth token or warnings
+    if session_token:
+        banner_lines.extend(
+            [
+                "",
+                f"<nowrap>  Token:   {session_token}",
+            ]
+        )
+    elif public_mode:
+        banner_lines.extend(
+            [
+                "",
+                "<nowrap>  ⚠ AUTH DISABLED - Anyone on the network can access",
+            ]
+        )
+
+    if restrict_sensitive_apis:
+        banner_lines.append("<nowrap>  ⚠ Sensitive APIs are restricted")
+
+    # Show network access mode and tips
+    banner_lines.append("")
+    banner_lines.append("<hr>")
+    banner_lines.append("")
+
+    if not public_mode:
+        # Local-only mode (127.0.0.1)
+        banner_lines.extend(
+            [
+                "<nowrap>  Tips:",
+                "<nowrap>    • Use -n / --network to share on LAN",
+                "<nowrap>    • Use --network --public for public access",
+            ]
+        )
+    elif lan_only:
+        # LAN mode (0.0.0.0 with lan_only)
+        banner_lines.extend(
+            [
+                "<nowrap>  Mode: LAN only (private IPs)",
+                "",
+                "<nowrap>  Tips:",
+                "<nowrap>    • Use --public to allow public access",
+                "<nowrap>    • ⚠ Public mode allows access from any IP",
+            ]
+        )
+    else:
+        # Public mode (0.0.0.0 without lan_only)
+        banner_lines.extend(
+            [
+                "<nowrap>  ⚠ Mode: PUBLIC (all networks)",
+                "<nowrap>    Anyone with the URL can access this instance",
+                "",
+                "<nowrap>  Security tips:",
+                "<nowrap>    • Keep your auth token secure",
+                "<nowrap>    • Consider using firewall or VPN",
+            ]
+        )
+
+    banner_lines.append("")
+
+    print_banner(banner_lines)
+    # print(f"API docs available at {url}/docs")
+
+    uvicorn.run(
+        "kimo_cli.web.app:create_app",
+        factory=True,
+        host=host,
+        port=actual_port,
+        reload=reload,
+        log_level="info",
+        timeout_graceful_shutdown=3,
+    )
+
+
+__all__ = ["create_app", "run_web_server"]

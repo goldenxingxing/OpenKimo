@@ -1,0 +1,510 @@
+from __future__ import annotations
+
+import asyncio
+import contextlib
+import json
+import os
+import time
+from collections.abc import Sequence
+from pathlib import Path
+from typing import Any, cast
+from uuid import uuid4
+
+import aiofiles
+import aiofiles.os
+from kosong.message import Message
+from pydantic import ValidationError
+
+from kimo_cli.session_lease import SessionLease
+from kimo_cli.soul.compaction import estimate_text_tokens
+from kimo_cli.soul.message import system
+from kimo_cli.utils.logging import logger
+from kimo_cli.utils.path import next_available_rotation
+
+
+class Context:
+    def __init__(self, file_backend: Path, lease: SessionLease | None = None):
+        self._file_backend = file_backend
+        self._lease = lease
+        self._history: list[Message] = []
+        self._token_count: int = 0
+        self._pending_token_estimate: int = 0
+        self._next_checkpoint_id: int = 0
+        """The ID of the next checkpoint, starting from 0, incremented after each checkpoint."""
+        self._system_prompt: str | None = None
+
+    async def restore(self) -> bool:
+        logger.debug("Restoring context from file: {file_backend}", file_backend=self._file_backend)
+        if self._history:
+            logger.error("The context storage is already modified")
+            raise RuntimeError("The context storage is already modified")
+        if not self._file_backend.exists():
+            logger.debug("No context file found, skipping restoration")
+            return False
+        if self._file_backend.stat().st_size == 0:
+            logger.debug("Empty context file, skipping restoration")
+            return False
+
+        messages_after_last_usage: list[Message] = []
+        async with aiofiles.open(self._file_backend, encoding="utf-8", errors="replace") as f:
+            line_no = 0
+            async for line in f:
+                line_no += 1
+                if not line.strip():
+                    continue
+                line_json = self._parse_context_line(
+                    line,
+                    file_backend=self._file_backend,
+                    line_no=line_no,
+                )
+                if line_json is None:
+                    continue
+                self._apply_context_record(
+                    line_json,
+                    history=self._history,
+                    messages_after_last_usage=messages_after_last_usage,
+                    file_backend=self._file_backend,
+                    line_no=line_no,
+                )
+
+        self._pending_token_estimate = estimate_text_tokens(messages_after_last_usage)
+        return True
+
+    @property
+    def history(self) -> Sequence[Message]:
+        return self._history
+
+    @property
+    def token_count(self) -> int:
+        return self._token_count
+
+    @property
+    def token_count_with_pending(self) -> int:
+        return self._token_count + self._pending_token_estimate
+
+    @property
+    def n_checkpoints(self) -> int:
+        return self._next_checkpoint_id
+
+    @property
+    def system_prompt(self) -> str | None:
+        return self._system_prompt
+
+    @property
+    def file_backend(self) -> Path:
+        return self._file_backend
+
+    async def write_system_prompt(self, prompt: str) -> None:
+        """Write the system prompt as the first record of the context file.
+
+        If the file is empty, writes it directly. If the file already has content
+        (e.g. a legacy session without system prompt), prepends it atomically via a
+        temporary file to avoid corruption on crash and avoid loading the entire file
+        into memory.
+        """
+        prompt_line = json.dumps({"role": "_system_prompt", "content": prompt}) + "\n"
+
+        def _write_system_prompt_sync() -> None:
+            if not self._file_backend.exists() or self._file_backend.stat().st_size == 0:
+                self._file_backend.write_text(prompt_line, encoding="utf-8")
+                return
+
+            # Unique temp name: a fixed ``context.tmp`` collides if anything else
+            # in the same session directory happens to use it (see the other
+            # writers below, which already use unique names).
+            tmp_path = self._file_backend.with_name(f".{self._file_backend.name}.{uuid4().hex}.tmp")
+            with (
+                tmp_path.open("x", encoding="utf-8") as tmp_f,
+                self._file_backend.open(encoding="utf-8") as src_f,
+            ):
+                try:
+                    tmp_f.write(prompt_line)
+                    while True:
+                        chunk = src_f.read(64 * 1024)
+                        if not chunk:
+                            break
+                        tmp_f.write(chunk)
+                    tmp_f.flush()
+                    os.fsync(tmp_f.fileno())
+                except BaseException:
+                    tmp_path.unlink(missing_ok=True)
+                    raise
+            tmp_path.replace(self._file_backend)
+
+        await asyncio.to_thread(_write_system_prompt_sync)
+
+        self._system_prompt = prompt
+
+    async def replace_system_prompt(self, prompt: str) -> None:
+        """Atomically replace all persisted system-prompt records with one current record."""
+        prompt_line = json.dumps({"role": "_system_prompt", "content": prompt}) + "\n"
+
+        def _replace_system_prompt_sync() -> None:
+            temporary = self._file_backend.with_name(
+                f".{self._file_backend.name}.{uuid4().hex}.tmp"
+            )
+            try:
+                with temporary.open("x", encoding="utf-8") as output:
+                    output.write(prompt_line)
+                    if self._file_backend.exists():
+                        with self._file_backend.open(encoding="utf-8") as source:
+                            for line in source:
+                                try:
+                                    record = json.loads(line, strict=False)
+                                except json.JSONDecodeError:
+                                    record = None
+                                if (
+                                    isinstance(record, dict)
+                                    and cast(dict[str, Any], record).get("role") == "_system_prompt"
+                                ):
+                                    continue
+                                output.write(line)
+                    output.flush()
+                    os.fsync(output.fileno())
+                os.replace(temporary, self._file_backend)
+            finally:
+                temporary.unlink(missing_ok=True)
+
+        await asyncio.to_thread(_replace_system_prompt_sync)
+        self._system_prompt = prompt
+
+    async def checkpoint(self, add_user_message: bool) -> int:
+        checkpoint_id = self._next_checkpoint_id
+        logger.debug("Checkpointing, ID: {id}", id=checkpoint_id)
+        if self._lease is not None:
+            self._lease.verify()
+        messages = (
+            [Message(role="user", content=[system(f"CHECKPOINT {checkpoint_id}")])]
+            if add_user_message
+            else []
+        )
+        lines = [json.dumps({"role": "_checkpoint", "id": checkpoint_id}) + "\n"]
+        lines.extend(message.model_dump_json(exclude_none=True) + "\n" for message in messages)
+
+        def _append_checkpoint_sync() -> None:
+            with self._file_backend.open("a+", encoding="utf-8") as file:
+                file.seek(0, os.SEEK_END)
+                original_size = file.tell()
+                try:
+                    file.write("".join(lines))
+                    file.flush()
+                    os.fsync(file.fileno())
+                except BaseException:
+                    file.seek(original_size)
+                    file.truncate()
+                    file.flush()
+                    os.fsync(file.fileno())
+                    raise
+
+        await asyncio.to_thread(_append_checkpoint_sync)
+        self._next_checkpoint_id += 1
+        self._history.extend(messages)
+        self._pending_token_estimate += estimate_text_tokens(messages)
+        return checkpoint_id
+
+    async def revert_to(self, checkpoint_id: int):
+        """
+        Revert the context to the specified checkpoint.
+        After this, the specified checkpoint and all subsequent content will be
+        removed from the context. File backend will be rotated.
+
+        Args:
+            checkpoint_id (int): The ID of the checkpoint to revert to. 0 is the first checkpoint.
+
+        Raises:
+            ValueError: When the checkpoint does not exist.
+            RuntimeError: When no available rotation path is found.
+        """
+
+        logger.debug("Reverting checkpoint, ID: {id}", id=checkpoint_id)
+        if self._lease is not None:
+            # Rotation replaces the canonical file; a second writer would keep
+            # appending to the old inode and its lines would vanish.
+            self._lease.verify()
+        if checkpoint_id >= self._next_checkpoint_id:
+            logger.error("Checkpoint {checkpoint_id} does not exist", checkpoint_id=checkpoint_id)
+            raise ValueError(f"Checkpoint {checkpoint_id} does not exist")
+
+        # Snapshot in-memory state BEFORE any mutation so a mid-rebuild
+        # failure can restore both the disk file AND the in-memory model.
+        # Without this, a failure leaves _history/_token_count zeroed
+        # while the disk still holds the full pre-revert history — the
+        # next append would silently splice a truncated tail onto a
+        # fully-restored prefix.
+        _saved_history = list(self._history)
+        _saved_token_count = self._token_count
+        _saved_next_checkpoint_id = self._next_checkpoint_id
+        _saved_system_prompt = self._system_prompt
+        _saved_pending_token_estimate = self._pending_token_estimate
+
+        # rotate the context file
+        rotated_file_path = await next_available_rotation(self._file_backend)
+        if rotated_file_path is None:
+            logger.error("No available rotation path found")
+            raise RuntimeError("No available rotation path found")
+        await aiofiles.os.replace(self._file_backend, rotated_file_path)
+        logger.debug(
+            "Rotated context file: {rotated_file_path}", rotated_file_path=rotated_file_path
+        )
+
+        # restore the context until the specified checkpoint
+        self._history.clear()
+        self._token_count = 0
+        self._next_checkpoint_id = 0
+        self._system_prompt = None
+        self._pending_token_estimate = 0
+        messages_after_last_usage: list[Message] = []
+        # Rebuilt beside the target and renamed into place, with the rotation
+        # undone if anything goes wrong. Written directly, an I/O error or a
+        # kill part-way through left a truncated canonical file — while the
+        # in-memory state above had already been cleared — and the only
+        # complete copy was the rotated one, with nothing to put it back.
+        tmp_path = self._file_backend.with_name(
+            f".{self._file_backend.name}.revert.{os.getpid()}.{time.time_ns()}.tmp"
+        )
+        try:
+            await self._rebuild_until_checkpoint(
+                rotated_file_path, tmp_path, checkpoint_id, messages_after_last_usage
+            )
+            await aiofiles.os.replace(tmp_path, self._file_backend)
+        except BaseException:
+            with contextlib.suppress(OSError):
+                await aiofiles.os.replace(rotated_file_path, self._file_backend)
+            with contextlib.suppress(OSError):
+                await aiofiles.os.remove(tmp_path)
+            # Roll back in-memory state to pre-revert values so the Context
+            # object is internally consistent with the restored file.
+            self._history = _saved_history
+            self._token_count = _saved_token_count
+            self._next_checkpoint_id = _saved_next_checkpoint_id
+            self._system_prompt = _saved_system_prompt
+            self._pending_token_estimate = _saved_pending_token_estimate
+            raise
+
+        self._pending_token_estimate = estimate_text_tokens(messages_after_last_usage)
+
+    async def _rebuild_until_checkpoint(
+        self,
+        source: Path,
+        destination: Path,
+        checkpoint_id: int,
+        messages_after_last_usage: list[Message],
+    ) -> None:
+        """Replay `source` into `destination`, stopping at `checkpoint_id`."""
+        async with (
+            aiofiles.open(source, encoding="utf-8", errors="replace") as old_file,
+            aiofiles.open(destination, "w", encoding="utf-8") as new_file,
+        ):
+            line_no = 0
+            async for line in old_file:
+                line_no += 1
+                if not line.strip():
+                    continue
+
+                line_json = self._parse_context_line(
+                    line,
+                    file_backend=source,
+                    line_no=line_no,
+                )
+                if line_json is None:
+                    continue
+                if line_json.get("role") == "_checkpoint" and line_json.get("id") == checkpoint_id:
+                    break
+
+                keep_line = self._apply_context_record(
+                    line_json,
+                    history=self._history,
+                    messages_after_last_usage=messages_after_last_usage,
+                    file_backend=source,
+                    line_no=line_no,
+                )
+                if keep_line:
+                    await new_file.write(line)
+
+    async def clear(self):
+        """
+        Clear the context history.
+        This is almost equivalent to revert_to(0), but without relying on the assumption
+        that the first checkpoint exists.
+        File backend will be rotated.
+
+        Raises:
+            RuntimeError: When no available rotation path is found.
+        """
+
+        logger.debug("Clearing context")
+
+        if self._lease is not None:
+            # Same reason as in ``revert_to``: rotating away a file another
+            # writer still holds would silently discard its appends.
+            self._lease.verify()
+
+        # rotate the context file
+        rotated_file_path = await next_available_rotation(self._file_backend)
+        if rotated_file_path is None:
+            logger.error("No available rotation path found")
+            raise RuntimeError("No available rotation path found")
+        await aiofiles.os.replace(self._file_backend, rotated_file_path)
+        # Truncate rather than ``touch``: touch only bumps mtime, so a file that
+        # reappeared in between would keep its content while ``_history`` is
+        # cleared, leaving memory and disk disagreeing.
+        self._file_backend.write_text("", encoding="utf-8")
+        logger.debug(
+            "Rotated context file: {rotated_file_path}", rotated_file_path=rotated_file_path
+        )
+
+        self._history.clear()
+        self._token_count = 0
+        self._pending_token_estimate = 0
+        self._next_checkpoint_id = 0
+        self._system_prompt = None
+
+    async def append_message(self, message: Message | Sequence[Message]):
+        logger.debug("Appending message(s) to context: {message}", message=message)
+        if self._lease is not None:
+            self._lease.verify()
+        messages = [message] if isinstance(message, Message) else message
+        payload = "".join(m.model_dump_json(exclude_none=True) + "\n" for m in messages)
+
+        # Write first, mutate memory second. The reverse order diverges on a
+        # failed write (ENOSPC, EACCES, EMFILE): `_history` would describe
+        # records the file never received, and `restore()` refuses to re-read
+        # once `_history` is non-empty, so the split never heals.
+        async with aiofiles.open(self._file_backend, "a", encoding="utf-8") as f:
+            await f.write(payload)
+
+        self._history.extend(messages)
+        self._pending_token_estimate += estimate_text_tokens(messages)
+
+    async def append_step(
+        self,
+        assistant_message: Message,
+        tool_messages: Sequence[Message],
+        *,
+        token_count: int | None,
+    ) -> None:
+        """Record a step — its assistant message, usage and tool results — in one write.
+
+        Written in three appends, a worker killed in between left the assistant's
+        tool calls on disk without their results, and the provider rejects that
+        history. The records and their order are the same as before.
+        """
+        if self._lease is not None:
+            self._lease.verify()
+        lines = [assistant_message.model_dump_json(exclude_none=True) + "\n"]
+        if token_count is not None:
+            lines.append(json.dumps({"role": "_usage", "token_count": token_count}) + "\n")
+        for message in tool_messages:
+            lines.append(message.model_dump_json(exclude_none=True) + "\n")
+
+        # Same ordering rule as `append_message`: persist before touching memory.
+        async with aiofiles.open(self._file_backend, "a", encoding="utf-8") as f:
+            await f.write("".join(lines))
+
+        self._history.append(assistant_message)
+        self._pending_token_estimate += estimate_text_tokens([assistant_message])
+        if token_count is not None:
+            self._token_count = token_count
+            self._pending_token_estimate = 0
+        self._history.extend(tool_messages)
+        self._pending_token_estimate += estimate_text_tokens(tool_messages)
+
+    async def update_token_count(self, token_count: int):
+        logger.debug("Updating token count in context: {token_count}", token_count=token_count)
+
+        async with aiofiles.open(self._file_backend, "a", encoding="utf-8") as f:
+            await f.write(json.dumps({"role": "_usage", "token_count": token_count}) + "\n")
+
+        self._token_count = token_count
+        self._pending_token_estimate = 0
+
+    def _parse_context_line(
+        self,
+        line: str,
+        *,
+        file_backend: Path,
+        line_no: int,
+    ) -> dict[str, Any] | None:
+        try:
+            line_json = json.loads(line, strict=False)
+        except json.JSONDecodeError as exc:
+            logger.warning(
+                "Skipping malformed context line {line_no} in {file}: {error}",
+                line_no=line_no,
+                file=file_backend,
+                error=exc,
+            )
+            return None
+        if not isinstance(line_json, dict):
+            logger.warning(
+                "Skipping non-object context line {line_no} in {file}",
+                line_no=line_no,
+                file=file_backend,
+            )
+            return None
+        return cast(dict[str, Any], line_json)
+
+    def _apply_context_record(
+        self,
+        line_json: dict[str, Any],
+        *,
+        history: list[Message],
+        messages_after_last_usage: list[Message],
+        file_backend: Path,
+        line_no: int,
+    ) -> bool:
+        role = line_json.get("role")
+        if not isinstance(role, str):
+            logger.warning(
+                "Skipping context line {line_no} in {file}: missing or invalid role",
+                line_no=line_no,
+                file=file_backend,
+            )
+            return False
+        if role == "_system_prompt":
+            content = line_json.get("content")
+            if not isinstance(content, str):
+                logger.warning(
+                    "Skipping invalid system prompt line {line_no} in {file}",
+                    line_no=line_no,
+                    file=file_backend,
+                )
+                return False
+            self._system_prompt = content
+            return True
+        if role == "_usage":
+            token_count = line_json.get("token_count")
+            if not isinstance(token_count, int):
+                logger.warning(
+                    "Skipping invalid usage line {line_no} in {file}",
+                    line_no=line_no,
+                    file=file_backend,
+                )
+                return False
+            self._token_count = token_count
+            messages_after_last_usage.clear()
+            return True
+        if role == "_checkpoint":
+            checkpoint_id = line_json.get("id")
+            if not isinstance(checkpoint_id, int):
+                logger.warning(
+                    "Skipping invalid checkpoint line {line_no} in {file}",
+                    line_no=line_no,
+                    file=file_backend,
+                )
+                return False
+            self._next_checkpoint_id = checkpoint_id + 1
+            return True
+        try:
+            message = Message.model_validate(line_json)
+        except ValidationError as exc:
+            logger.warning(
+                "Skipping invalid context message line {line_no} in {file}: {error}",
+                line_no=line_no,
+                file=file_backend,
+                error=exc,
+            )
+            return False
+        history.append(message)
+        messages_after_last_usage.append(message)
+        return True

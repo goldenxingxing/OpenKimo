@@ -1,0 +1,388 @@
+{
+  "attachFiles": "Attach files",
+  "planMode": {
+    "label": "Plan",
+    "toggle": "Toggle plan mode",
+    "active": "Plan mode is active. The model will only read and plan, not modify files.",
+    "enable": "Enable plan mode for read-only research and planning."
+  },
+  "yoloMode": {
+    "label": "YOLO",
+    "toggle": "Toggle YOLO mode",
+    "active": "YOLO is on. Every action runs without asking — commands, file edits and deletes included. Turn it off to review actions again.",
+    "enable": "Skip every approval prompt. The agent runs commands and edits files without asking. Same as the /yolo command."
+  },
+  "approval": {
+    "summary": {
+      "command": "Run command",
+      "diff": "Edit file",
+      "todo": "Update todos",
+      "task": "Background task",
+      "wiki": "Write to wiki",
+      "generic": "Action",
+      "moreLines": "+{{count}} more lines",
+      "lines": "{{before}} → {{after}} lines",
+      "files": "{{count}} files",
+      "todoDetail": "{{done}}/{{total}} done",
+      "pages": "{{count}} pages",
+      "rawDetails": "Raw request details"
+    },
+    "allowAction": "Allow this {{action}}?",
+    "sessionApproved": "Session approved. Future matching requests auto-approve.",
+    "approvalConfirmed": "Approval confirmed. Continuing execution…",
+    "requestDenied": "Request denied.",
+    "requestDeniedWithReason": "Request denied: {{reason}}",
+    "waitingApproval": "Waiting for your approval…",
+    "executionCancelled": "Tool execution cancelled.",
+    "executionInterrupted": "Tool execution interrupted (session process exited unexpectedly).",
+    "approve": "Approve",
+    "approving": "Approving...",
+    "approveForSession": "Approve for session",
+    "decline": "Decline",
+    "declining": "Declining...",
+    "declineWithFeedback": "Decline with feedback",
+    "cancelFeedback": "Cancel feedback",
+    "submitFeedback": "Submit feedback",
+    "feedbackPlaceholder": "Tell the model what to do instead...",
+    "feedbackHint": "Enter to submit · Shift+Enter for newline · Esc to cancel",
+    "manualRequiredBy": "Manual approval required by {{sender}}",
+    "actionLabel": "Action:",
+    "confirming": "Confirming…",
+    "approvingSession": "Approving session…",
+    "actionFailed": "Approval action failed"
+  },
+  "wikiApproval": {
+    "title": "Write to Knowledge Base",
+    "details": "Details",
+    "paths": "Pages",
+    "sources": "Sources",
+    "duplicates": "Duplicates omitted",
+    "conflicts": "Conflicts preserved",
+    "omitted": "{{count}} more omitted",
+    "approveOnce": "Allow once",
+    "approveForSession": "Always allow this session",
+    "decline": "Decline"
+  },
+  "activity": {
+    "uploadingFiles": "Uploading files...",
+    "errorFallback": "An error occurred",
+    "connecting": "Connecting...",
+    "waitingApproval": "Waiting for approval...",
+    "loadingHistory": "Loading history...",
+    "thinking": "Thinking...",
+    "awaitingInput": "Awaiting input",
+    "runningTool": "Running {{tool}}...",
+    "tools": {
+      "Read": "Reading files...",
+      "Write": "Writing files...",
+      "Edit": "Editing code...",
+      "Bash": "Running command...",
+      "Glob": "Searching files...",
+      "Grep": "Searching content...",
+      "WebFetch": "Fetching web content...",
+      "WebSearch": "Searching the web...",
+      "Task": "Running agent...",
+      "NotebookEdit": "Editing notebook..."
+    }
+  },
+  "composer": {
+    "placeholderNoSession": "Create a session to start...",
+    "placeholderConnecting": "Connecting...",
+    "placeholderStarting": "Starting environment...",
+    "placeholderFollowUp": "Add a follow-up message...",
+    "placeholderDefault": "Ask anything, / for commands, @ to mention files",
+    "uploadingBadge": "Uploading files…",
+    "expandInput": "Expand input",
+    "collapseInput": "Collapse input",
+    "send": "Send",
+    "sendHint": "Send (Enter)",
+    "stopGeneration": "Stop generation",
+    "queueMessage": "Queue message",
+    "placeholderGeneric": "What would you like to know?",
+    "submit": "Submit"
+  },
+  "header": {
+    "openSidebar": "Open sessions sidebar",
+    "doubleClickRename": "Double-click to rename",
+    "showFiles": "Show workspace files",
+    "hideFiles": "Hide workspace files",
+    "searchMessages": "Search messages",
+    "foldAll": "Fold all blocks",
+    "unfoldAll": "Unfold all blocks"
+  },
+  "conversation": {
+    "startingEnv": "Starting environment...",
+    "connectingSession": "Connecting to session...",
+    "createSessionTitle": "Create a session to begin",
+    "createSessionHint": "Click the + button in the sidebar to start a new session",
+    "createNewSession": "Create new session",
+    "newTabHint": "{{modifier}}+Click to open in new tab",
+    "startConversation": "Start a conversation by typing a message below."
+  },
+  "files": {
+    "title": "Workspace files",
+    "currentWorkDir": "Current work directory",
+    "refresh": "Refresh workspace files",
+    "close": "Close workspace files panel",
+    "up": "Up",
+    "root": "Root",
+    "loading": "Loading files...",
+    "loadFailed": "Failed to load workspace files",
+    "loadDirFailed": "Failed to load this directory",
+    "tryAgain": "Try again",
+    "emptyDir": "No files in this directory.",
+    "directory": "Directory",
+    "fileLabel": "File",
+    "openDir": "Open directory {{name}}",
+    "download": "Download {{name}}"
+  },
+  "mentions": {
+    "pendingUploads": "Pending uploads",
+    "workspaceFiles": "Workspace files",
+    "uploadBadge": "Upload",
+    "workspaceBadge": "Workspace",
+    "noMatch": "No files match \"@{{query}}\".",
+    "noFiles": "No files available to mention yet.",
+    "indexing": "Indexing workspace files…",
+    "unavailable": "Workspace files unavailable.",
+    "retry": "Retry",
+    "selectSession": "Select an active session to enable workspace file mentions.",
+    "filesReady_one": "{{count}} file ready to mention.",
+    "filesReady_other": "{{count}} files ready to mention.",
+    "workspaceIndexed": "Workspace files indexed.",
+    "searchDeeperHint": " Type a path to search deeper."
+  },
+  "commands": {
+    "heading": "Slash Commands",
+    "noMatch": "No commands match \"/{{query}}\".",
+    "empty": "No commands available."
+  },
+  "search": {
+    "placeholder": "Search in conversation...",
+    "resultCount_one": "{{count}} result",
+    "resultCount_other": "{{count}} results",
+    "noResults": "No results",
+    "noMessages": "No messages found",
+    "jumpToMessage": "Jump to message",
+    "selectResult": "Select a result to preview",
+    "typeToSearch": "Type to search",
+    "navigate": "Navigate",
+    "close": "Close",
+    "title": "Search Messages",
+    "messageLabel": {
+      "user": "User",
+      "assistant": "Assistant",
+      "thinking": "Thinking"
+    },
+    "preview": {
+      "content": "Content",
+      "thinking": "Thinking",
+      "tool": "Tool",
+      "input": "Input",
+      "output": "Output",
+      "message": "Message",
+      "code": "Code"
+    }
+  },
+  "openIn": {
+    "noDirectory": "No directory",
+    "pathCopied": "Path copied",
+    "copyFailed": "Failed to copy path",
+    "noWorkDir": "No working directory",
+    "noWorkDirDesc": "Create a session with a working directory first.",
+    "openWorkDir": "Open working directory",
+    "open": "Open",
+    "openInLabel": "Open in {{label}}",
+    "openInLabelLastUsed": "{{label}} (last used)",
+    "openFailed": "Failed to open application",
+    "unexpectedError": "Unexpected error",
+    "chooseApp": "Choose app to open working directory",
+    "lastUsed": "Last used",
+    "copyPath": "Copy path",
+    "openFailedSentence": "Failed to open application.",
+    "failedToOpen": "Failed to open",
+    "apps": {
+      "finder": "Finder",
+      "terminal": "Terminal"
+    },
+    "pathNotFound": "Path not found, and no same-named file under the work directory: {{path}}"
+  },
+  "sessionInfo": {
+    "title": "Session Info",
+    "sessionId": "Session ID",
+    "workingDirectory": "Working Directory",
+    "sessionDirectory": "Session Directory",
+    "info": "Session info",
+    "copy": "Copy {{label}}"
+  },
+  "system": {
+    "gitBashMissingTitle": "Git for Windows is required",
+    "gitBashMissing": "Shell commands require Git for Windows. Install it from <installLink>{{link}}</installLink> to enable the shell tool.",
+    "gitBashInstall": "Install Git for Windows",
+    "gitBashRefresh": "Refresh"
+  },
+  "paste": {
+    "noun": "Pasted",
+    "lines": "{{count}} lines",
+    "chars": "{{count}} chars",
+    "view": "View full text",
+    "expand": "Expand to text",
+    "editTitle": "Pasted text {{id}}",
+    "save": "Save",
+    "cancel": "Cancel",
+    "collapse": "Collapse"
+  },
+  "retry": {
+    "rateLimit": "Rate limited",
+    "serverError": "Server error",
+    "timeout": "Timed out",
+    "connection": "Connection lost",
+    "emptyResponse": "Empty response",
+    "other": "{{errorType}}",
+    "attemptOf": "retry {{attempt}}/{{max}}",
+    "attempt": "retry {{attempt}}",
+    "elapsed": "for {{duration}}",
+    "nextIn": "next in {{duration}}",
+    "stopHint": "press Stop to give up",
+    "unitH": "h",
+    "unitM": "m",
+    "unitS": "s"
+  },
+  "sessionError": {
+    "title": "This reply stopped with an error",
+    "dismiss": "Dismiss"
+  },
+  "attachmentToken": {
+    "image": "Image",
+    "file": "File",
+    "pasteUnsupportedTitle": "This file could not be pasted",
+    "pasteUnsupported": "The browser did not hand over the file's contents. Drag it into the input, or add it with the paperclip."
+  },
+  "reasoning": {
+    "thinking": "Thinking",
+    "thought": "Thought",
+    "thoughtFor": "Thought for {{duration}}s",
+    "suppressed": "Thinking was skipped by the server (provider-side limit); the response below was generated without reasoning"
+  },
+  "message": {
+    "copy": "Copy",
+    "copied": "Copied!",
+    "previousBranch": "Previous branch",
+    "nextBranch": "Next branch"
+  },
+  "fork": {
+    "button": "Fork session",
+    "tooltip": "Fork session from this point",
+    "title": "Fork Session",
+    "description": "A new session will be created with the conversation history up to and including this response. The current session will not be affected.",
+    "confirm": "Fork"
+  },
+  "attachment": {
+    "image": "Image",
+    "video": "Video",
+    "attachment": "Attachment",
+    "decodeFailed": "Failed to decode file content",
+    "remove": "Remove attachment",
+    "preview": "Attachment preview",
+    "alt": "attachment",
+    "uploadedImage": "uploaded image",
+    "addPhotosOrFiles": "Add photos or files"
+  },
+  "upload": {
+    "unsupportedImageType": "Unsupported image type: {{type}}",
+    "imageTooLarge": "Image too large: {{size}}MB (max {{max}}MB)",
+    "unsupportedVideoType": "Unsupported video type: {{type}}",
+    "videoTooLarge": "Video too large: {{size}}MB (max {{max}}MB)",
+    "noAcceptedTypes": "No files match the accepted types.",
+    "validationFailed": "File validation failed",
+    "manyFailed_one": "{{count}} file failed validation. First error: {{error}}",
+    "manyFailed_other": "{{count}} files failed validation. First error: {{error}}",
+    "allTooLarge": "All files exceed the maximum size.",
+    "tooMany_one": "Too many files. Maximum {{count}} file allowed.",
+    "tooMany_other": "Too many files. Maximum {{count}} files allowed.",
+    "processFailed": "Failed to process file. Please try a smaller file.",
+    "uploadFiles": "Upload files",
+    "fileError": "File Error"
+  },
+  "assistant": {
+    "thinkingThroughResponse": "Thinking through the response...",
+    "reasoningThroughRequest": "Reasoning through the request…",
+    "assemblingSnippet": "Assembling snippet…",
+    "generatedCode": "Generated code",
+    "typedSubagent": "{{type}} agent",
+    "subagent": "sub-agent",
+    "thoughtThroughProblem": "Thought through the problem",
+    "thinkingThroughProblem": "Thinking through the problem…"
+  },
+  "question": {
+    "responseFailed": "Question response failed",
+    "planPreview": "Plan Preview",
+    "answerPlaceholder": "Type your answer...",
+    "hintSelect": "select",
+    "hintSwitch": "switch",
+    "hintToggle": "toggle",
+    "hintConfirm": "confirm",
+    "dismissArmed": "Press esc again to stop",
+    "dismiss": "Stop run",
+    "submitting": "Submitting...",
+    "submit": "Submit",
+    "next": "Next"
+  },
+  "queue": {
+    "edit": "Edit",
+    "moveUp": "Move up",
+    "editMessage": "Edit queued message",
+    "count_one": "{{count}} Queued",
+    "count_other": "{{count}} Queued"
+  },
+  "todo": {
+    "progress": "{{done}}/{{total}} Tasks",
+    "staleInterrupted": "Interrupted",
+    "staleCarried": "From earlier turns"
+  },
+  "outputTime": {
+    "justNow": "just now",
+    "minutesAgo_one": "{{count}} minute ago",
+    "minutesAgo_other": "{{count}} minutes ago",
+    "hoursAgo_one": "{{count}} hour ago",
+    "hoursAgo_other": "{{count}} hours ago",
+    "daysAgo_one": "{{count}} day ago",
+    "daysAgo_other": "{{count}} days ago"
+  },
+  "plugins": {
+    "subagentAnimation": {
+      "name": "Subagent Animation",
+      "pluginDescription": "Plays a 3-second animation when a sub-agent is spawned.",
+      "registryDescription": "Shows an animated indicator when a sub-agent is spawned.",
+      "agentFallback": "Agent",
+      "loading": "Loading",
+      "spawning": "spawning..."
+    },
+    "thinkingAnimation": {
+      "name": "Thinking Animation",
+      "pluginDescription": "Pixel-art robot thinking animation with phased bulb/eureka sequence. Auto-dismiss within 5s.",
+      "registryDescription": "Pixel-art robot thinking animation with phased bulb/eureka sequence.",
+      "thinking": "THINKING{{dots}}",
+      "analyzing": "Analyzing context...",
+      "reasoning": "Reasoning through...",
+      "eureka": "Eureka!"
+    },
+    "subagentCluster": {
+      "name": "Subagent Cluster",
+      "pluginDescription": "Pixel-art summoning animation when subagents spawn in cluster. Auto-dismiss within 5s.",
+      "registryDescription": "Pixel-art summoning animation when subagents spawn in cluster.",
+      "deployed_one": "{{count}} AGENT DEPLOYED",
+      "deployed_other": "{{count}} AGENTS DEPLOYED",
+      "activated": "CLUSTER MODE ACTIVATED",
+      "summoning": "Summoning units...",
+      "online": "All units online!"
+    }
+  },
+  "modelSelector": {
+    "logoAlt": "{{provider}} logo"
+  },
+  "pathMentions": {
+    "clickHint": "Click to open; Cmd+Click to reveal in Finder\n{{path}}",
+    "openContainingFolder": "Open containing folder"
+  }
+}
