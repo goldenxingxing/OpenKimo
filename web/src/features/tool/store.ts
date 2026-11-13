@@ -72,16 +72,19 @@ export function handleToolResult(
       lower.includes("write-file") ||
       lower.includes("write_file")
     ) {
-      const filePath = args.path ?? args.file_path;
+      // `||` so an empty-string path falls back to file_path (matches the
+      // pre-narrowing truthiness semantics); the check below still rejects "".
+      const filePath = args.path || args.file_path;
       if (typeof filePath === "string" && filePath) {
         addNewFile(filePath);
       }
     }
 
-    // Generic output parameters - these always indicate file creation
-    if (typeof args.output_file === "string") addNewFile(args.output_file);
-    if (typeof args.output_path === "string") addNewFile(args.output_path);
-    if (typeof args.download_dir === "string") addNewFile(args.download_dir);
+    // Generic output parameters - these always indicate file creation.
+    // Keep the truthiness guard so an empty string never lands in the list.
+    if (typeof args.output_file === "string" && args.output_file) addNewFile(args.output_file);
+    if (typeof args.output_path === "string" && args.output_path) addNewFile(args.output_path);
+    if (typeof args.download_dir === "string" && args.download_dir) addNewFile(args.download_dir);
   } catch {
     // Ignore parse errors
   }

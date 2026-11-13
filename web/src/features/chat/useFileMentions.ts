@@ -22,6 +22,9 @@ const IGNORED_DIRS = new Set([
   "dist",
   "build",
   "__pycache__",
+  // OpenKimo's own per-session records (context.jsonl, leases, offloads):
+  // runtime artifacts, not user documents, so they must not crowd the index.
+  "session-data",
 ]);
 
 type MentionRange = {

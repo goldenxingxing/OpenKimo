@@ -49,7 +49,7 @@ def test_default_config_dump():
                 "prune_minimum_tokens": 20000,
             },
             "background": {
-                "max_running_tasks": 4,
+                "max_running_tasks": 50,
                 "read_max_bytes": 30000,
                 "notification_tail_lines": 20,
                 "notification_tail_chars": 3000,

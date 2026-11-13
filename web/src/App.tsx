@@ -743,15 +743,18 @@ function App() {
                           <ShieldCheck className="size-3.5" />
                         </a>
                       )}
-                      <button
-                        type="button"
-                        title={t("common:user.signOut")}
-                        aria-label={t("common:user.signOut")}
-                        className="inline-flex h-6 w-6 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-secondary/50 hover:text-foreground shrink-0"
-                        onClick={handleLogout}
-                      >
-                        <LogOut className="size-3.5" />
-                      </button>
+                      {/* The local owner never logged in — signing out is meaningless. */}
+                      {currentUser?.auth_mode !== "local" && (
+                        <button
+                          type="button"
+                          title={t("common:user.signOut")}
+                          aria-label={t("common:user.signOut")}
+                          className="inline-flex h-6 w-6 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-secondary/50 hover:text-foreground shrink-0"
+                          onClick={handleLogout}
+                        >
+                          <LogOut className="size-3.5" />
+                        </button>
+                      )}
                     </div>
                     {/* Theme toggle + language toggle + collapse */}
                     <div className="flex items-center justify-between">
@@ -852,15 +855,18 @@ function App() {
                     <ShieldCheck className="size-3.5" />
                   </a>
                 )}
-                <button
-                  type="button"
-                  title={t("common:user.signOut")}
-                  aria-label={t("common:user.signOut")}
-                  className="inline-flex h-6 w-6 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-secondary/50 hover:text-foreground shrink-0"
-                  onClick={handleLogout}
-                >
-                  <LogOut className="size-3.5" />
-                </button>
+                {/* The local owner never logged in — signing out is meaningless. */}
+                {currentUser?.auth_mode !== "local" && (
+                  <button
+                    type="button"
+                    title={t("common:user.signOut")}
+                    aria-label={t("common:user.signOut")}
+                    className="inline-flex h-6 w-6 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-secondary/50 hover:text-foreground shrink-0"
+                    onClick={handleLogout}
+                  >
+                    <LogOut className="size-3.5" />
+                  </button>
+                )}
               </div>
               <div className="flex flex-col items-center gap-2">
                 <ThemeToggle />

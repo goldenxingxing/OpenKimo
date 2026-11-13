@@ -366,6 +366,7 @@
       "pluginDescription": "多个子 Agent 同时创建时播放像素风召唤动画。5 秒内自动关闭。",
       "registryDescription": "多个子 Agent 同时创建时播放像素风召唤动画。",
       "deployed_other": "已部署 {{count}} 个 Agent",
+      "deployed_multiple": "已部署多个 Agent",
       "activated": "集群模式已启动",
       "summoning": "正在召集...",
       "online": "全员就位！"

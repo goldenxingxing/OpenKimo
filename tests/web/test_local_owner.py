@@ -58,7 +58,12 @@ class _Req:
 
 def test_user_from_connection_returns_local_owner() -> None:
     owner = {"id": "local", "role": "admin", "is_active": 1}
-    assert user_from_connection(_Req(owner, session_token=None)) is owner
+    result = user_from_connection(_Req(owner, session_token=None))
+    # The identity is returned as a tagged copy (auth_mode="local") so
+    # /api/auth/me can tell the frontend this is the no-login local owner.
+    assert result is not None
+    assert result["id"] == "local"
+    assert result["auth_mode"] == "local"
 
 
 def test_user_from_connection_none_without_local_owner() -> None:

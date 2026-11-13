@@ -56,7 +56,6 @@ from kosong.message import (
     TextPart,
     ThinkPart,
     ToolCall,
-    ToolCallPart,
 )
 from kosong.tooling import Tool
 
@@ -548,7 +547,29 @@ class OpenAIResponsesStreamedMessage:
     async def _convert_stream_response(
         self, response: AsyncStream[ResponseStreamEvent]
     ) -> AsyncIterator[StreamedMessagePart]:
-        """Convert streaming Responses events into message parts."""
+        """Convert streaming Responses events into message parts.
+
+        ``function_call`` items are accumulated by ``item_id`` and emitted as one
+        complete ``ToolCall`` when the item finishes. The API carries ``item_id``
+        on every delta precisely because events for concurrent output items may
+        interleave, and a ``ToolCallPart`` can only be merged into the most
+        recent ``ToolCall`` — streaming the deltas through in arrival order would
+        splice arguments into the wrong call. The cost is that tool-call
+        arguments no longer stream in token by token; they arrive complete.
+        """
+        pending_fc: dict[str, tuple[str, str, list[str]]] = {}
+        emitted_fc: set[str] = set()
+
+        def emit_fc(item_id: str) -> ToolCall | None:
+            if item_id in emitted_fc or item_id not in pending_fc:
+                return None
+            call_id, name, parts = pending_fc.pop(item_id)
+            emitted_fc.add(item_id)
+            return ToolCall(
+                id=call_id,
+                function=ToolCall.FunctionBody(name=name, arguments="".join(parts)),
+            )
+
         try:
             async for chunk in response:
                 if chunk.type == "response.output_text.delta":
@@ -562,19 +583,32 @@ class OpenAIResponsesStreamedMessage:
                 elif chunk.type == "response.output_item.added":
                     item = chunk.item
                     if item.type == "function_call":
-                        yield ToolCall(
-                            id=item.call_id or str(uuid.uuid4()),
-                            function=ToolCall.FunctionBody(
-                                name=item.name,
-                                arguments=item.arguments,
-                            ),
+                        initial = [item.arguments] if item.arguments else []
+                        pending_fc[item.id] = (
+                            item.call_id or str(uuid.uuid4()),
+                            item.name,
+                            initial,
                         )
                 elif chunk.type == "response.output_item.done":
                     item = chunk.item
-                    if item.type == "reasoning":
+                    if item.type == "function_call":
+                        fc = emit_fc(item.id)
+                        if fc is not None:
+                            yield fc
+                    elif item.type == "reasoning":
                         yield ThinkPart(think="", encrypted=item.encrypted_content)
                 elif chunk.type == "response.function_call_arguments.delta":
-                    yield ToolCallPart(arguments_part=chunk.delta)
+                    entry = pending_fc.get(chunk.item_id)
+                    if entry is not None:
+                        entry[2].append(chunk.delta)
+                elif chunk.type == "response.function_call_arguments.done":
+                    # The done event carries the authoritative full arguments.
+                    entry = pending_fc.get(chunk.item_id)
+                    if entry is not None:
+                        entry[2][:] = [chunk.arguments]
+                        fc = emit_fc(chunk.item_id)
+                        if fc is not None:
+                            yield fc
                 elif chunk.type == "response.reasoning_summary_part.added":
                     yield ThinkPart(think="")
                 elif chunk.type == "response.reasoning_summary_text.delta":
@@ -583,6 +617,12 @@ class OpenAIResponsesStreamedMessage:
                     self._id = chunk.response.id
                     self._usage = chunk.response.usage
                     self._record_finish_reason(chunk.response)
+            # Stream exhausted: flush any function_call whose done event never
+            # arrived, so a call is never silently dropped.
+            for item_id in list(pending_fc):
+                fc = emit_fc(item_id)
+                if fc is not None:
+                    yield fc
         except (OpenAIError, httpx.HTTPError) as e:
             raise convert_error(e) from e
         finally:

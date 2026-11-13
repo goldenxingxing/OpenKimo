@@ -35,6 +35,10 @@ class UserResponse(BaseModel):
     user_id: str
     username: str
     role: str
+    #: "local" when the identity is the no-login local owner, "password"
+    #: for a real cookie/bearer session. The frontend hides sign-out for
+    #: the local owner.
+    auth_mode: str = "password"
 
 
 @lru_cache(maxsize=1)
@@ -96,6 +100,7 @@ def login(body: LoginRequest, response: Response) -> UserResponse:
         user_id=user["id"],
         username=user["username"],
         role=user["role"],
+        auth_mode=user.get("auth_mode", "password"),
     )
 
 
@@ -123,6 +128,7 @@ async def me(
         user_id=user["id"],
         username=user["username"],
         role=user["role"],
+        auth_mode=user.get("auth_mode", "password"),
     )
 
 

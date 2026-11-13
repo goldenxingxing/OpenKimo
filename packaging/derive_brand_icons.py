@@ -25,8 +25,8 @@ from PIL import Image, ImageChops, ImageDraw, ImageFilter
 
 ROOT = Path(__file__).resolve().parents[1]
 SOURCE = ROOT / "packaging" / "LogoSource.png"
-LOGO = ROOT / "kimo-cli" / "web" / "public" / "logo.png"
-FAVICON = ROOT / "kimo-cli" / "web" / "public" / "favicon.png"
+LOGO = ROOT / "web" / "public" / "logo.png"
+FAVICON = ROOT / "web" / "public" / "favicon.png"
 APP_ICON = ROOT / "packaging" / "AppIcon.png"
 MENUBAR = ROOT / "packaging" / "MenuBarIconTemplate.png"
 

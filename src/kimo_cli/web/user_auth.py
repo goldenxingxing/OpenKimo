@@ -43,7 +43,9 @@ def user_from_connection(connection: HTTPConnection) -> dict[str, Any] | None:
         session_token = getattr(app.state, "session_token", None)
         local_owner = getattr(app.state, "local_owner", None) if not session_token else None
         if local_owner:
-            return local_owner
+            # Tag the identity so /api/auth/me can tell the frontend this is
+            # the no-login local owner (no sign-out entry point makes sense).
+            return {**local_owner, "auth_mode": "local"}
 
     # 1. Cookie
     cookie_token = connection.cookies.get(_COOKIE_NAME)

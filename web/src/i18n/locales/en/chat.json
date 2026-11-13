@@ -373,6 +373,7 @@
       "registryDescription": "Pixel-art summoning animation when subagents spawn in cluster.",
       "deployed_one": "{{count}} AGENT DEPLOYED",
       "deployed_other": "{{count}} AGENTS DEPLOYED",
+      "deployed_multiple": "MULTIPLE AGENTS DEPLOYED",
       "activated": "CLUSTER MODE ACTIVATED",
       "summoning": "Summoning units...",
       "online": "All units online!"

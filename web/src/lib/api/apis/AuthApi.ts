@@ -5,6 +5,8 @@ export interface UserInfo {
   user_id: string;
   username: string;
   role: string;
+  /** "local" = no-login local owner (hide sign-out); "password" = real session. */
+  auth_mode?: string;
 }
 
 function apiUrl(path: string): string {

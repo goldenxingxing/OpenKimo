@@ -299,6 +299,12 @@ function ClusterScene({
   const { t } = useTranslation("chat");
   const [phase, setPhase] = useState(0);
   const count = Math.min(agents.length, 8);
+  // A cluster (>=2 agents) reads as "multiple" — the exact count adds noise
+  // to a pixel animation that only has room for 8 units anyway.
+  const deployedText =
+    agents.length >= 2
+      ? t("plugins.subagentCluster.deployed_multiple")
+      : t("plugins.subagentCluster.deployed", { count });
   // dismiss is recreated on every parent render. Depending on it restarted
   // the close timer on each event, so the 5s auto-dismiss never arrived.
   const dismissRef = useRef(dismiss);
@@ -337,7 +343,7 @@ function ClusterScene({
         }}
       >
         <PixelText
-          text={t("plugins.subagentCluster.deployed", { count })}
+          text={deployedText}
           size={18}
           color="#60a5fa"
           style={{ marginBottom: "4px" }}
