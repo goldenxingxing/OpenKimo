@@ -263,7 +263,7 @@ def test_read_file_params_schema(read_file_tool: ReadFile):
                 },
                 "n_lines": {
                     "default": 1000,
-                    "description": "The number of lines to read. By default read up to 1000 lines, which is the max allowed value. Set this value when the file is too large to read at once.",
+                    "description": "The number of lines to read. By default read up to 1000 lines; larger values are capped at this limit. Set this value when the file is too large to read at once.",
                     "minimum": 1,
                     "type": "integer",
                 },

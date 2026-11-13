@@ -166,7 +166,10 @@ def _validate_body(body: str) -> None:
         if "[[" in consumed or "]]" in consumed:
             raise UnsafeWikiPage("Wiki links must use [[category/slug]]")
         for link in links:
-            validate_logical_page(f"{link.group(1)}.md")
+            try:
+                validate_logical_page(f"{link.group(1)}.md")
+            except UnsafeWikiPath as exc:
+                raise UnsafeWikiPage("Wiki links must use [[category/slug]]") from exc
     if any(pattern.search(body) for pattern in _SECRET_PATTERNS):
         raise UnsafeWikiPage("Wiki pages cannot contain credentials or secrets")
     if _SECRET_ASSIGNMENT_RE.search(body) or _SECRET_HEADER_RE.search(body):

@@ -23,7 +23,7 @@ LintCode = Literal[
     "stale_provenance",
 ]
 _WIKILINK = re.compile(r"\[\[([^\[\]]+)\]\]")
-_CONFLICT = re.compile(r"(?im)^##+\s+Conflict\b|^(?:<{7}|={7}|>{7})")
+_CONFLICT = re.compile(r"(?im)^##+\s+Conflict\b|^<{7}")
 _CLAIM = re.compile(r"(?m)^(?!\s*#)(?:\s*[-*]\s+)?(.{24,})$")
 
 

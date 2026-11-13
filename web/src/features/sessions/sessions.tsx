@@ -340,8 +340,12 @@ export const SessionsSidebar = memo(function SessionsSidebarComponent({
 
   // View mode state with localStorage persistence
   const [viewMode, setViewMode] = useState<ViewMode>(() => {
-    const stored = localStorage.getItem(VIEW_MODE_KEY);
-    return stored === "grouped" ? "grouped" : "list";
+    try {
+      const stored = localStorage.getItem(VIEW_MODE_KEY);
+      return stored === "grouped" ? "grouped" : "list";
+    } catch {
+      return "list";
+    }
   });
 
   // Archived section expanded state
@@ -374,7 +378,7 @@ export const SessionsSidebar = memo(function SessionsSidebarComponent({
     }
   }, [isArchivedExpanded, onRefreshArchivedSessions]);
 
-  // Exit multi-select mode when switching between archived/non-archived
+  // Clear the selection after a bulk action, or when the person cancels.
   const exitMultiSelectMode = useCallback(() => {
     setIsMultiSelectMode(false);
     setSelectedSessionIds(new Set());
@@ -459,7 +463,11 @@ export const SessionsSidebar = memo(function SessionsSidebarComponent({
 
   const handleViewModeChange = useCallback((mode: ViewMode) => {
     setViewMode(mode);
-    localStorage.setItem(VIEW_MODE_KEY, mode);
+    try {
+      localStorage.setItem(VIEW_MODE_KEY, mode);
+    } catch {
+      // Storage may be unavailable; the choice still applies for this session.
+    }
   }, []);
 
   const newSessionShortcutModifier = isMacOS() ? "Cmd" : "Ctrl";
@@ -538,7 +546,7 @@ export const SessionsSidebar = memo(function SessionsSidebarComponent({
     event.stopPropagation();
 
     const menuWidth = 200;
-    const menuHeight = 32;
+    const menuHeight = 150;
     const padding = 8;
     const viewportWidth = window.innerWidth;
     const viewportHeight = window.innerHeight;
@@ -718,6 +726,7 @@ export const SessionsSidebar = memo(function SessionsSidebarComponent({
         onKeyDown={(event) => {
           if (event.key === "Escape") {
             event.stopPropagation();
+            setContextMenu(null);
           }
         }}
         role="menu"

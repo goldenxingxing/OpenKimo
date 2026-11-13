@@ -71,14 +71,31 @@ def _count_sessions(db: Any, user_id: str) -> int:
     return int(row[0]) if row else 0
 
 
-def _user_to_detail(db: Any, user: dict[str, Any]) -> UserDetail:
+def _count_sessions_for_all(db: Any) -> dict[str, int]:
+    """Active session counts for every user in one query (avoids N+1)."""
+    import time
+
+    rows = db.execute(
+        "SELECT user_id, COUNT(*) FROM user_sessions WHERE expires_at > ? GROUP BY user_id",
+        (time.time(),),
+    ).fetchall()
+    return {row[0]: int(row[1]) for row in rows}
+
+
+def _user_to_detail(
+    db: Any, user: dict[str, Any], session_counts: dict[str, int] | None = None
+) -> UserDetail:
     return UserDetail(
         id=user["id"],
         username=user["username"],
         role=user["role"],
         is_active=bool(user["is_active"]),
         created_at=user["created_at"],
-        session_count=_count_sessions(db, user["id"]),
+        session_count=(
+            session_counts.get(user["id"], 0)
+            if session_counts is not None
+            else _count_sessions(db, user["id"])
+        ),
     )
 
 
@@ -94,7 +111,8 @@ async def get_users(
     """Return all users with their active session counts."""
     with db_session() as db:
         users = list_users(db)
-        return [_user_to_detail(db, u) for u in users]
+        counts = _count_sessions_for_all(db)
+        return [_user_to_detail(db, u, counts) for u in users]
 
 
 @router.post("/users", summary="Create a new user (admin only)", status_code=201)
@@ -204,7 +222,9 @@ class SkillBulkResult(BaseModel):
 async def list_managed_skills(
     admin: dict[str, Any] = Depends(require_admin),
 ) -> list[ManagedSkill]:
-    return _skill_manager().list_skills()
+    # Scanning both skill directories and parsing frontmatter is blocking I/O;
+    # keep it off the event loop.
+    return await asyncio.to_thread(lambda: _skill_manager().list_skills())
 
 
 # NOTE: keep this registered ahead of the "/skills/{name}/..." routes below.
@@ -276,8 +296,10 @@ async def upload_managed_skill(
     try:
         manager = _skill_manager()
         if (file.filename or "").lower().endswith(".md"):
-            return manager.install_skill_md(data.decode("utf-8"), replace=replace)
-        return manager.install_archive(data, replace=replace)
+            return await asyncio.to_thread(
+                manager.install_skill_md, data.decode("utf-8"), replace=replace
+            )
+        return await asyncio.to_thread(manager.install_archive, data, replace=replace)
     except FileExistsError as exc:
         raise HTTPException(status_code=409, detail=f"Skill already exists: {exc}") from exc
     except (OSError, ValueError) as exc:

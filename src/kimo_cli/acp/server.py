@@ -211,10 +211,14 @@ class ACPServer:
         except BaseException:
             # Do not leave a half-configured entry behind: ``ACPSession.__init__``
             # already started the follow-up loop, so it must be closed either way.
-            if acp_session is not None:
-                await acp_session.close()
-            else:
-                await cli_instance.close()
+            # A failure inside close() must not mask the original exception.
+            try:
+                if acp_session is not None:
+                    await acp_session.close()
+                else:
+                    await cli_instance.close()
+            except Exception as exc:
+                logger.warning("Failed to close session after setup error: {error}", error=exc)
             raise
 
         self.sessions[session.id] = (acp_session, model_id_conv)

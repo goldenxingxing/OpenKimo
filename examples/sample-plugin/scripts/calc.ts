@@ -5,8 +5,18 @@ const chunks: Buffer[] = [];
 process.stdin.on("data", (chunk) => chunks.push(chunk));
 process.stdin.on("end", () => {
   const raw = Buffer.concat(chunks).toString("utf-8").trim();
-  const params = raw ? JSON.parse(raw) : {};
-  const expression: string = params.expression ?? "0";
+  let params: unknown = {};
+  try {
+    params = raw ? JSON.parse(raw) : {};
+  } catch (e) {
+    console.error(`Invalid JSON input: ${e}`);
+    process.exit(1);
+  }
+  const obj =
+    params !== null && typeof params === "object"
+      ? (params as Record<string, unknown>)
+      : {};
+  const expression = typeof obj.expression === "string" ? obj.expression : "0";
 
   // Safe evaluation: only allow numbers and basic operators
   if (!/^[\d\s+\-*/.()]+$/.test(expression)) {

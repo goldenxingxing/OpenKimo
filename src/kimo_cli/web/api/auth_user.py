@@ -108,7 +108,7 @@ def logout(request: Request, response: Response) -> dict[str, str]:
             with db_session() as db:
                 delete_user_session(db, token)
         except Exception as e:
-            logger.warning("failed to delete session %s: {err}", token, err=e)
+            logger.warning("failed to delete session {}: {err}", token, err=e)
 
     response.delete_cookie(key=_COOKIE_NAME, path="/")
     return {"detail": "Logged out"}

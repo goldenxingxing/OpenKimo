@@ -1,5 +1,4 @@
 import json
-from typing import cast
 
 import streamingjson  # type: ignore[reportMissingTypeStubs]
 from kaos.path import KaosPath
@@ -84,12 +83,7 @@ def extract_key_argument(json_content: str | streamingjson.Lexer, tool_name: str
                 return None
             key_argument = str(curr_args["url"])
         case _:
-            if isinstance(json_content, streamingjson.Lexer):
-                # lexer.json_content is list[str] based on streamingjson source code
-                content: list[str] = cast(list[str], json_content.json_content)  # type: ignore[reportUnknownMemberType]
-                key_argument = "".join(content)
-            else:
-                key_argument = json_content
+            key_argument = json_str
     key_argument = shorten_middle(key_argument, width=50)
     return key_argument
 

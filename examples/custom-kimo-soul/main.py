@@ -76,7 +76,21 @@ class MyBashTool(CallableTool2):
     async def __call__(self, params: MyBashParams) -> ToolReturnValue:
         import subprocess
 
-        result = subprocess.run(params.command, shell=True, capture_output=True, text=True)
+        try:
+            result = await asyncio.to_thread(
+                subprocess.run,
+                params.command,
+                shell=True,
+                capture_output=True,
+                text=True,
+                timeout=120,
+            )
+        except subprocess.TimeoutExpired:
+            return ToolError(
+                output="",
+                message="Command timed out after 120s",
+                brief="Bash command timed out",
+            )
         if result.returncode != 0:
             return ToolError(
                 output=result.stdout,

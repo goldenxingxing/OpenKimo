@@ -10,6 +10,7 @@ same systems is what makes the graph numbers, added later, mean anything.
 from __future__ import annotations
 
 import asyncio
+import functools
 import json
 import os
 import statistics
@@ -63,23 +64,29 @@ def ours(turns, questions):
 
     entries = [MemoryEntry(kind="project", scope="persistent", content=t) for _, t in turns]
     text = {e.id: e.content for e in entries}
-    tmp = Path(tempfile.mkdtemp())
-    (tmp / "src").write_text("x", encoding="utf-8")
-    index = MemorySearchIndex(tmp / "db", tmp / "src")
-    return [
-        "\n".join(text[h.entry_id] for h in index.search(q, entries, limit=TOP_K))
-        for q, _ in questions
-    ]
+    with tempfile.TemporaryDirectory() as tmpdir:
+        tmp = Path(tmpdir)
+        (tmp / "src").write_text("x", encoding="utf-8")
+        index = MemorySearchIndex(tmp / "db", tmp / "src")
+        return [
+            "\n".join(text[h.entry_id] for h in index.search(q, entries, limit=TOP_K))
+            for q, _ in questions
+        ]
 
 
-def txtai_hybrid(turns, questions):
+@functools.lru_cache(maxsize=1)
+def _txtai_embeddings():
     from txtai import Embeddings
 
-    emb = Embeddings(
+    return Embeddings(
         path=os.environ.get("BENCH_TXTAI_MODEL", "sentence-transformers/all-MiniLM-L6-v2"),
         content=True,
         hybrid=True,
     )
+
+
+def txtai_hybrid(turns, questions):
+    emb = _txtai_embeddings()
     emb.index([(i, text, None) for i, (_, text) in enumerate(turns)])
     return ["\n".join(turns[int(r["id"])][1] for r in emb.search(q, TOP_K)) for q, _ in questions]
 
@@ -126,8 +133,8 @@ async def main() -> None:
             picked = qa[: max(1, cap // len(data))]
             notes = fn(turns, [(q, "") for q, _ in picked])
             rows += [(q, a, n) for (q, a), n in zip(picked, notes, strict=True)]
-        retrieved[label] = rows
-        print(f"  {label}: 取回 {len(rows)} 题", flush=True)
+        retrieved[label] = rows[:cap]
+        print(f"  {label}: 取回 {len(retrieved[label])} 题", flush=True)
 
     print("\n判分中…", flush=True)
     judged = await score_all(retrieved)

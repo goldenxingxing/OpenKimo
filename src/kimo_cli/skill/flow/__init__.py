@@ -43,7 +43,7 @@ class Flow:
     end_id: str
 
 
-_CHOICE_RE = re.compile(r"<choice>([^<]*)</choice>")
+_CHOICE_RE = re.compile(r"<choice>(.*?)</choice>", re.DOTALL)
 
 
 def parse_choice(text: str) -> str | None:

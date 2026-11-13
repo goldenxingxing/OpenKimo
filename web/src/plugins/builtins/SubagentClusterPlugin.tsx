@@ -307,7 +307,6 @@ function ClusterScene({
   useEffect(() => {
     const t1 = setTimeout(() => setPhase(1), SPAWN_DURATION);
     const t2 = setTimeout(() => {
-      setPhase(2);
       dismissRef.current();
     }, SPAWN_DURATION + HOLD_DURATION + 600);
 
@@ -338,7 +337,7 @@ function ClusterScene({
         }}
       >
         <PixelText
-          text={t("plugins.subagentCluster.deployed", { count: agents.length })}
+          text={t("plugins.subagentCluster.deployed", { count })}
           size={18}
           color="#60a5fa"
           style={{ marginBottom: "4px" }}
@@ -398,10 +397,6 @@ function ClusterScene({
       </div>
 
       <style>{`
-        @keyframes psFadeIn {
-          from { opacity: 0; }
-          to { opacity: 1; }
-        }
         @keyframes psFloat {
           0%, 100% { transform: translateY(0); }
           50% { transform: translateY(-8px); }

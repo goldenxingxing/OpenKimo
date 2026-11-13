@@ -14,7 +14,10 @@ from kimo_cli.utils.logging import logger
 
 from .models import NotificationDelivery, NotificationEvent, NotificationView
 
-_VALID_NOTIFICATION_ID = re.compile(r"^[a-z0-9]{2,20}$")
+# Path-safety guard only: lowercase alphanumerics cannot escape the store root.
+# The length bound is generous enough for a full uuid4 hex (33 chars) so that
+# ids can be lengthened for collision resistance without touching this regex.
+_VALID_NOTIFICATION_ID = re.compile(r"^[a-z0-9]{2,40}$")
 _windows_lock = threading.Lock()
 
 
@@ -90,8 +93,11 @@ class NotificationStore:
         delivery: NotificationDelivery,
     ) -> None:
         notification_dir = self.notification_dir(event.id)
-        atomic_json_write(event.model_dump(mode="json"), notification_dir / self.EVENT_FILE)
+        # event.json is the commit marker (list_notification_ids keys off it), so
+        # write delivery first: a crash between the two leaves an ignored directory
+        # instead of one whose delivery is permanently empty.
         atomic_json_write(delivery.model_dump(mode="json"), notification_dir / self.DELIVERY_FILE)
+        atomic_json_write(event.model_dump(mode="json"), notification_dir / self.EVENT_FILE)
 
     def list_notification_ids(self) -> list[str]:
         if not self.root.exists():

@@ -42,7 +42,7 @@ async def translate(
 ) -> list[str]:
     if not texts:
         return []
-    lines = "\n".join(f"{i + 1}. {t}" for i, t in enumerate(texts))
+    lines = "\n".join(f"{i + 1}. {' '.join(t.splitlines())}" for i, t in enumerate(texts))
     async with sem:
         for attempt in range(3):
             try:
@@ -57,8 +57,8 @@ async def translate(
                 )
                 r.raise_for_status()
                 got = json.loads(r.json()["choices"][0]["message"]["content"])
-                out = [str(got.get(str(i + 1), texts[i])) for i in range(len(texts))]
-                if all(out):
+                out = [got.get(str(i + 1)) for i in range(len(texts))]
+                if all(isinstance(v, str) and v.strip() for v in out):
                     return out
             except Exception as exc:  # noqa: BLE001
                 if attempt == 2:

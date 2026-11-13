@@ -249,6 +249,10 @@ def detect_file_type(path: str | PurePath, header: bytes | None = None) -> FileT
             if media_hint:
                 return FileType(kind="unknown", mime_type="")
             return sniffed
+        # UTF-16/32 text legitimately contains NUL bytes; a BOM means it is
+        # wide text rather than binary content.
+        if header.startswith((b"\xff\xfe", b"\xfe\xff", b"\x00\x00\xfe\xff")):
+            return FileType(kind="text", mime_type="text/plain")
         # NUL bytes are a strong signal of binary content.
         if b"\x00" in header:
             return FileType(kind="unknown", mime_type="")

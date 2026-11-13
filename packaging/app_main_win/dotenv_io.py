@@ -1,4 +1,4 @@
-"""Re-export shim for the macOS dotenv_io module (pure-Python, OS-agnostic)."""
+"""Re-export shim for the dotenv_io module (pure-Python, OS-agnostic)."""
 
 from __future__ import annotations
 

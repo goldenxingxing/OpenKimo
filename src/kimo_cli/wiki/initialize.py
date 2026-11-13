@@ -80,9 +80,9 @@ def ensure_wiki(root: Path | None = None) -> WikiLayout:
 
 
 def _ensure_directory(path: Path, root: Path) -> None:
-    path.mkdir(parents=True, exist_ok=True)
-    if not path.is_dir() or path.is_symlink():
+    if (path.exists() or path.is_symlink()) and (not path.is_dir() or path.is_symlink()):
         raise ValueError(f"Wiki managed path must be a directory: {path}")
+    path.mkdir(parents=True, exist_ok=True)
     _assert_within_root(path, root)
 
 

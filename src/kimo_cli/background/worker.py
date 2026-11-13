@@ -115,7 +115,7 @@ async def run_background_task_worker(
 
         try:
             if os.name == "nt":
-                terminate_process_tree_windows(process.pid, force=force)
+                await asyncio.to_thread(terminate_process_tree_windows, process.pid, force=force)
                 return
 
             target_pgid = process.pid
@@ -197,6 +197,7 @@ async def run_background_task_worker(
                         await _terminate_process(force=True)
                         returncode = await process.wait()
     except Exception as exc:
+        await _terminate_process(force=True)
         logger.exception("Background task worker failed")
         runtime = store.read_runtime(task_id)
         runtime.status = "failed"

@@ -27,9 +27,11 @@ export function AgentScopeBar({
   const [open, setOpen] = useState(false);
 
   useEffect(() => {
+    let cancelled = false;
     getSubagents(sessionId, refreshKey > 0)
-      .then(setAgents)
-      .catch(() => setAgents([]));
+      .then((res) => { if (!cancelled) setAgents(res); })
+      .catch(() => { if (!cancelled) setAgents([]); });
+    return () => { cancelled = true; };
   }, [sessionId, refreshKey]);
 
   // Don't render if no sub-agents

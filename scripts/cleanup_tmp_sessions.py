@@ -66,24 +66,25 @@ def main() -> None:
     with open(METADATA_FILE, encoding="utf-8") as f:
         metadata = json.load(f)
 
-    work_dirs: list[dict] = metadata.get("work_dirs", [])
+    work_dirs: list[dict] = metadata.get("work_dirs") or []
 
     # --- Phase 1: tmp entries in kimo.json ---
     tmp_entries: list[dict] = []
     keep_entries: list[dict] = []
     keep_hashes: set[str] = set()
     for wd in work_dirs:
-        if is_tmp_path(wd.get("path", "")):
+        path = wd.get("path") or ""
+        if is_tmp_path(path):
             tmp_entries.append(wd)
         else:
             keep_entries.append(wd)
-            keep_hashes.add(work_dir_hash(wd["path"], wd.get("kaos", "local")))
+            keep_hashes.add(work_dir_hash(path, wd.get("kaos", "local")))
 
     tmp_dirs: list[Path] = []
     for wd in tmp_entries:
-        h = work_dir_hash(wd["path"], wd.get("kaos", "local"))
+        h = work_dir_hash(wd.get("path") or "", wd.get("kaos", "local"))
         session_dir = SESSIONS_DIR / h
-        if session_dir.is_dir():
+        if session_dir.is_dir() and session_dir not in tmp_dirs:
             tmp_dirs.append(session_dir)
 
     # --- Phase 2: orphan directories (on disk but not in kimo.json) ---

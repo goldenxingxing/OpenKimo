@@ -346,22 +346,20 @@ def _save(document: dict[str, Any], raw_content: str | None) -> None:
         ) from exc
 
 
-async def _apply_and_respond(
+async def _respond_after_save(
     request: Request,
     document: dict[str, Any],
     runner: KimoCLIRunner,
-    *,
-    raw_content: str | None = None,
 ) -> MCPMutationResponse:
-    """Persist a changed document and restart the sessions that can take it.
+    """Restart the sessions that can take a change already persisted to disk.
 
     MCP servers are connected when a worker starts, so an edit reaches a live
     session only through a restart. Busy sessions are left alone and named in
     the response — interrupting a running turn to pick up a config change is
-    the user's call, not ours.
+    the user's call, not ours. The caller must have finished the save while
+    holding ``_mutation_lock``; the restart itself must not hold that lock, or
+    every other MCP edit is serialized behind a worker restart.
     """
-    _save(document, raw_content)
-
     restarted: list[str] = []
     skipped_busy: list[str] = []
     try:
@@ -417,7 +415,8 @@ async def create_mcp_server(
 
         servers[body.name] = config
         document["mcpServers"] = servers
-        return await _apply_and_respond(http_request, document, runner)
+        _save(document, None)
+    return await _respond_after_save(http_request, document, runner)
 
 
 @router.put("/servers/{name}", summary="Update an MCP server (admin only)")
@@ -451,7 +450,8 @@ async def update_mcp_server(
 
         servers[name] = config
         document["mcpServers"] = servers
-        return await _apply_and_respond(http_request, document, runner)
+        _save(document, None)
+    return await _respond_after_save(http_request, document, runner)
 
 
 @router.delete("/servers/{name}", summary="Remove an MCP server (admin only)")
@@ -474,7 +474,8 @@ async def delete_mcp_server(
             )
         del servers[name]
         document["mcpServers"] = servers
-        return await _apply_and_respond(http_request, document, runner)
+        _save(document, None)
+    return await _respond_after_save(http_request, document, runner)
 
 
 @router.post("/servers/{name}/test", summary="Test an MCP server connection (admin only)")
@@ -583,9 +584,8 @@ async def put_raw_mcp_config(
 
         # Blank text would be written as a file that is not JSON, which the CLI
         # and every session then refuse to read; store the empty document instead.
-        return await _apply_and_respond(
-            http_request, document, runner, raw_content=None if blank else body.content
-        )
+        _save(document, None if blank else body.content)
+    return await _respond_after_save(http_request, document, runner)
 
 
 __all__ = ["router"]

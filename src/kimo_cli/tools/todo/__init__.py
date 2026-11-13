@@ -1,3 +1,4 @@
+import asyncio
 import json
 from pathlib import Path
 from typing import Any, Literal, cast, override
@@ -39,8 +40,8 @@ class SetTodoList(CallableTool2[Params]):
     @override
     async def __call__(self, params: Params) -> ToolReturnValue:
         if params.todos is None:
-            return self._read_todos()
-        return self._write_todos(params.todos)
+            return await asyncio.to_thread(self._read_todos)
+        return await asyncio.to_thread(self._write_todos, params.todos)
 
     # ---- Write mode --------------------------------------------------------
 
@@ -50,10 +51,9 @@ class SetTodoList(CallableTool2[Params]):
             self._save_todos(todos)
         except Exception as e:
             logger.warning("Failed to save todos: {err}", err=e)
-            return ToolReturnValue(
-                is_error=True,
-                output=f"Failed to save todos: {e}",
+            return ToolError(
                 message=f"Failed to save todos: {e}",
+                brief="Failed to save todos",
             )
 
         items = [TodoDisplayItem(title=todo.title, status=todo.status) for todo in todos]
@@ -134,9 +134,9 @@ class SetTodoList(CallableTool2[Params]):
     def _save_subagent_todos(self, items: list[TodoItemState]) -> None:
         state_file = self._subagent_state_file()
         if state_file is None:
-            # A subagent runtime without a store has nowhere to persist to; say so
-            # instead of reporting "Todo list updated" for a write that never
-            # happened.
+            # A subagent runtime without a store has nowhere to persist to. This
+            # is a supported no-op (see ``copy_for_subagent`` callers that clear
+            # the store), so warn instead of pretending a write landed.
             logger.warning(
                 "Subagent todos not persisted: no subagent state file "
                 "(subagent_store={store}, subagent_id={id})",

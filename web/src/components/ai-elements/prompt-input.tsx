@@ -762,11 +762,20 @@ export const PromptInput = ({
       if (!accept || accept.trim() === "") {
         return true;
       }
-      if (accept.includes("image/*")) {
-        return f.type.startsWith("image/");
-      }
-      // NOTE: keep simple; expand as needed
-      return true;
+      const rules = accept
+        .split(",")
+        .map((rule) => rule.trim().toLowerCase())
+        .filter(Boolean);
+      const name = f.name.toLowerCase();
+      return rules.some((rule) => {
+        if (rule.startsWith(".")) {
+          return name.endsWith(rule);
+        }
+        if (rule.endsWith("/*")) {
+          return f.type.startsWith(rule.slice(0, -1));
+        }
+        return f.type === rule;
+      });
     },
     [accept],
   );
@@ -1061,8 +1070,11 @@ export const PromptInput = ({
   );
 
   const handleChange: ChangeEventHandler<HTMLInputElement> = (event) => {
-    if (event.currentTarget.files) {
-      add(event.currentTarget.files);
+    const input = event.currentTarget;
+    if (input.files) {
+      const selected = Array.from(input.files);
+      input.value = "";
+      add(selected);
     }
   };
 
@@ -1343,6 +1355,7 @@ export const PromptInputTextarea = forwardRef<
   ) => {
     const controller = useOptionalPromptInputController();
     const attachments = usePromptInputAttachments();
+    const localAttachments = useContext(LocalAttachmentsContext);
     const { t } = useTranslation("chat");
     const [isComposing, setIsComposing] = useState(false);
     const [element, setElement] = useState<HTMLTextAreaElement | null>(null);
@@ -1478,7 +1491,7 @@ export const PromptInputTextarea = forwardRef<
 
       if (files.length > 0) {
         event.preventDefault();
-        attachments.add(files);
+        (localAttachments?.add ?? attachments.add)(files);
         return;
       }
 
@@ -1776,13 +1789,13 @@ interface SpeechRecognition extends EventTarget {
   lang: string;
   start(): void;
   stop(): void;
-  onstart: ((this: SpeechRecognition, ev: Event) => any) | null;
-  onend: ((this: SpeechRecognition, ev: Event) => any) | null;
+  onstart: ((this: SpeechRecognition, ev: Event) => void) | null;
+  onend: ((this: SpeechRecognition, ev: Event) => void) | null;
   onresult:
-    | ((this: SpeechRecognition, ev: SpeechRecognitionEvent) => any)
+    | ((this: SpeechRecognition, ev: SpeechRecognitionEvent) => void)
     | null;
   onerror:
-    | ((this: SpeechRecognition, ev: SpeechRecognitionErrorEvent) => any)
+    | ((this: SpeechRecognition, ev: SpeechRecognitionErrorEvent) => void)
     | null;
 }
 
@@ -1854,7 +1867,7 @@ export const PromptInputSpeechButton = ({
 
       speechRecognition.continuous = true;
       speechRecognition.interimResults = true;
-      speechRecognition.lang = "en-US";
+      speechRecognition.lang = navigator.language || "en-US";
 
       speechRecognition.onstart = () => {
         setIsListening(true);

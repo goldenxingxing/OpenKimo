@@ -59,7 +59,7 @@ export function translateBackendMessage(
 
   const exactKey = `backend:exact.${raw}`;
   const exact = t(exactKey, { defaultValue: "" });
-  if (exact && exact !== exactKey) return exact;
+  if (exact) return exact;
 
   for (const tpl of BACKEND_TEMPLATES) {
     const match = raw.match(tpl.pattern);

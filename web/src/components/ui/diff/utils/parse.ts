@@ -42,7 +42,7 @@ export interface ParseOptions {
 
 const calculateChangeRatio = (a: string, b: string): number => {
   const totalChars = a.length + b.length;
-  if (totalChars === 0) return 1;
+  if (totalChars === 0) return 0;
   const tokens = diffWords(a, b);
   const changedChars = tokens
     .filter((token) => token.added || token.removed)
@@ -418,7 +418,7 @@ const insertSkipBlocks = (hunks: Hunk[]): (Hunk | SkipBlock)[] => {
       result.push({
         count: distanceToLastHunk,
         type: "skip",
-        content: context ?? hunk.content,
+        content: context,
       });
     }
     lastHunkLine = Math.max(hunk.oldStart + hunk.oldLines, lastHunkLine);

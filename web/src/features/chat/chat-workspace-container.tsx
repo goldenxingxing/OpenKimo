@@ -309,6 +309,7 @@ export function ChatWorkspaceContainer({
             if (!filePart.url) return null;
 
             const response = await fetch(filePart.url);
+            if (!response.ok) return null;
             const blob = await response.blob();
             const file = new File([blob], filePart.filename ?? "unnamed_file", {
               type: filePart.mediaType ?? blob.type,

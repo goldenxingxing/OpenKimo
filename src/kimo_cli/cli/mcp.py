@@ -57,6 +57,9 @@ def _parse_key_value_pairs(
         if not key:
             typer.echo(f"Invalid {option_name} format: {item} (empty key).", err=True)
             raise typer.Exit(code=1)
+        if key in parsed:
+            typer.echo(f"Duplicate {option_name} key: {key}.", err=True)
+            raise typer.Exit(code=1)
         parsed[key] = value
     return parsed
 
@@ -172,6 +175,8 @@ def mcp_add(
 
     if "mcpServers" not in config:
         config["mcpServers"] = {}
+    if name in config["mcpServers"]:
+        typer.echo(f"Warning: overwriting existing MCP server '{name}'.", err=True)
     config["mcpServers"][name] = server_config
     _save_mcp_config(config)
     typer.echo(f"Added MCP server '{name}' to {get_global_mcp_config_file()}.")

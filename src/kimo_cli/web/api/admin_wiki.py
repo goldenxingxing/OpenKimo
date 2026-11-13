@@ -116,7 +116,7 @@ class WriteWikiPageRequest(BaseModel):
     tags: list[str] = Field(default_factory=list)
     body: str
     #: The revision the editor started from; ``None`` creates a new page.
-    expected_revision: int | None = None
+    expected_revision: int | None = Field(default=None, ge=1)
 
 
 class WikiWriteResult(BaseModel):

@@ -131,6 +131,17 @@ class AskUserQuestion(CallableTool2[Params]):
                 brief="Invalid context",
             )
 
+        seen_questions: set[str] = set()
+        for q in params.questions:
+            if q.question in seen_questions:
+                return ToolError(
+                    message=(
+                        "Duplicate question text is not supported; each question must be unique."
+                    ),
+                    brief="Duplicate question",
+                )
+            seen_questions.add(q.question)
+
         questions = [
             QuestionItem(
                 question=q.question,

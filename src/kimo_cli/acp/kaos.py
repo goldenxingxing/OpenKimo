@@ -10,6 +10,8 @@ from kaos import AsyncReadable, AsyncWritable, Kaos, KaosProcess, StatResult, St
 from kaos.local import local_kaos
 from kaos.path import KaosPath
 
+from kimo_cli.utils.logging import logger
+
 _DEFAULT_POLL_INTERVAL = 0.2
 _TRUNCATION_NOTICE = "[acp output truncated]\n"
 
@@ -129,8 +131,10 @@ class ACPProcess:
                         exit_response = await exit_task
                         if exit_response.exit_code is not None:
                             exit_code = exit_response.exit_code
-                    except Exception:
-                        pass
+                    except Exception as exc:
+                        logger.warning(
+                            "Failed to read ACP terminal exit status: {error}", error=exc
+                        )
                     break
 
                 await asyncio.sleep(self._poll_interval)

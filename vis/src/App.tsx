@@ -206,14 +206,28 @@ function SessionStats({ sessionId, refreshKey }: { sessionId: string; refreshKey
   const [agentCount, setAgentCount] = useState(0);
 
   useEffect(() => {
+    let cancelled = false;
     setLoaded(false);
     getWireEvents(sessionId, refreshKey > 0)
-      .then((res) => setEvents(res.events))
-      .catch(() => setEvents([]))
-      .finally(() => setLoaded(true));
+      .then((res) => {
+        if (!cancelled) setEvents(res.events);
+      })
+      .catch(() => {
+        if (!cancelled) setEvents([]);
+      })
+      .finally(() => {
+        if (!cancelled) setLoaded(true);
+      });
     getSubagents(sessionId, refreshKey > 0)
-      .then((agents) => setAgentCount(agents.length))
-      .catch(() => setAgentCount(0));
+      .then((agents) => {
+        if (!cancelled) setAgentCount(agents.length);
+      })
+      .catch(() => {
+        if (!cancelled) setAgentCount(0);
+      });
+    return () => {
+      cancelled = true;
+    };
   }, [sessionId, refreshKey]);
 
   const stats = useMemo(() => computeStats(events), [events]);
@@ -326,6 +340,7 @@ export function App() {
     const handler = () => {
       const params = new URLSearchParams(window.location.search);
       setSessionId(params.get("session"));
+      setAgentScope(null);
     };
     window.addEventListener("popstate", handler);
     return () => window.removeEventListener("popstate", handler);

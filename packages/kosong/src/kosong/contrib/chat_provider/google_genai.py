@@ -148,15 +148,14 @@ class GoogleGenAI:
         tools: Sequence[KosongTool],
         history: Sequence[Message],
     ) -> "GoogleGenAIStreamedMessage":
-        # Off the event loop: the conversion downloads any image or audio URL
-        # in the history with a synchronous client.
-        contents = await asyncio.to_thread(messages_to_google_genai_contents, history)
-
         config = GenerateContentConfig(**self._generation_kwargs)
         config.system_instruction = system_prompt
         config.tools = [tool_to_google_genai(tool) for tool in tools]
 
         try:
+            # Off the event loop: the conversion downloads any image or audio URL
+            # in the history with a synchronous client.
+            contents = await asyncio.to_thread(messages_to_google_genai_contents, history)
             if self._stream:
                 stream_response = await self._client.aio.models.generate_content_stream(  # type: ignore[reportUnknownMemberType]
                     model=self._model,
@@ -181,8 +180,9 @@ class GoogleGenAI:
         if "gemini-3" in self._model:
             match effort:
                 case "off":
-                    # use default thinking config
-                    pass
+                    # Gemini 3 cannot disable thinking entirely; at least stop
+                    # exposing thought summaries when thinking is turned off.
+                    thinking_config.include_thoughts = False
                 case "low":
                     thinking_config.thinking_level = ThinkingLevel.LOW
                 case "medium":
@@ -667,9 +667,6 @@ def messages_to_google_genai_contents(messages: Sequence[Message]) -> list[Conte
             continue
 
         contents.append(message_to_google_genai(message))
-        if message.role == "assistant" and message.tool_calls:
-            for tool_call in message.tool_calls:
-                tool_name_by_id[tool_call.id] = tool_call.function.name
         i += 1
 
     return contents

@@ -305,6 +305,8 @@ class OpenAILegacyStreamedMessage:
     ) -> AsyncIterator[StreamedMessagePart]:
         self._id = response.id
         self._usage = response.usage
+        if not response.choices:
+            return
         self._finish_reason = normalize_finish_reason(response.choices[0].finish_reason)
         message = response.choices[0].message
         reasoning_content = extract_reasoning(message, self._reasoning_keys or ())

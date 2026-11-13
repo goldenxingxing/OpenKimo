@@ -731,7 +731,11 @@ def mermaid(app: Shell, args: str):
     code = source
     candidate = Path(source).expanduser()
     if candidate.is_file():
-        code = candidate.read_text(encoding="utf-8")
+        try:
+            code = candidate.read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError) as exc:
+            console.print(f"[red]Could not read {candidate}: {exc}[/red]")
+            return
 
     if not mmdc_available():
         console.print(f"[yellow]{MMDC_INSTALL_HINT}[/yellow]")

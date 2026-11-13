@@ -78,6 +78,7 @@ async def _setup_platform(platform: Platform) -> _SetupResult | None:
         # `if not api_key` alone let a key of spaces through, which is then
         # saved and fails later as an auth error with nothing pointing back
         # here.
+        console.print("[yellow]No API key entered; setup cancelled.[/yellow]")
         return None
 
     # list models

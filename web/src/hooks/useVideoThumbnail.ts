@@ -26,8 +26,15 @@ export function useVideoThumbnail(url?: string): string | null {
         return;
       }
       const canvas = document.createElement("canvas");
-      canvas.width = video.videoWidth;
-      canvas.height = video.videoHeight;
+      // Cap the capture size: a 4K source would block the main thread and
+      // store a multi-MB data URL for a thumbnail only shown small.
+      const MAX_THUMB_DIM = 640;
+      const scale = Math.min(
+        1,
+        MAX_THUMB_DIM / Math.max(video.videoWidth, video.videoHeight),
+      );
+      canvas.width = Math.max(1, Math.round(video.videoWidth * scale));
+      canvas.height = Math.max(1, Math.round(video.videoHeight * scale));
       const ctx = canvas.getContext("2d");
       if (!ctx) {
         return;

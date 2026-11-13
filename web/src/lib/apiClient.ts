@@ -55,7 +55,12 @@ function createConfig(): Configuration {
             // "Unexpected token <" everywhere the message is shown.
             let data: Record<string, unknown> = {};
             try {
-              data = (await context.response.json()) as Record<string, unknown>;
+              const parsed: unknown = await context.response.json();
+              // A JSON `null` (or any non-object) would make `.detail` below
+              // throw a TypeError outside this catch block.
+              if (parsed !== null && typeof parsed === "object") {
+                data = parsed as Record<string, unknown>;
+              }
             } catch {
               data = {};
             }

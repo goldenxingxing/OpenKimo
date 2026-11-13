@@ -326,7 +326,7 @@ def _where_git_executables() -> list[str]:
             check=False,
             timeout=_GIT_EXEC_PATH_TIMEOUT_SECONDS,
         )
-    except OSError:
+    except (OSError, subprocess.TimeoutExpired):
         return []
 
     if result.returncode != 0:

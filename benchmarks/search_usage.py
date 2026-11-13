@@ -48,7 +48,8 @@ def tool_calls(path: Path):
                     except json.JSONDecodeError:
                         args = {}
                 operation = args.get("operation") if isinstance(args, dict) else None
-                op = str(operation.get("op") if isinstance(operation, dict) else operation)
+                raw = operation.get("op") if isinstance(operation, dict) else operation
+                op = str(raw) if raw is not None else None
             yield name, op
 
 

@@ -37,6 +37,13 @@ export PYTHONPATH="/app/src${PYTHONPATH:+:$PYTHONPATH}"
 HOST="${KIMO_WEB_HOST:-0.0.0.0}"
 PORT="${KIMO_WEB_PORT:-5494}"
 
+# Validate before handing PORT to uvicorn, which otherwise fails late with an
+# opaque error after the startup banner has already announced the address.
+if ! [[ "$PORT" =~ ^[0-9]+$ ]] || [ "${#PORT}" -gt 5 ] || [ "$PORT" -lt 1 ] || [ "$PORT" -gt 65535 ]; then
+    echo "ERROR: KIMO_WEB_PORT must be a number between 1 and 65535 (got '$PORT')." >&2
+    exit 1
+fi
+
 # 0.0.0.0 is required inside the container (the port is published by Docker),
 # but binding it without a session token exposes the whole UI to the network.
 if [ -z "${KIMO_WEB_SESSION_TOKEN:-}" ] && [ "$HOST" != "127.0.0.1" ] && [ "$HOST" != "localhost" ]; then

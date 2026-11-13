@@ -67,7 +67,7 @@ def main() -> None:
                     continue
                 try:
                     system.add_dialogue(
-                        speaker=turn.get("speaker", "?"),
+                        speaker=turn.get("speaker") or "?",
                         content=turn["text"],
                         timestamp=when or None,
                     )

@@ -112,12 +112,14 @@ export function StateViewer({ sessionId, refreshKey = 0 }: StateViewerProps) {
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
+    let cancelled = false;
     setLoading(true);
     setError(null);
     getSessionState(sessionId, refreshKey > 0)
-      .then(setState)
-      .catch((err) => setError(err.message))
-      .finally(() => setLoading(false));
+      .then((res) => { if (!cancelled) setState(res); })
+      .catch((err) => { if (!cancelled) setError(err.message); })
+      .finally(() => { if (!cancelled) setLoading(false); });
+    return () => { cancelled = true; };
   }, [sessionId, refreshKey]);
 
   if (loading) {

@@ -216,7 +216,7 @@ def parse_args(argv: list[str]) -> BuildConfig:
         slug=slug,
         version=version,
         build_number=build_number,
-        copyright=args.copyright,
+        copyright=(args.copyright or "").replace("{APP_NAME}", app_name),
         py_version=args.py_version,
         icon=icon,
         logo=logo,

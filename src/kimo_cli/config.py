@@ -500,7 +500,7 @@ def load_config_from_string(config_string: str) -> Config:
         json_error = exc
         data = None
 
-    if data is None:
+    if json_error is not None:
         try:
             data = tomlkit.loads(config_string)
         except TOMLKitError as toml_error:
@@ -577,7 +577,7 @@ def _migrate_json_config_to_toml() -> None:
         with open(old_json_config_file, encoding="utf-8") as f:
             data = json.load(f)
         config = Config.model_validate(data)
-    except json.JSONDecodeError as e:
+    except (json.JSONDecodeError, UnicodeDecodeError) as e:
         raise ConfigError(f"Invalid JSON in legacy configuration file: {e}") from e
     except ValidationError as e:
         raise ConfigError(f"Invalid legacy configuration file: {e}") from e

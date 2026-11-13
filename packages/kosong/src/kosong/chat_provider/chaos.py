@@ -2,7 +2,7 @@ import json
 import os
 import random
 from collections.abc import AsyncIterator, Sequence
-from typing import TYPE_CHECKING, Any, Protocol
+from typing import TYPE_CHECKING, Any
 
 import httpx
 from pydantic import BaseModel
@@ -61,6 +61,9 @@ class ChaosTransport(httpx.AsyncBaseTransport):
         self._wrapped = wrapped_transport
         self._config = config
         self._rng = random.Random(config.seed)
+
+    async def aclose(self) -> None:
+        await self._wrapped.aclose()
 
     async def handle_async_request(self, request: httpx.Request) -> httpx.Response:
         if self._should_inject_error():

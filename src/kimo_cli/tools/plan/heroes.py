@@ -260,6 +260,8 @@ def get_or_create_slug(session_id: str) -> str:
     else:
         # All 20 attempts collided; append session prefix for uniqueness
         slug = f"{slug}-{session_id[:8]}"
+        while (PLANS_DIR / f"{slug}.md").exists():
+            slug = f"{slug}-{secrets.token_hex(2)}"
     _slug_cache[session_id] = slug
     return slug
 

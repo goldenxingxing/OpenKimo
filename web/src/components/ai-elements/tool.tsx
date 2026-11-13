@@ -35,7 +35,7 @@ import {
   XIcon,
 } from "lucide-react";
 import type { ComponentProps, JSX, MouseEvent, ReactNode } from "react";
-import { createContext, isValidElement, useCallback, useMemo, useState } from "react";
+import { isValidElement, useCallback, useMemo, useState } from "react";
 import { isMacOS } from "@/hooks/utils";
 import { useVideoThumbnail } from "@/hooks/useVideoThumbnail";
 import { useTranslation } from "react-i18next";
@@ -47,20 +47,12 @@ import {
 
 export type ToolProps = ComponentProps<typeof Collapsible>;
 
-type ToolContextValue = {
-  isOpen: boolean;
-};
-
-const ToolContext = createContext<ToolContextValue>({ isOpen: false });
-
 export const Tool = ({ className, defaultOpen, ...props }: ToolProps) => (
-  <ToolContext.Provider value={{ isOpen: defaultOpen ?? false }}>
-    <Collapsible
-      className={cn("not-prose mb-1 w-full text-sm", className)}
-      defaultOpen={defaultOpen}
-      {...props}
-    />
-  </ToolContext.Provider>
+  <Collapsible
+    className={cn("not-prose mb-1 w-full text-sm", className)}
+    defaultOpen={defaultOpen}
+    {...props}
+  />
 );
 
 /** Extended tool state that includes approval states beyond the base ToolUIPart["state"] */
@@ -470,7 +462,7 @@ export type ToolMediaPreviewProps = ComponentProps<"div"> & {
 const ALLOWED_URL_PROTOCOLS = new Set(["http:", "https:", "data:", "blob:"]);
 
 const isAllowedMediaUrl = (url: string): boolean => {
-  if (url.startsWith("/")) return true;
+  if (url.startsWith("/") && !url.startsWith("//")) return true;
   try {
     const parsed = new URL(url);
     return ALLOWED_URL_PROTOCOLS.has(parsed.protocol);
@@ -607,6 +599,7 @@ export const ToolMediaPreview = ({
                 controls
                 poster={previewPoster ?? undefined}
                 autoPlay
+                muted
                 playsInline
                 onError={() => setPreviewError(true)}
               />

@@ -32,7 +32,7 @@ function rateColorClass(rate: number): string {
   return "text-red-500";
 }
 
-export function ToolStatsDashboard({ events, onScrollToIndex }: ToolStatsDashboardProps) {
+export function ToolStatsDashboard({ events }: ToolStatsDashboardProps) {
   const [sortMode, setSortMode] = useState<SortMode>("failureRate");
 
   const stats = useMemo(() => {

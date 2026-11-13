@@ -125,7 +125,14 @@ export const SubagentActivity = memo(
           )}
         >
           {steps.map((step, index) => (
-            <SubagentStepItem key={`sa-step-${index}`} step={step} />
+            <SubagentStepItem
+              key={
+                step.kind === "tool-call"
+                  ? `sa-step-${step.toolCallId}`
+                  : `sa-step-${index}`
+              }
+              step={step}
+            />
           ))}
         </CollapsibleContent>
       </Collapsible>

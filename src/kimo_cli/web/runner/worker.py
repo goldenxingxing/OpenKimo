@@ -74,12 +74,12 @@ async def run_worker(session_id: UUID) -> None:
     default_mcp_file = get_global_mcp_config_file()
     mcp_configs: list[dict[str, Any]] = []
     if default_mcp_file.exists():
-        raw = default_mcp_file.read_text(encoding="utf-8")
         try:
+            raw = default_mcp_file.read_text(encoding="utf-8")
             mcp_configs = [json.loads(raw)]
-        except json.JSONDecodeError:
+        except (OSError, UnicodeDecodeError, json.JSONDecodeError):
             logger.warning(
-                "Invalid JSON in MCP config file: {path}",
+                "Invalid or unreadable MCP config file: {path}",
                 path=default_mcp_file,
             )
 
@@ -103,8 +103,8 @@ async def run_worker(session_id: UUID) -> None:
     if isinstance(_model, str) and _model:
         session_model = _model
     agent_file: Path | None = None
-    _agent_spec_path: str | None = _cfg.get("agent_spec_path")
-    if _agent_spec_path:
+    _agent_spec_path = _cfg.get("agent_spec_path")
+    if isinstance(_agent_spec_path, str) and _agent_spec_path:
         _path = Path(_agent_spec_path)
         if not _path.is_file():
             raise FileNotFoundError(

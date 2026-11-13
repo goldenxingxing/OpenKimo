@@ -18,7 +18,11 @@ function Install-Uv {
   if (-not $MachinePath) { $MachinePath = '' }
   $UserPath = [Environment]::GetEnvironmentVariable('Path', 'User')
   if (-not $UserPath) { $UserPath = '' }
-  $env:PATH = "$($MachinePath.TrimEnd(';'));$($UserPath.TrimEnd(';'))".Split(';', [System.StringSplitOptions]::RemoveEmptyEntries) -join ';'
+  # Preserve entries already set on this process (e.g. by CI); rebuilding from
+  # Machine + User alone drops them, though the uv dir is normally in User.
+  $ProcessPath = [Environment]::GetEnvironmentVariable('Path', 'Process')
+  if (-not $ProcessPath) { $ProcessPath = '' }
+  $env:PATH = "$($ProcessPath.TrimEnd(';'));$($MachinePath.TrimEnd(';'));$($UserPath.TrimEnd(';'))".Split(';', [System.StringSplitOptions]::RemoveEmptyEntries) -join ';'
 }
 
 if (Get-Command uv -ErrorAction SilentlyContinue) {

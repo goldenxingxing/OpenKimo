@@ -139,7 +139,7 @@ async def main() -> None:
         ("?", "分类失败"),
     ):
         n = counts[key]
-        print(f"{name:<40}{n:>6}{n / len(turns) * 100:>8.1f}%")
+        print(f"{name:<40}{n:>6}{(n / len(turns) * 100 if turns else 0.0):>8.1f}%")
 
     if asked:
         print(f"\n在「确实在问事实」的 {asked} 条里，需要多跳的占 {counts['C'] / asked * 100:.1f}%")
@@ -153,9 +153,13 @@ async def main() -> None:
     print(f"\n全部标注写入 {out}")
 
     print("\n判为多跳的前 15 条：")
-    for turn, label in list(zip(turns, labels, strict=True)):
+    shown = 0
+    for turn, label in zip(turns, labels, strict=True):
         if label == "C":
             print(f"  - {turn[:92]}")
+            shown += 1
+            if shown >= 15:
+                break
 
 
 if __name__ == "__main__":

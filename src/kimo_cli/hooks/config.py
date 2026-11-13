@@ -1,4 +1,4 @@
-from typing import Literal
+from typing import Literal, get_args
 
 from pydantic import BaseModel, Field
 
@@ -18,7 +18,7 @@ HookEventType = Literal[
     "Notification",
 ]
 
-HOOK_EVENT_TYPES: list[str] = list(HookEventType.__args__)  # type: ignore[attr-defined]
+HOOK_EVENT_TYPES: list[str] = list(get_args(HookEventType))
 
 
 class HookDef(BaseModel):

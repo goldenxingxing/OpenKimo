@@ -22,7 +22,7 @@ export function ThemeToggle({ className }: ThemeToggleProps) {
         className,
       )}
       onClick={(e) => {
-        toggleThemeWithTransition(e);
+        void toggleThemeWithTransition(e).catch(() => {});
       }}
       size="icon"
       variant="outline"

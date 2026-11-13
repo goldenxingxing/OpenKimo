@@ -307,17 +307,17 @@ class Wiki(CallableTool2[Params]):
                 message=f"Wiki operation failed: {_one_line(exc)}",
                 brief="Wiki operation failed",
             )
-        except OSError as exc:
-            logger.warning("Wiki operation failed: {error}", error=exc)
-            return ToolError(
-                message="Wiki operation failed. Check the request and try again.",
-                brief="Wiki operation failed",
-            )
         except (WikiBusyError, WikiConflictError, WikiRecoveryRequired) as exc:
             logger.warning("Wiki operation requires retry: {error}", error=exc)
             return ToolError(
                 message="Wiki changed or is busy. Refresh the Wiki state and retry.",
                 brief="Wiki retry required",
+            )
+        except OSError as exc:
+            logger.warning("Wiki operation failed: {error}", error=exc)
+            return ToolError(
+                message="Wiki operation failed. Check the request and try again.",
+                brief="Wiki operation failed",
             )
         except asyncio.CancelledError:
             raise

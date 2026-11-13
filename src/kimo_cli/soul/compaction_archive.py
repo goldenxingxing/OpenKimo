@@ -48,7 +48,9 @@ class CompactionArchiver:
         self._dir.mkdir(parents=True, exist_ok=True)
         path = self._dir / f"compaction-{datetime.now():%Y%m%d-%H%M%S}-{uuid4().hex[:8]}.jsonl"
         payload = "".join(m.model_dump_json(exclude_none=True) + "\n" for m in history)
-        path.write_text(payload, encoding="utf-8")
+        tmp_path = path.with_name(path.name + ".tmp")
+        tmp_path.write_text(payload, encoding="utf-8")
+        tmp_path.replace(path)
         logger.info(
             "Archived {n} pre-compaction messages ({bytes} bytes) to {path}",
             n=len(history),

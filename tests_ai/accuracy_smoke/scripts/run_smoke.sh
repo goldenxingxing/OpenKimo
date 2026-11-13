@@ -47,7 +47,11 @@ if [ -n "${UV_PYTHON_INSTALL_MIRROR}" ]; then
 fi
 UV_PYTHON="${UV_PYTHON}" UV_PYTHON_INSTALL_MIRROR="${UV_PYTHON_INSTALL_MIRROR}" \
   uv build --package kimo-cli --out-dir "${WHEEL_DIR}" >/dev/null
-KIMO_CLI_WHEEL_PATH="$(ls -t "${WHEEL_DIR}"/*.whl | head -n 1)"
+KIMO_CLI_WHEEL_PATH="$(ls -t "${WHEEL_DIR}"/*.whl 2>/dev/null | head -n 1 || true)"
+if [ -z "${KIMO_CLI_WHEEL_PATH}" ]; then
+  echo "No kimo-cli wheel found in ${WHEEL_DIR}" >&2
+  exit 1
+fi
 
 echo "Using local kimo-cli wheel: ${KIMO_CLI_WHEEL_PATH}"
 
@@ -87,7 +91,8 @@ import sys
 task, job_dir, out_tsv = sys.argv[1:4]
 result_path = pathlib.Path(job_dir) / "result.json"
 data = json.loads(result_path.read_text(encoding="utf-8"))
-evals = data.get("stats", {}).get("evals", {})
+stats = data.get("stats") or {}
+evals = stats.get("evals") or {}
 if evals:
     entry = next(iter(evals.values()))
     metrics = entry.get("metrics", [])
@@ -95,7 +100,7 @@ if evals:
     n_errors = entry.get("n_errors")
 else:
     reward_mean = None
-    n_errors = data.get("stats", {}).get("n_errors")
+    n_errors = stats.get("n_errors")
 with open(out_tsv, "a", encoding="utf-8") as f:
     f.write(
         f"{task}\t{reward_mean if reward_mean is not None else ''}\t"

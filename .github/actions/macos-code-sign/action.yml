@@ -36,6 +36,7 @@ runs:
         # Decode certificate
         cert_path="${RUNNER_TEMP}/certificate.p12"
         echo "$APPLE_CERTIFICATE_P12" | base64 -d > "$cert_path"
+        chmod 600 "$cert_path"
 
         # Create temporary keychain
         keychain_path="${RUNNER_TEMP}/signing.keychain-db"
@@ -44,6 +45,8 @@ runs:
         security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$keychain_path"
 
         # Add to keychain search list
+        original_default_keychain=$(security default-keychain 2>/dev/null | tr -d '"' | xargs || true)
+        echo "ORIGINAL_DEFAULT_KEYCHAIN=$original_default_keychain" >> "$GITHUB_ENV"
         security list-keychains -d user -s "$keychain_path" $(security list-keychains -d user | tr -d '"')
         security default-keychain -s "$keychain_path"
 
@@ -101,6 +104,7 @@ runs:
         # Save API key
         key_path="${RUNNER_TEMP}/AuthKey.p8"
         echo "$APPLE_NOTARIZATION_KEY_P8" | base64 -d > "$key_path"
+        chmod 600 "$key_path"
 
         # Create zip for notarization
         binary_name=$(basename "$BINARY_PATH")
@@ -135,6 +139,7 @@ runs:
               --key-id "$APPLE_NOTARIZATION_KEY_ID" \
               --issuer "$APPLE_NOTARIZATION_ISSUER_ID" || true
           fi
+          rm -f "$key_path" "$zip_path"
           exit 1
         fi
 
@@ -158,6 +163,9 @@ runs:
       if: always()
       shell: bash
       run: |
+        if [[ -n "${ORIGINAL_DEFAULT_KEYCHAIN:-}" ]]; then
+          security default-keychain -s "$ORIGINAL_DEFAULT_KEYCHAIN" || true
+        fi
         if [[ -n "${APPLE_KEYCHAIN_PATH:-}" && -f "${APPLE_KEYCHAIN_PATH}" ]]; then
           security delete-keychain "$APPLE_KEYCHAIN_PATH" || true
         fi

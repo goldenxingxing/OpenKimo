@@ -979,7 +979,14 @@ export function useSessionStream(
             if (inDocument && documentFilename) {
               const content = documentContent.join("");
               const bytes = new TextEncoder().encode(content);
-              const base64 = btoa(String.fromCharCode(...bytes));
+              // Chunk the spread: String.fromCharCode(...bytes) throws a
+              // RangeError (too many arguments) for multi-MB documents.
+              let binary = "";
+              const CHUNK_SIZE = 0x8000;
+              for (let i = 0; i < bytes.length; i += CHUNK_SIZE) {
+                binary += String.fromCharCode(...bytes.subarray(i, i + CHUNK_SIZE));
+              }
+              const base64 = btoa(binary);
               const dataUrl = `data:${documentMediaType ?? "text/plain"};base64,${base64}`;
               attachments.push({
                 type: "file",
@@ -1268,6 +1275,7 @@ export function useSessionStream(
     setIsReplayingHistory(true);
     setHistoryLoadedFor(null);
     setAwaitingFirstResponse(false);
+    setWaitingOnBackground(false);
     // Reset first turn tracking
     hasTurnStartedRef.current = false;
     firstTurnCompleteCalledRef.current = false;
@@ -2788,10 +2796,17 @@ export function useSessionStream(
 
             initializeIdRef.current = null;
 
-            // Auto-retry initialize after 2 seconds
+            // Auto-retry initialize after 2 seconds, but only if the socket
+            // whose initialize failed is still the active one — a stale timer
+            // must not send initialize on a newer socket.
+            const failedWs = wsRef.current;
             setTimeout(() => {
-              if (wsRef.current?.readyState === WebSocket.OPEN) {
-                sendInitialize(wsRef.current);
+              if (
+                failedWs &&
+                wsRef.current === failedWs &&
+                failedWs.readyState === WebSocket.OPEN
+              ) {
+                sendInitialize(failedWs);
               }
             }, 2000);
 

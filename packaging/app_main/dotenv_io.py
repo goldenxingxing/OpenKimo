@@ -202,7 +202,7 @@ def mask_secret(value: str) -> str:
     """Render a sensitive value for display."""
     if not value:
         return ""
-    if len(value) <= 8:
+    if len(value) <= 12:
         return "•" * len(value)
     return value[:4] + "•" * 12 + value[-4:]
 

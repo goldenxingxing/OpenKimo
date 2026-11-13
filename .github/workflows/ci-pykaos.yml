@@ -17,8 +17,13 @@ on:
       - "pyproject.toml"
       - "uv.lock"
 
+concurrency:
+  group: pykaos-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   test:
+    timeout-minutes: 45
     name: ${{ matrix.target }} python-${{ matrix.python-version }}
     runs-on: ${{ matrix.runner }}
     strategy:
@@ -57,7 +62,7 @@ jobs:
           allow-prereleases: true
 
       - name: Set up uv
-        uses: astral-sh/setup-uv@v1
+        uses: astral-sh/setup-uv@162b8acf397cb069dec09a3f5a9847cf71cfa46a # v1
         with:
           version: "0.8.5"
           enable-cache: true

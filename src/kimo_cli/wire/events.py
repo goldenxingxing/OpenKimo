@@ -42,7 +42,8 @@ def collect_events_with_origin(
         inner: dict[str, Any] | None = payload.get("event")
         if isinstance(inner, dict):
             inner_type: str = inner.get("type", "")
-            inner_payload: dict[str, Any] = inner.get("payload") or {}
+            raw_payload = inner.get("payload")
+            inner_payload: dict[str, Any] = raw_payload if isinstance(raw_payload, dict) else {}
             if inner_type:
                 subagent_type = payload.get("subagent_type")
                 child = (

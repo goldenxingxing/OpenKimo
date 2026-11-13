@@ -97,7 +97,7 @@ def main() -> int:
     build_id = _assemble(remote, sha)
 
     target = _resolve_project_root() / "src" / "kimo_cli" / "_build_info.py"
-    target.write_text(f'BUILD_SHA = "{build_id}"\n')
+    target.write_text(f"BUILD_SHA = {build_id!r}\n")
     print(f"Injected build_sha={build_id!r} into {target}")
     return 0
 

@@ -23,6 +23,10 @@ export function getAuthToken(): string | null {
       clearAuthToken();
       return null;
     }
+  } else {
+    // A token with no timestamp cannot be age-checked; treat it as stale.
+    clearAuthToken();
+    return null;
   }
 
   return token;

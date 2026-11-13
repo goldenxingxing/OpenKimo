@@ -576,7 +576,7 @@ async def read_skill_text(skill: Skill) -> str | None:
     """Read the SKILL.md contents for a skill."""
     try:
         return (await skill.skill_md_file.read_text(encoding="utf-8")).strip()
-    except OSError as exc:
+    except (OSError, UnicodeDecodeError) as exc:
         logger.warning(
             "Failed to read skill file {path}: {error}",
             path=skill.skill_md_file,

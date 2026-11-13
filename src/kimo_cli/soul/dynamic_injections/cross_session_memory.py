@@ -106,9 +106,8 @@ class CrossSessionMemoryInjectionProvider(DynamicInjectionProvider):
             # I/O failed — do NOT mark _injected, so the next call retries.
             # Marking here would permanently silence the injection channel.
             return []
-        self._injected = True
-
         rendered = render(persistent, recent, pending, actions=_ACTIONS)
+        self._injected = True
         if not rendered:
             return []
 

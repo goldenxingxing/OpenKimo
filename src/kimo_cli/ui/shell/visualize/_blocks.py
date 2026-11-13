@@ -435,7 +435,8 @@ class _ToolCallBlock:
             # and its remaining argument chunks then had nowhere to go.
             return
 
-        self._last_subagent_tool_call = None
+        if self._last_subagent_tool_call is sub_tool_call:
+            self._last_subagent_tool_call = None
 
         self._finished_subagent_tool_calls.append(
             _ToolCallBlock.FinishedSubCall(

@@ -136,7 +136,7 @@ export function SessionsExplorer({ onSelectSession }: SessionsExplorerProps) {
     if (el.scrollHeight <= el.clientHeight) {
       setDisplayCount((prev) => Math.min(prev + PAGE_SIZE, sorted.length));
     }
-  }, [displayCount, sorted.length]);
+  }, [displayCount, sorted.length, viewMode]);
 
   const groups = useMemo((): ProjectGroupData[] => {
     if (!grouped) return [];

@@ -3,16 +3,18 @@ set -euo pipefail
 
 install_uv() {
   if command -v curl >/dev/null 2>&1; then
-    curl -fsSL https://astral.sh/uv/install.sh | sh
-    return
+    if curl -fsSL https://astral.sh/uv/install.sh | sh; then
+      return
+    fi
   fi
 
   if command -v wget >/dev/null 2>&1; then
-    wget -qO- https://astral.sh/uv/install.sh | sh
-    return
+    if wget -qO- https://astral.sh/uv/install.sh | sh; then
+      return
+    fi
   fi
 
-  echo "Error: curl or wget is required to install uv." >&2
+  echo "Error: failed to install uv via curl or wget." >&2
   exit 1
 }
 

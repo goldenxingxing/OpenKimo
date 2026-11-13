@@ -74,7 +74,7 @@ export function AssistantMessage({
   const content = useMemo(() => {
     switch (message.variant) {
       case "chain-of-thought":
-        return renderChainOfThoughtMessage(message, t);
+        return renderChainOfThoughtMessage(message, t, workDir);
       case "tool":
         return renderToolMessage({
           message,
@@ -163,10 +163,14 @@ const renderAssistantText = (
   );
 };
 
-const renderChainOfThoughtMessage = (message: LiveMessage, t: TFunction) => {
+const renderChainOfThoughtMessage = (
+  message: LiveMessage,
+  t: TFunction,
+  workDir?: string | null,
+) => {
   const details = message.chainOfThought;
   if (!details) {
-    return renderAssistantText(message, t);
+    return renderAssistantText(message, t, workDir);
   }
   const visibleSteps = details.steps.slice(0, details.revealedSteps);
 

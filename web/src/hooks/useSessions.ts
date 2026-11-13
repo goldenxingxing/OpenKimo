@@ -293,12 +293,32 @@ export function useSessions(): UseSessionsReturn {
     setError(null);
     try {
       const offset = sessions.length;
-      const moreSessions =
-        await apiClient.sessions.listSessionsApiSessionsGet({
+      const response =
+        await apiClient.sessions.listSessionsApiSessionsGetRaw({
           limit: PAGE_SIZE,
           offset,
           q: searchQuery.trim() || undefined,
         });
+      // Same double-parse as refreshSessions: the generated mapper drops the
+      // background counters, so re-attach them from the raw status JSON.
+      const rawPayload: unknown = await response.raw.clone().json();
+      const mappedSessions = await response.value();
+      const moreSessions: SessionWithBackground[] = mappedSessions.map(
+        (session, index) => {
+          const rawStatus = Array.isArray(rawPayload)
+            ? (rawPayload[index] as Record<string, unknown> | undefined)?.status
+            : undefined;
+          return session.status
+            ? {
+                ...session,
+                status: {
+                  ...session.status,
+                  ...readBackgroundCounts(rawStatus),
+                },
+              }
+            : session;
+        },
+      );
       setSessions((current) => {
         const next = [...current, ...moreSessions];
         // So a later refresh asks for everything that is on screen.

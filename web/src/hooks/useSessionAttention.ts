@@ -98,6 +98,9 @@ export function useSessionAttention(
         return;
       }
       if (event.type === "snapshot") {
+        if (!Array.isArray(event.sessions)) {
+          return;
+        }
         setAttention((state) => applySnapshot(state, event.sessions, viewingRef.current));
       } else if (event.type === "activity") {
         setAttention((state) => applyActivity(state, event, viewingRef.current));

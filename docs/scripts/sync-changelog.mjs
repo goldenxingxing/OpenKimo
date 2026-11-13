@@ -26,7 +26,13 @@ This page documents the changes in each Kimo Code CLI release.
 `;
 
 // Read the source file
-let content = readFileSync(sourcePath, "utf-8");
+let content;
+try {
+  content = readFileSync(sourcePath, "utf-8");
+} catch (err) {
+  console.error(`Failed to read ${sourcePath}: ${err.message}`);
+  process.exit(1);
+}
 
 // Remove the HTML comment block at the top
 content = content.replace(/<!--[\s\S]*?-->\n*/g, "");
@@ -41,7 +47,7 @@ content = content.replace(
 );
 
 // Remove subsection headers like ### Added, ### Changed, ### Fixed
-content = content.replace(/^### (Added|Changed|Fixed|Improved|Tools|SDK)\n+/gm, "");
+content = content.replace(/^### .+\n+/gm, "");
 
 // Write the target file
 writeFileSync(targetPath, HEADER + content.trim() + "\n");

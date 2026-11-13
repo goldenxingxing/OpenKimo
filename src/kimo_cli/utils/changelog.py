@@ -35,7 +35,7 @@ def parse_changelog(md_text: str) -> dict[str, ReleaseEntry]:
         if current_ver is None:
             return
         description = "\n".join([line.strip() for line in desc_lines]).strip()
-        # Deduplicate and normalize entries
+        # Normalize entries
         norm_entries = [
             line.strip()[2:].strip() for line in bullet_lines if line.strip().startswith("- ")
         ]

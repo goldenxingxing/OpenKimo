@@ -65,7 +65,7 @@ function computeTurnMetrics(events: WireEvent[]): TurnMetrics[] {
         turnOutputTokens += usage.output ?? 0;
       }
     }
-    // Also count tokens from SubagentEvent-wrapped StatusUpdate
+    // Also count tokens and steps from SubagentEvent-wrapped events
     if (event.type === "SubagentEvent" && inTurn) {
       const inner = event.payload.event as Record<string, unknown> | undefined;
       if (inner?.type === "StatusUpdate") {
@@ -75,6 +75,10 @@ function computeTurnMetrics(events: WireEvent[]): TurnMetrics[] {
           turnInputTokens += (usage.input_other ?? 0) + (usage.input_cache_read ?? 0) + (usage.input_cache_creation ?? 0);
           turnOutputTokens += usage.output ?? 0;
         }
+      } else if (inner?.type === "StepBegin") {
+        stepCount++;
+      } else if (inner?.type === "ToolCall") {
+        toolCallCount++;
       }
     }
 

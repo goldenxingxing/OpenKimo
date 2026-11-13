@@ -140,7 +140,9 @@ export type MemoryEvent =
  */
 export function useMemoryEvents(onEvent: (event: MemoryEvent) => void): void {
   const handlerRef = useRef(onEvent);
-  handlerRef.current = onEvent;
+  useEffect(() => {
+    handlerRef.current = onEvent;
+  }, [onEvent]);
 
   useEffect(() => {
     const url = `${getApiBaseUrl()}/api/memory/events`;

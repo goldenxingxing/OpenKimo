@@ -39,6 +39,7 @@ export function useGitDiffStats(sessionId: string | null): UseGitDiffStatsReturn
   const fetchStats = useCallback(async (forceRefresh = false) => {
     if (!sessionId) {
       setStats(null);
+      setIsLoading(false);
       return;
     }
 

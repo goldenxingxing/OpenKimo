@@ -405,7 +405,11 @@ class WikiManager:
         from: an edit made against a page that has moved on is refused, not merged.
         """
         logical_path = validate_logical_page(logical_path).as_posix()
-        if contains_sensitive_text(title) or contains_sensitive_text(body):
+        if (
+            contains_sensitive_text(title)
+            or any(contains_sensitive_text(tag) for tag in tags)
+            or contains_sensitive_text(body)
+        ):
             raise ValueError("Wiki pages cannot contain credentials or secrets")
         snapshot = self._snapshot()
         existing = {page.logical_path: page for page in snapshot.pages}
@@ -561,7 +565,11 @@ class WikiManager:
         try:
             text = data.decode("utf-8")
         except UnicodeDecodeError:
-            return DiscardedCandidate(reason="sensitive", summary="Ingest source rejected")
+            return DiscardedCandidate(
+                reason="sensitive",
+                summary="Ingest source rejected",
+                detail="Ingest source is not valid UTF-8",
+            )
         if contains_sensitive_text(text):
             return DiscardedCandidate(reason="sensitive", summary="Ingest source rejected")
         return portable.model_copy(update={"content_hash": content_hash(data)})
@@ -653,6 +661,7 @@ def _read_raw_pages(layout: WikiLayout) -> dict[str, str]:
             or not directory.resolve(strict=True).is_relative_to(layout.root.resolve(strict=True))
         ):
             continue
+        resolved_root = layout.root.resolve(strict=True)
         for target in sorted(directory.rglob("*.md"), key=lambda path: path.as_posix()):
             relative_target = target.relative_to(directory).as_posix()
             logical_path = f"{category}/{relative_target}"
@@ -660,7 +669,7 @@ def _read_raw_pages(layout: WikiLayout) -> dict[str, str]:
                 safe_file = (
                     not target.is_symlink()
                     and target.is_file()
-                    and target.resolve(strict=True).is_relative_to(layout.root.resolve(strict=True))
+                    and target.resolve(strict=True).is_relative_to(resolved_root)
                 )
                 pages[logical_path] = target.read_text(encoding="utf-8") if safe_file else ""
             except (OSError, UnicodeError, ValueError):

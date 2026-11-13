@@ -269,6 +269,8 @@ async def run_soul(
             with contextlib.suppress(asyncio.CancelledError):
                 await ui_task
             logger.warning("UI loop timed out, cancelled")
+        except Exception:
+            logger.exception("UI loop raised during shutdown")
         finally:
             _current_wire.reset(wire_token)
 

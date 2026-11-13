@@ -62,9 +62,6 @@ function compactPath(path: string, maxLength = 22): string {
     return normalized;
   }
   const parts = normalized.split("/").filter(Boolean);
-  if (parts.length === 0) {
-    return normalized.slice(0, maxLength - 1) + "…";
-  }
   const tail = parts.slice(-2).join("/");
   if (tail.length + 2 <= maxLength) {
     return `…/${tail}`;
@@ -87,13 +84,14 @@ export function OpenInMenu({ workDir, className }: OpenInMenuProps) {
   const hasWorkDir = Boolean(workDir && workDir.trim().length > 0);
   const displayPath = workDir ? compactPath(workDir) : t("openIn.noDirectory");
 
+  // biome-ignore lint/correctness/useExhaustiveDependencies: t re-snapshots translated labels when the language changes
   const menuTargets = useMemo<OpenTarget[]>(
     () =>
       ALL_OPEN_TARGETS.filter((t) => !t.macOnly || isMac).map((t) => ({
         ...t,
         icon: ICON_MAP[t.id],
       })),
-    [isMac],
+    [isMac, t],
   );
 
   const lastTargetId = useLastOpenTargetId();

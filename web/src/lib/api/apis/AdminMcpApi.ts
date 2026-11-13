@@ -62,8 +62,20 @@ async function response<T>(value: Response): Promise<T> {
   if (!value.ok) {
     let message = `Request failed (${value.status})`;
     try {
-      const body = (await value.json()) as { detail?: string };
-      message = body.detail || message;
+      const body = (await value.json()) as { detail?: unknown } | null;
+      const detail = body?.detail;
+      if (Array.isArray(detail)) {
+        // FastAPI 422 returns detail as an array of {loc, msg, type} objects.
+        message = detail
+          .map((item) =>
+            item && typeof item === "object" && "msg" in item
+              ? String((item as { msg: unknown }).msg)
+              : String(item),
+          )
+          .join("; ");
+      } else if (typeof detail === "string") {
+        message = detail;
+      }
     } catch {
       // Keep the status-based fallback.
     }

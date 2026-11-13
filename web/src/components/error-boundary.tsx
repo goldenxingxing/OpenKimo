@@ -11,9 +11,13 @@ function ErrorFallback({ error, resetErrorBoundary }: FallbackProps) {
   const copyError = async () => {
     const errorObj = error instanceof Error ? error : new Error(String(error));
     const text = `${errorObj.name}: ${errorObj.message}\n\n${errorObj.stack ?? ""}`;
-    await navigator.clipboard.writeText(text);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch {
+      // Clipboard unavailable or permission denied: leave the button unchanged.
+    }
   };
 
   const errorMessage = error instanceof Error ? error.message : String(error);

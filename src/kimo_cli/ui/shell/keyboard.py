@@ -60,6 +60,8 @@ class KeyboardListener:
         self._pause_event.clear()
         if self._listener and self._listener.is_alive():
             await asyncio.to_thread(self._listener.join)
+        self._listener = None
+        self._cancel_event.clear()
 
     def _pause_sync(self) -> None:
         self._pause_event.set()

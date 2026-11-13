@@ -346,6 +346,10 @@ export const CodeBlock = ({
         setHtml(highlighted.light);
         setDarkHtml(highlighted.dark);
       },
+      () => {
+        // Highlighting is best-effort; a failed dynamic import must not
+        // surface as an unhandled promise rejection.
+      },
     );
 
     return () => {

@@ -75,7 +75,7 @@ class Print:
                         return ExitCode.SUCCESS
                     else:
                         assert self.input_format == "stream-json"
-                        command = self._read_next_command()
+                        command = await self._read_next_command()
                         if command is None:
                             return ExitCode.SUCCESS
 
@@ -440,9 +440,9 @@ class Print:
         """
         return ExitCode.RETRYABLE if is_retryable_llm_error(e) else ExitCode.FAILURE
 
-    def _read_next_command(self) -> str | None:
+    async def _read_next_command(self) -> str | None:
         while True:
-            json_line = sys.stdin.readline()
+            json_line = await asyncio.to_thread(sys.stdin.readline)
             if not json_line:
                 # EOF
                 return None

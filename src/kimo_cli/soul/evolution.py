@@ -79,5 +79,5 @@ class EvolutionRecorder:
             self._records_path.parent.mkdir(parents=True, exist_ok=True)
             with open(self._records_path, "a", encoding="utf-8") as f:
                 f.write(json.dumps(asdict(record), ensure_ascii=False) + "\n")
-        except OSError:
+        except (OSError, UnicodeEncodeError):
             logger.warning("Failed to record evolution turn evidence", exc_info=True)

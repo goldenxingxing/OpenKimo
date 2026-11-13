@@ -75,13 +75,13 @@ _SCAN_BUDGET_SEC = 8.0
 ``truncated`` — an approximate dashboard beats a hung request."""
 
 _MEMO_MAX = 5000
-"""Per-file memo capacity (LRU). Keyed by (path, mtime_ns, size)."""
+"""Per-file memo capacity (LRU). Keyed by (path, mtime_ns, size, static_roots)."""
 
 _MAX_DAYS = 90
 
 _SKILL_MD = "skill.md"
 
-_SLASH_RE = re.compile(r"^/(skill|flow):([A-Za-z0-9_-]+)(?=\s|$)")
+_SLASH_RE = re.compile(r"^/(skill|flow):([A-Za-z0-9._-]+)(?=\s|$)")
 
 # Trailing directory layouts that mark a skills root, mirroring
 # skill.__init__._get_{user_brand,project_generic,project_brand}_skills_dir_candidates.
@@ -536,7 +536,7 @@ def _prune_response_cache(now: float) -> None:
 def _memoised_scan(
     session_dir: Path, stat: os.stat_result, static_roots: set[tuple[str, ...]]
 ) -> dict[str, _Agg]:
-    key = (str(session_dir), stat.st_mtime_ns, stat.st_size)
+    key = (str(session_dir), stat.st_mtime_ns, stat.st_size, frozenset(static_roots))
     cached = _file_memo.get(key)
     if cached is not None:
         _file_memo.move_to_end(key)

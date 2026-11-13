@@ -65,7 +65,7 @@ def edit_text_in_editor(text: str, configured: str = "") -> str | None:
         with os.fdopen(fd, "w", encoding="utf-8") as f:
             f.write(text)
 
-        mtime_before = os.path.getmtime(tmpfile)
+        mtime_before = os.stat(tmpfile).st_mtime_ns
 
         try:
             returncode = subprocess.call(editor_cmd + [tmpfile], env=get_clean_env())
@@ -77,7 +77,7 @@ def edit_text_in_editor(text: str, configured: str = "") -> str | None:
             logger.warning("Editor exited with non-zero return code: {}", returncode)
             return None
 
-        mtime_after = os.path.getmtime(tmpfile)
+        mtime_after = os.stat(tmpfile).st_mtime_ns
         if mtime_after == mtime_before:
             return None
 

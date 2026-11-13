@@ -171,7 +171,15 @@ class _SessionRenewalMiddleware:
 
         async def _send_with_cookie(message: Message) -> None:
             if message["type"] == "http.response.start":
-                MutableHeaders(scope=message).append("set-cookie", cookie)
+                headers = MutableHeaders(scope=message)
+                # A route that set this cookie itself (login/logout) wins. The
+                # browser keeps the last of several same-named cookies, so
+                # appending a renewal header after the route's would undo it.
+                if not any(
+                    value.startswith(f"{SESSION_COOKIE_NAME}=")
+                    for value in headers.getlist("set-cookie")
+                ):
+                    headers.append("set-cookie", cookie)
             await send(message)
 
         await self.app(scope, receive, _send_with_cookie)
@@ -449,7 +457,7 @@ def create_app(
             candidate = STATIC_DIR / full_path
             try:
                 resolved = candidate.resolve()
-            except OSError:
+            except (OSError, ValueError):
                 resolved = None
             inside = resolved is not None and (
                 resolved == _static_root or _static_root in resolved.parents

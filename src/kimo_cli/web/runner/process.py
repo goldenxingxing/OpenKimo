@@ -293,6 +293,9 @@ class SessionProcess:
         self._lock = asyncio.Lock()
         self._ws_lock = asyncio.Lock()
         self._sent_files: set[str] = set()
+        #: (names, .sent marker) for the message being delivered, so a failed
+        #: stdin write can roll those "already sent" markers back.
+        self._pending_sent: tuple[set[str], Path] | None = None
         self._deferred_restart_reason: str | None = None
         #: The client's last ``initialize``, replayed to a worker that replaces
         #: this one. See :meth:`_replay_initialize`.
@@ -944,9 +947,12 @@ class SessionProcess:
             else:
                 prefix.extend(parts)
 
-        # Mark files as sent and persist to disk so state survives server restarts.
+        # Mark files as sent and persist to disk so state survives server
+        # restarts. Remember what was marked so send_message can roll the
+        # markers back if the write to the worker's stdin fails.
         for file in files:
             self._sent_files.add(file.name)
+        self._pending_sent = ({file.name for file in files}, sent_marker)
         with contextlib.suppress(Exception):
             sent_marker.write_text(json.dumps(sorted(self._sent_files)), encoding="utf-8")
         return prefix, placed
@@ -1261,8 +1267,21 @@ class SessionProcess:
             logger.error(f"{e.__class__.__name__} {e}: Invalid JSONRPC in message: {message}")
             return
 
-        process.stdin.write((message + "\n").encode("utf-8"))
-        await process.stdin.drain()
+        try:
+            process.stdin.write((message + "\n").encode("utf-8"))
+            await process.stdin.drain()
+        except (OSError, RuntimeError):
+            # The worker never saw the message. Undo this turn's "already
+            # sent" markers so a retry re-sends its attachments instead of
+            # silently dropping them.
+            if self._pending_sent is not None:
+                names, marker = self._pending_sent
+                self._sent_files.difference_update(names)
+                with contextlib.suppress(Exception):
+                    marker.write_text(json.dumps(sorted(self._sent_files)), encoding="utf-8")
+            raise
+        finally:
+            self._pending_sent = None
 
         # A forwarded cancel arms the watchdog: whatever the worker does with
         # it, the session must go non-busy within a bounded time.

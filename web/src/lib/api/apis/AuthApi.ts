@@ -41,13 +41,16 @@ export async function login(username: string, password: string): Promise<UserInf
 }
 
 export async function logout(): Promise<void> {
-  await fetch(apiUrl("/api/auth/logout"), {
+  const resp = await fetch(apiUrl("/api/auth/logout"), {
     method: "POST",
     headers: {
       ...getAuthHeader(),
     },
     credentials: "include",
   });
+  if (!resp.ok) {
+    throw new Error(`Logout failed (${resp.status})`);
+  }
 }
 
 export async function getMe(): Promise<UserInfo | null> {

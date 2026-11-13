@@ -167,6 +167,7 @@ export function CreateSessionDialog({
       })
       .catch((error) => {
         console.error("Failed to fetch directories:", error);
+        toast.error((error as Error).message);
       })
       .finally(() => {
         setIsLoading(false);
@@ -189,6 +190,9 @@ export function CreateSessionDialog({
       setAgentName(null);
       setAgents([]);
       agentCacheRef.current.clear();
+      // Invalidate in-flight agent fetches so a late answer cannot repopulate
+      // the list (and the cache) after the dialog closed.
+      agentRequestRef.current += 1;
       if (agentFetchTimerRef.current !== null) {
         window.clearTimeout(agentFetchTimerRef.current);
         agentFetchTimerRef.current = null;

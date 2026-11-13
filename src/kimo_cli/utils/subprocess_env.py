@@ -44,7 +44,7 @@ def get_clean_env(base_env: dict[str, str] | None = None) -> dict[str, str]:
         orig_key = f"{var}_ORIG"
         if orig_key in env:
             # Restore the original value that was saved by PyInstaller bootloader
-            env[var] = env[orig_key]
+            env[var] = env.pop(orig_key)
         elif var in env:
             # Variable was not set before PyInstaller modified it, so remove it
             del env[var]

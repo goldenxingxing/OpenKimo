@@ -5,7 +5,7 @@ from kimo_cli.llm import ALL_MODEL_CAPABILITIES, ModelCapability
 from kimo_cli.soul import StatusSnapshot, wire_send
 from kimo_cli.ui.shell import Shell
 from kimo_cli.utils.slashcmd import SlashCommand
-from kimo_cli.wire.types import ContentPart, StepBegin, TextPart
+from kimo_cli.wire.types import ContentPart, StepBegin, TextPart, TurnEnd
 
 
 class EchoSoul:
@@ -57,6 +57,7 @@ class EchoSoul:
         else:
             for part in user_input:
                 wire_send(part)
+        wire_send(TurnEnd())
 
 
 if __name__ == "__main__":

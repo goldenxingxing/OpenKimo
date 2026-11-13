@@ -7,6 +7,8 @@ const CURRENT_USER_KEY = "kimo_current_user";
 
 /** Don't re-ask the server on every tab switch; a session cannot lapse that fast. */
 const REVALIDATE_INTERVAL_MS = 30_000;
+/** A hung /me must not leave the app in its loading state forever. */
+const AUTH_CHECK_TIMEOUT_MS = 10_000;
 
 function loadCachedUser(): UserInfo | null {
   try {
@@ -43,19 +45,26 @@ export function useAuth(): UseAuthReturn {
   // On mount, verify session with backend (use cache optimistically while verifying)
   useEffect(() => {
     let cancelled = false;
+    const checkId = Date.now();
+    lastCheckRef.current = checkId;
+    const timeoutId = window.setTimeout(() => {
+      if (!cancelled) {
+        setIsLoading(false);
+      }
+    }, AUTH_CHECK_TIMEOUT_MS);
 
-    lastCheckRef.current = Date.now();
     getMe()
       .then((user) => {
-        if (cancelled) return;
+        if (cancelled || lastCheckRef.current !== checkId) return;
         setCurrentUser(user);
         saveUser(user);
       })
       .catch(() => {
-        if (cancelled) return;
+        if (cancelled || lastCheckRef.current !== checkId) return;
         // Network error - keep cached user to avoid unnecessary logout
       })
       .finally(() => {
+        window.clearTimeout(timeoutId);
         if (!cancelled) {
           setIsLoading(false);
         }
@@ -63,6 +72,7 @@ export function useAuth(): UseAuthReturn {
 
     return () => {
       cancelled = true;
+      window.clearTimeout(timeoutId);
     };
   }, []);
 
@@ -113,6 +123,9 @@ export function useAuth(): UseAuthReturn {
   }, []);
 
   const login = useCallback(async (username: string, password: string): Promise<void> => {
+    // Invalidate a /me issued before this login; its stale null answer must
+    // not log the freshly authenticated user straight back out.
+    lastCheckRef.current = Date.now();
     const user = await apiLogin(username, password);
     setCurrentUser(user);
     saveUser(user);

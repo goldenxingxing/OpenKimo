@@ -84,6 +84,7 @@ def get_statistics() -> dict[str, Any]:
                     try:
                         parsed = parse_wire_file_line(line)
                     except Exception:
+                        logger.debug("Skipped malformed line in {path}", path=wire_path)
                         continue
                     if isinstance(parsed, WireFileMetadata):
                         continue

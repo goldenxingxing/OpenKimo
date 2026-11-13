@@ -47,9 +47,9 @@ class SessionMemoryInjectionProvider(DynamicInjectionProvider):
 
         if signature == self._last_signature:
             return []
+        content = _render(entries)
         self._last_signature = signature
-
-        return [DynamicInjection(type=_INJECTION_TYPE, content=_render(entries))]
+        return [DynamicInjection(type=_INJECTION_TYPE, content=content)]
 
 
 def _signature(entries: Sequence[MemoryEntry]) -> str:

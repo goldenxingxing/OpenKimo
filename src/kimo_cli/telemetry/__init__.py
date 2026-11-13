@@ -35,10 +35,10 @@ if TYPE_CHECKING:
 # ---------------------------------------------------------------------------
 
 _MAX_QUEUE_SIZE = 1000
+"""Maximum number of events to buffer before sink is attached."""
 
 _MAX_TRACKED_SESSIONS = 1000
 """How many session ids are remembered for the session_started de-duplication."""
-"""Maximum number of events to buffer before sink is attached."""
 
 _event_queue: deque[dict[str, Any]] = deque(maxlen=_MAX_QUEUE_SIZE)
 """Events buffered before sink is attached."""
@@ -53,6 +53,7 @@ _session_started_order: deque[str] = deque()
 """Insertion order of ``_session_started_sessions``, used to evict the oldest."""
 _sink: EventSink | None = None
 _disabled: bool = False
+_background_tasks: set[asyncio.Task[Any]] = set()
 
 # ---------------------------------------------------------------------------
 # Current request trace id (x-trace-id response header)
@@ -104,6 +105,12 @@ def get_client_info() -> tuple[str, str | None] | None:
     return _client_info
 
 
+def _on_flush_done(task: asyncio.Task[Any]) -> None:
+    _background_tasks.discard(task)
+    with suppress(asyncio.CancelledError):
+        task.exception()
+
+
 def track_session_started_once(
     *,
     ui_mode: str,
@@ -143,7 +150,9 @@ def track_session_started_once(
 
     if _sink is not None:
         with suppress(Exception):
-            asyncio.get_running_loop().create_task(_sink.flush())
+            task = asyncio.get_running_loop().create_task(_sink.flush())
+            _background_tasks.add(task)
+            task.add_done_callback(_on_flush_done)
 
 
 def disable() -> None:

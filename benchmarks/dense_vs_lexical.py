@@ -88,6 +88,8 @@ def dense(store: list[str], turns: list[str]):
     from fastembed import TextEmbedding
 
     started = time.perf_counter()
+    if not store:
+        return [[] for _ in turns], time.perf_counter() - started, 0.0
     model = TextEmbedding(MODEL)
     vectors = np.array([v for v in model.embed(store)])
     vectors /= np.linalg.norm(vectors, axis=1, keepdims=True) + 1e-9
@@ -126,8 +128,8 @@ async def judge(client, sem, turns, retrieved):
     total = good = 0
     at = [[0, 0] for _ in range(TOP_K)]  # [useful, shown] per position
     for hits, reply in zip(retrieved, replies, strict=True):
-        marks = [m.upper() for m in re.findall(r"[YN]", reply or "")][: len(hits)]
-        total += len(hits)
+        marks = [m.upper() for m in re.findall(r"[YN]", reply or "", re.I)][: len(hits)]
+        total += len(marks)
         good += sum(1 for m in marks if m == "Y")
         for i, mark in enumerate(marks):
             if i < TOP_K:

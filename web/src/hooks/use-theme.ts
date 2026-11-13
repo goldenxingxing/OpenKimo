@@ -157,7 +157,15 @@ export function useTheme(): UseThemeResult {
         });
       });
 
-      await transition.ready;
+      try {
+        await transition.ready;
+      } catch {
+        // A skipped transition rejects `ready`; clear the attribute now so it
+        // is not left on the root forever, and swallow `finished`'s rejection.
+        stopThemeSwitching(root);
+        void transition.finished.catch(() => undefined);
+        return;
+      }
 
       // Light→Dark: animate OLD (light) shrinking to reveal dark underneath
       // Dark→Light: animate NEW (light) expanding to cover dark
@@ -176,9 +184,10 @@ export function useTheme(): UseThemeResult {
         pseudoElement,
       });
 
-      transition.finished.finally(() => {
-        stopThemeSwitching(root);
-      });
+      transition.finished.then(
+        () => stopThemeSwitching(root),
+        () => stopThemeSwitching(root),
+      );
     },
     [toggleTheme],
   );

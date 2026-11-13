@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import type { ContextMessage, ContentPart, ToolCallItem } from "@/lib/api";
 import { normalizeContent } from "@/lib/api";
 import { Markdown } from "@/components/markdown";
@@ -52,12 +52,13 @@ function ThinkingBlock({ part }: { part: ContentPart }) {
 function ToolCallBlock({ toolCall }: { toolCall: ToolCallItem }) {
   const [expanded, setExpanded] = useState(false);
   const navigateToWire = useNavigateToWire();
-  let parsedArgs: unknown = null;
-  try {
-    parsedArgs = JSON.parse(toolCall.function.arguments);
-  } catch {
-    parsedArgs = toolCall.function.arguments;
-  }
+  const parsedArgs: unknown = useMemo(() => {
+    try {
+      return JSON.parse(toolCall.function.arguments);
+    } catch {
+      return toolCall.function.arguments;
+    }
+  }, [toolCall.function.arguments]);
   const hasExtras = toolCall.extras && Object.keys(toolCall.extras).length > 0;
 
   return (

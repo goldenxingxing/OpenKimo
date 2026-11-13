@@ -159,19 +159,19 @@ def _parse_records_file(records_file: Path) -> list[TurnEvidence]:
             continue
         try:
             d = json.loads(line)
-        except json.JSONDecodeError:
-            continue
-        out.append(
-            TurnEvidence(
-                session_dir=session_dir,
-                input_tokens=int(d.get("input_tokens") or 0),
-                output_tokens=int(d.get("output_tokens") or 0),
-                reasoning_tokens=int(d.get("reasoning_tokens") or 0),
-                steps=int(d.get("steps") or 0),
-                outcome=str(d.get("outcome") or "unknown"),
-                task=d.get("task"),
+            out.append(
+                TurnEvidence(
+                    session_dir=session_dir,
+                    input_tokens=int(d.get("input_tokens") or 0),
+                    output_tokens=int(d.get("output_tokens") or 0),
+                    reasoning_tokens=int(d.get("reasoning_tokens") or 0),
+                    steps=int(d.get("steps") or 0),
+                    outcome=str(d.get("outcome") or "unknown"),
+                    task=d.get("task"),
+                )
             )
-        )
+        except (json.JSONDecodeError, ValueError, TypeError):
+            continue
     return out
 
 
@@ -551,6 +551,8 @@ def log_action(action: str, actor: str, detail: object = None) -> None:
 
 
 def read_actions(limit: int = 50) -> list[dict]:
+    if limit <= 0:
+        return []
     path = evolution_dir() / ACTIONS_FILE_NAME
     if not path.exists():
         return []

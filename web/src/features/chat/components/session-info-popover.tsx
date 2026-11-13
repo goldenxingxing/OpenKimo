@@ -10,7 +10,7 @@ import {
 } from "@/components/ui/tooltip";
 import type { Session } from "@/lib/api/models";
 import { CheckIcon, CopyIcon, InfoIcon } from "lucide-react";
-import { useState, useCallback } from "react";
+import { useState, useCallback, useRef } from "react";
 import { useTranslation } from "react-i18next";
 
 type SessionInfoItemProps = {
@@ -21,12 +21,14 @@ type SessionInfoItemProps = {
 function SessionInfoItem({ label, value }: SessionInfoItemProps) {
   const { t } = useTranslation("chat");
   const [copied, setCopied] = useState(false);
+  const copiedTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const handleCopy = useCallback(async () => {
     try {
       await navigator.clipboard.writeText(value);
       setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
+      if (copiedTimerRef.current !== null) clearTimeout(copiedTimerRef.current);
+      copiedTimerRef.current = setTimeout(() => setCopied(false), 2000);
     } catch (error) {
       console.error("Failed to copy:", error);
     }
@@ -120,22 +122,7 @@ export function SessionInfoPopover({
         <TooltipContent side="bottom">{t("sessionInfo.info")}</TooltipContent>
       </Tooltip>
       <DropdownMenuContent align="end" className="w-100 p-3">
-        <div className="space-y-3">
-          <p className="font-medium text-sm">{t("sessionInfo.title")}</p>
-          <SessionInfoItem label={t("sessionInfo.sessionId")} value={sessionId} />
-          {session?.workDir && (
-            <SessionInfoItem
-              label={t("sessionInfo.workingDirectory")}
-              value={session.workDir}
-            />
-          )}
-          {session?.sessionDir && (
-            <SessionInfoItem
-              label={t("sessionInfo.sessionDirectory")}
-              value={session.sessionDir}
-            />
-          )}
-        </div>
+        <SessionInfoSection sessionId={sessionId} session={session} />
       </DropdownMenuContent>
     </DropdownMenu>
   );

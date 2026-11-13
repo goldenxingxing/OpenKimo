@@ -193,6 +193,7 @@ def _git_deleted_files(root: Path, scope: str | None = None) -> set[str]:
             cwd=root,
             capture_output=True,
             text=True,
+            encoding="utf-8",
             timeout=_GIT_LS_FILES_TIMEOUT,
         )
         if result.returncode == 0:

@@ -120,7 +120,8 @@ async def main():
             from kosong.contrib.chat_provider.openai_responses import OpenAIResponses
 
             base_url = base_url or "https://api.openai.com/v1"
-            assert api_key is not None, "Expect OPENAI_API_KEY environment variable"
+            if api_key is None:
+                raise ValueError("Expect OPENAI_API_KEY environment variable")
             model = model or "gpt-5"
 
             chat_provider = OpenAIResponses(base_url=base_url, api_key=api_key, model=model)
@@ -128,7 +129,8 @@ async def main():
             from kosong.contrib.chat_provider.anthropic import Anthropic
 
             base_url = base_url or "https://api.anthropic.com"
-            assert api_key is not None, "Expect ANTHROPIC_API_KEY environment variable"
+            if api_key is None:
+                raise ValueError("Expect ANTHROPIC_API_KEY environment variable")
             model = model or "claude-sonnet-4-5"
 
             chat_provider = Anthropic(
@@ -138,9 +140,8 @@ async def main():
             from kosong.contrib.chat_provider.google_genai import GoogleGenAI
 
             api_key = api_key or os.getenv("GEMINI_API_KEY")
-            assert api_key is not None, (
-                "Expect GOOGLE_API_KEY or GEMINI_API_KEY environment variable"
-            )
+            if api_key is None:
+                raise ValueError("Expect GOOGLE_API_KEY or GEMINI_API_KEY environment variable")
             model = model or "gemini-3-pro-preview"
             chat_provider = GoogleGenAI(
                 base_url=base_url, api_key=api_key, model=model

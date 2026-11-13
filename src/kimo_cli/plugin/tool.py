@@ -83,16 +83,23 @@ class PluginTool(CallableTool):
             if not result:
                 return result.rejection_error()
 
-        params_json = json.dumps(kwargs, ensure_ascii=False)
+        if kwargs or not args:
+            params = kwargs
+        elif len(args) == 1:
+            params = args[0]
+        else:
+            params = list(args)
+        params_json = json.dumps(params, ensure_ascii=False)
 
         try:
+            env = await asyncio.to_thread(self._build_env)
             proc = await asyncio.create_subprocess_exec(
                 *self._command,
                 stdin=asyncio.subprocess.PIPE,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
                 cwd=str(self._plugin_dir),
-                env=self._build_env(),
+                env=env,
             )
         except Exception as exc:
             return ToolRuntimeError(str(exc))

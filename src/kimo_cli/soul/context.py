@@ -102,6 +102,8 @@ class Context:
         temporary file to avoid corruption on crash and avoid loading the entire file
         into memory.
         """
+        if self._lease is not None:
+            self._lease.verify()
         prompt_line = json.dumps({"role": "_system_prompt", "content": prompt}) + "\n"
 
         def _write_system_prompt_sync() -> None:
@@ -113,11 +115,11 @@ class Context:
             # in the same session directory happens to use it (see the other
             # writers below, which already use unique names).
             tmp_path = self._file_backend.with_name(f".{self._file_backend.name}.{uuid4().hex}.tmp")
-            with (
-                tmp_path.open("x", encoding="utf-8") as tmp_f,
-                self._file_backend.open(encoding="utf-8") as src_f,
-            ):
-                try:
+            try:
+                with (
+                    tmp_path.open("x", encoding="utf-8") as tmp_f,
+                    self._file_backend.open(encoding="utf-8") as src_f,
+                ):
                     tmp_f.write(prompt_line)
                     while True:
                         chunk = src_f.read(64 * 1024)
@@ -126,10 +128,9 @@ class Context:
                         tmp_f.write(chunk)
                     tmp_f.flush()
                     os.fsync(tmp_f.fileno())
-                except BaseException:
-                    tmp_path.unlink(missing_ok=True)
-                    raise
-            tmp_path.replace(self._file_backend)
+                tmp_path.replace(self._file_backend)
+            finally:
+                tmp_path.unlink(missing_ok=True)
 
         await asyncio.to_thread(_write_system_prompt_sync)
 
@@ -137,6 +138,8 @@ class Context:
 
     async def replace_system_prompt(self, prompt: str) -> None:
         """Atomically replace all persisted system-prompt records with one current record."""
+        if self._lease is not None:
+            self._lease.verify()
         prompt_line = json.dumps({"role": "_system_prompt", "content": prompt}) + "\n"
 
         def _replace_system_prompt_sync() -> None:
@@ -410,6 +413,8 @@ class Context:
         self._pending_token_estimate += estimate_text_tokens(tool_messages)
 
     async def update_token_count(self, token_count: int):
+        if self._lease is not None:
+            self._lease.verify()
         logger.debug("Updating token count in context: {token_count}", token_count=token_count)
 
         async with aiofiles.open(self._file_backend, "a", encoding="utf-8") as f:

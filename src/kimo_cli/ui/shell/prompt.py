@@ -833,7 +833,7 @@ def _load_history_entries(history_file: Path) -> list[_HistoryEntry]:
                         line=line,
                     )
                     continue
-    except OSError as exc:
+    except (OSError, UnicodeDecodeError) as exc:
         logger.warning(
             "Failed to load user history file: {file} ({error})",
             file=history_file,
@@ -2209,7 +2209,7 @@ class CustomPromptSession:
         # ── line 2: toast (left) + context (right) — always rendered ──────
         fragments.append(("", "\n"))
 
-        right_text = self._render_right_span(status)
+        right_text = _truncate_right(self._render_right_span(status), max(1, columns - 2))
         right_width = _display_width(right_text)
 
         left_toast = _current_toast("left")

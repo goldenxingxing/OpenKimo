@@ -126,6 +126,7 @@ class JsonlLinearStorage(MemoryLinearStorage):
                 separators=(",", ":"),
             )
             file.write("\n")
+            file.flush()
 
         await asyncio.to_thread(_write)
 
@@ -141,5 +142,6 @@ class JsonlLinearStorage(MemoryLinearStorage):
                 separators=(",", ":"),
             )
             file.write("\n")
+            file.flush()
 
         await asyncio.to_thread(_write)

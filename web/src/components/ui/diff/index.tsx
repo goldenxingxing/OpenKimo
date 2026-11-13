@@ -136,15 +136,22 @@ const SkipBlockRow: React.FC<{
   </>
 );
 
-const Line: React.FC<{
-  line: LineType;
-}> = ({ line }) => {
+const Line = React.memo(({ line }: { line: LineType }) => {
   const { language } = useDiffContext();
   const Tag =
     line.type === "insert" ? "ins" : line.type === "delete" ? "del" : "span";
   const lineNumberNew =
-    line.type === "normal" ? line.newLineNumber : line.lineNumber;
-  const lineNumberOld = line.type === "normal" ? line.oldLineNumber : undefined;
+    line.type === "delete"
+      ? undefined
+      : line.type === "normal"
+        ? line.newLineNumber
+        : line.lineNumber;
+  const lineNumberOld =
+    line.type === "insert"
+      ? undefined
+      : line.type === "normal"
+        ? line.oldLineNumber
+        : line.lineNumber;
 
   return (
     <tr
@@ -184,4 +191,4 @@ const Line: React.FC<{
       </td>
     </tr>
   );
-};
+});

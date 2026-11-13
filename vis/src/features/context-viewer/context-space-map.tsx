@@ -64,7 +64,7 @@ function classifyMessage(msg: ContextMessage): { category: string; tokens: numbe
   }
 
   if (msg.role === "tool") {
-    const tokens = JSON.stringify(msg.content).length / 4;
+    const tokens = (JSON.stringify(msg.content) ?? "").length / 4;
     results.push({ category: "tool-result", tokens });
     return results;
   }
@@ -101,8 +101,14 @@ function formatTokens(n: number): string {
   return String(Math.round(n));
 }
 
-function getPreview(msg: ContextMessage): string {
+function getPreview(msg: ContextMessage, category?: string): string {
   const parts = normalizeContent(msg.content);
+  if (category === "thinking") {
+    for (const p of parts) {
+      if (p.think) return p.think.slice(0, 80);
+      if (p.thinking) return p.thinking.slice(0, 80);
+    }
+  }
   for (const p of parts) {
     if (p.text) return p.text.slice(0, 80);
     if (p.think) return p.think.slice(0, 80);
@@ -157,7 +163,7 @@ export function ContextSpaceMap({ messages, onScrollToIndex }: ContextSpaceMapPr
         category: m.category,
         estimatedTokens: Math.round(m.tokens),
         percentage: total > 0 ? (m.tokens / total) * 100 : 0,
-        preview: getPreview(messages[m.index]),
+        preview: getPreview(messages[m.index], m.category),
       }));
 
     return { categories: cats, largeItems: large, totalTokens: Math.round(total) };

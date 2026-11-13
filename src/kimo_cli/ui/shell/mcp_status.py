@@ -4,6 +4,7 @@ import time
 
 from prompt_toolkit.formatted_text import FormattedText
 from rich.console import Group, RenderableType
+from rich.markup import escape
 from rich.spinner import Spinner
 from rich.text import Text
 
@@ -24,17 +25,19 @@ def render_mcp_console(snapshot: MCPStatusSnapshot) -> RenderableType:
     renderables: list[RenderableType] = [BulletColumns(header)]
     for server in snapshot.servers:
         color = _status_color(server.status)
-        server_text = f"[{color}]{server.name}[/{color}]"
+        server_text = f"[{color}]{escape(server.name)}[/{color}]"
         if server.status == "unauthorized":
-            server_text += f" [grey50](unauthorized - run: kimo mcp auth {server.name})[/grey50]"
+            server_text += (
+                f" [grey50](unauthorized - run: kimo mcp auth {escape(server.name)})[/grey50]"
+            )
         elif server.status != "connected":
-            server_text += f" [grey50]({server.status})[/grey50]"
+            server_text += f" [grey50]({escape(server.status)})[/grey50]"
 
         lines: list[RenderableType] = [Text.from_markup(server_text)]
         for tool_name in server.tools:
             lines.append(
                 BulletColumns(
-                    Text.from_markup(f"[grey50]{tool_name}[/grey50]"),
+                    Text.from_markup(f"[grey50]{escape(tool_name)}[/grey50]"),
                     bullet_style="grey50",
                 )
             )

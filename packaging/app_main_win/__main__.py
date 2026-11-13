@@ -247,10 +247,16 @@ class OpenKimoApp:
     # ---- menu handlers ------------------------------------------------
 
     def _on_open_web(self, _icon, _item) -> None:
-        webbrowser.open(f"http://127.0.0.1:{self.supervisor.port}")
+        try:
+            webbrowser.open(f"http://127.0.0.1:{self.supervisor.port}")
+        except Exception:
+            log.exception("webbrowser.open failed")
 
     def _on_open_admin(self, _icon, _item) -> None:
-        webbrowser.open(f"http://127.0.0.1:{self.supervisor.port}/admin")
+        try:
+            webbrowser.open(f"http://127.0.0.1:{self.supervisor.port}/admin")
+        except Exception:
+            log.exception("webbrowser.open failed")
 
     def _on_toggle(self, _icon, _item) -> None:
         if self.supervisor.state in (ServerState.RUNNING, ServerState.STARTING):
@@ -291,7 +297,12 @@ class OpenKimoApp:
             # caught, so it escaped into the pystray menu callback. Log it and
             # fall through to the generic opener below.
             log.exception("os.startfile failed for %s; trying the fallback opener", path)
-        opener = "open" if sys.platform == "darwin" else "xdg-open"
+        if sys.platform == "darwin":
+            opener = "open"
+        elif os.name == "nt":
+            opener = "explorer"
+        else:
+            opener = "xdg-open"
         try:
             subprocess.run([opener, str(path)], check=False)
         except Exception:

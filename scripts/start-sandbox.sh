@@ -64,6 +64,13 @@ if [ "$ENABLE_BROWSER" != "false" ]; then
     # BrowserGuard 在 monitor 模式下持续运行
     python /app/browser_guard.py --monitor > /app/logs/browser_guard.log 2>&1 &
     BROWSER_PID=$!
+    # A crash here used to leave the container running with browser tools
+    # silently unavailable; give it a moment and verify it is still alive.
+    sleep 0.5
+    if ! kill -0 "$BROWSER_PID" 2>/dev/null; then
+        echo "      ERROR: Browser Guard exited during startup; see /app/logs/browser_guard.log" >&2
+        exit 1
+    fi
     echo "      Browser Guard PID: $BROWSER_PID" >&2
 fi
 

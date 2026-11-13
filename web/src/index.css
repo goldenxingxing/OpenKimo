@@ -108,6 +108,7 @@
 
   /* Semantic colors - dark */
   --success: oklch(0.7 0.2 145);
+  --success-foreground: oklch(0.141 0.005 285.823);
   --warning: oklch(0.75 0.15 75);
   --info: oklch(0.7 0.15 250);
   --destructive-foreground: oklch(0.141 0.005 285.823);

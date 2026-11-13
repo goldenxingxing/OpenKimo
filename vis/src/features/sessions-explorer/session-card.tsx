@@ -150,7 +150,7 @@ export function SessionCard({ session, onSelect, compact, searchQuery, onDeleted
             role="button"
             tabIndex={0}
             onClick={handleDownload}
-            onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") handleDownload(e as unknown as React.MouseEvent); }}
+            onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); handleDownload(e as unknown as React.MouseEvent); } }}
             className="rounded p-0.5 hover:bg-accent text-muted-foreground hover:text-foreground transition-colors shrink-0"
             title="Download session files"
           >
@@ -161,7 +161,7 @@ export function SessionCard({ session, onSelect, compact, searchQuery, onDeleted
               role="button"
               tabIndex={0}
               onClick={handleDeleteClick}
-              onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") handleDeleteClick(e as unknown as React.MouseEvent); }}
+              onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); handleDeleteClick(e as unknown as React.MouseEvent); } }}
               className="rounded p-0.5 hover:bg-red-500/10 text-muted-foreground hover:text-red-500 transition-colors shrink-0"
               title="Delete imported session"
             >
@@ -197,7 +197,7 @@ export function SessionCard({ session, onSelect, compact, searchQuery, onDeleted
               role="button"
               tabIndex={0}
               onClick={handleDownload}
-              onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") handleDownload(e as unknown as React.MouseEvent); }}
+              onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); handleDownload(e as unknown as React.MouseEvent); } }}
               className="rounded p-0.5 hover:bg-accent text-muted-foreground hover:text-foreground transition-colors"
               title="Download session files"
             >
@@ -208,7 +208,7 @@ export function SessionCard({ session, onSelect, compact, searchQuery, onDeleted
                 role="button"
                 tabIndex={0}
                 onClick={handleDeleteClick}
-                onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") handleDeleteClick(e as unknown as React.MouseEvent); }}
+                onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); handleDeleteClick(e as unknown as React.MouseEvent); } }}
                 className="rounded p-0.5 hover:bg-red-500/10 text-muted-foreground hover:text-red-500 transition-colors"
                 title="Delete imported session"
               >
@@ -278,15 +278,16 @@ function LazyStats({
   useEffect(() => {
     if (!hasWire || !ref.current) return;
 
+    let cancelled = false;
     const el = ref.current;
     const observer = new IntersectionObserver(
       ([entry]) => {
         if (entry.isIntersecting) {
           setLoading(true);
           getSessionSummary(sessionId)
-            .then(setSummary)
+            .then((res) => { if (!cancelled) setSummary(res); })
             .catch((err) => { console.warn(`Failed to load summary for ${sessionId}:`, err); })
-            .finally(() => setLoading(false));
+            .finally(() => { if (!cancelled) setLoading(false); });
           observer.disconnect();
         }
       },
@@ -294,7 +295,7 @@ function LazyStats({
     );
 
     observer.observe(el);
-    return () => observer.disconnect();
+    return () => { cancelled = true; observer.disconnect(); };
   }, [sessionId, hasWire]);
 
   if (!hasWire) {

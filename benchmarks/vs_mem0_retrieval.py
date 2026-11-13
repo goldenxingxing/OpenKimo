@@ -117,6 +117,10 @@ def _qdrant(tag, path):
 def run_mem0(turns, questions, tag, store_cfg):
     from mem0 import Memory
 
+    required = ("BENCH_MODEL", "BENCH_BASE_URL", "DEEPSEEK_API_KEY")
+    missing = [k for k in required if k not in os.environ]
+    if missing:
+        raise SystemExit(f"缺少环境变量：{', '.join(missing)}")
     store = Path(tempfile.mkdtemp())
     memory = Memory.from_config(
         {
@@ -154,7 +158,7 @@ def run_mem0(turns, questions, tag, store_cfg):
             top_k=max(TOP_K),
             threshold=0.0,
         )
-        rows = found.get("results", found) if isinstance(found, dict) else found
+        rows = found.get("results", []) if isinstance(found, dict) else found
         ranked = [str((r.get("metadata") or {}).get("dia_id", "")) for r in rows]
         out.append(score(ranked, gold))
     return out
@@ -188,7 +192,9 @@ def main() -> None:
         (f"mem0 (纯向量 {EMBED_MODEL.split('/')[-1]})", theirs),
         ("mem0 (qdrant 混合: 向量+BM25)", hybrid),
     ):
-        cells = "".join(f"{statistics.mean(r[k] for r in rows) * 100:>10.1f}%" for k in TOP_K)
+        cells = "".join(
+            f"{(statistics.mean(r[k] for r in rows) * 100 if rows else 0.0):>10.1f}%" for k in TOP_K
+        )
         print(f"{label:<32}{cells}")
 
 

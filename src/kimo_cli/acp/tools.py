@@ -143,7 +143,9 @@ class Terminal(CallableTool2[ShellParams]):
                 terminal_id=terminal_id,
             )
             builder.write(output_response.output)
-            if output_response.exit_status:
+            # wait_for_terminal_exit is authoritative; only fall back to the
+            # output snapshot when the wait never produced a result (timeout).
+            if exit_status is None and output_response.exit_status:
                 exit_status = output_response.exit_status
 
             exit_code = exit_status.exit_code if exit_status else None

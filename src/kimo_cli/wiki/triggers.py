@@ -260,7 +260,6 @@ class WikiTurnCoordinator:
         self._checkpoint_by_key: dict[str, str] = {}
         self._grants: dict[str, WikiAdmissionGrant] = {}
         self._last_retrieval_outcome: str | None = None
-        self._retrieval_refs: dict[str, tuple[tuple[str, int, str], ...]] = {}
 
     @property
     def unresolved_count(self) -> int:
@@ -299,8 +298,7 @@ class WikiTurnCoordinator:
                     raise WikiTriggerRejected("invalid retrieval result reference")
             self._last_retrieval_outcome = outcome
             if result_refs:
-                root_turn_id = self._require_active_turn()
-                self._retrieval_refs[root_turn_id] = result_refs
+                self._require_active_turn()
 
     async def begin_turn(self, raw_text: str, normalized_text: str) -> RootTurn:
         async with self._locked():
@@ -1079,6 +1077,11 @@ class WikiTurnCoordinator:
                     self._checkpoints[checkpoint_id] = replace(checkpoint, state="cancelled")
                     self._track_resolved(checkpoint, "cancelled")
             self._grants.clear()
+            self._turns.clear()
+            self._evidence.clear()
+            self._evidence_by_key.clear()
+            self._checkpoints.clear()
+            self._checkpoint_by_key.clear()
             self._active_root_turn_id = None
             self._closed = True
             self._safe_track("wiki_trigger_runtime_closed")

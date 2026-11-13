@@ -55,7 +55,9 @@ def score(ranked, gold):
 
 
 def ours(turns, questions):
-    sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
+    src = str(Path(__file__).resolve().parents[1] / "src")
+    if src not in sys.path:
+        sys.path.insert(0, src)
     import tempfile
 
     from kimo_cli.memory.entry import MemoryEntry
@@ -63,13 +65,14 @@ def ours(turns, questions):
 
     entries = [MemoryEntry(kind="project", scope="persistent", content=t) for _, t in turns]
     dia = {e.id: d for e, (d, _) in zip(entries, turns, strict=True)}
-    tmp = Path(tempfile.mkdtemp())
-    (tmp / "src").write_text("x", encoding="utf-8")
-    index = MemorySearchIndex(tmp / "db", tmp / "src")
-    return [
-        score([dia[h.entry_id] for h in index.search(q, entries, limit=max(TOP_K))], g)
-        for q, g in questions
-    ]
+    with tempfile.TemporaryDirectory() as tmpdir:
+        tmp = Path(tmpdir)
+        (tmp / "src").write_text("x", encoding="utf-8")
+        index = MemorySearchIndex(tmp / "db", tmp / "src")
+        return [
+            score([dia[h.entry_id] for h in index.search(q, entries, limit=max(TOP_K))], g)
+            for q, g in questions
+        ]
 
 
 def txtai_hybrid(turns, questions):
@@ -126,6 +129,9 @@ def main():
                 rows += fn(turns, questions)
         except Exception as exc:  # noqa: BLE001
             print(f"{label:<32}  跑失败: {type(exc).__name__}: {exc}"[:110])
+            continue
+        if not rows:
+            print(f"{label:<32}  无结果")
             continue
         print(
             f"{label:<32}"

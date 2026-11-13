@@ -45,11 +45,11 @@ function text(item: DisplayItem, name: string): string {
   return typeof value === "string" ? value : "";
 }
 
-/** Lines in a text block, ignoring one trailing newline. */
+/** Lines in a text block, ignoring trailing newlines. */
 function countLines(value: string): number {
   if (!value) return 0;
-  const body = value.endsWith("\n") ? value.slice(0, -1) : value;
-  return body.split("\n").length;
+  const body = value.replace(/\n+$/, "");
+  return body ? body.split("\n").length : 0;
 }
 
 function firstLine(value: string): { line: string; rest: number } {

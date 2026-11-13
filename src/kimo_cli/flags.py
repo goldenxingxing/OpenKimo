@@ -139,7 +139,10 @@ def _load_overrides_from_disk() -> dict[str, bool]:
         from kimo_cli.config import load_config
 
         return dict(load_config().experimental)
-    except Exception:
+    except Exception as exc:
+        from kimo_cli.utils.logging import logger
+
+        logger.warning("Failed to load experimental flag overrides: {error}", error=exc)
         return {}
 
 

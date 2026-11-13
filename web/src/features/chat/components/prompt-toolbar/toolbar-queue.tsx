@@ -39,7 +39,7 @@ function QueueItemRow({ item, isFirst, onEdit }: { item: QueuedItem; isFirst: bo
       <div className="flex items-center gap-0.5 shrink-0 opacity-0 group-hover:opacity-100 transition-opacity">
         <Tooltip>
           <TooltipTrigger asChild>
-            <Button variant="ghost" size="icon-sm" className="size-5" onClick={() => onEdit(item.id)}>
+            <Button variant="ghost" size="icon-sm" className="size-5" aria-label={t("chat:queue.edit")} onClick={() => onEdit(item.id)}>
               <PencilIcon className="size-3" />
             </Button>
           </TooltipTrigger>
@@ -48,7 +48,7 @@ function QueueItemRow({ item, isFirst, onEdit }: { item: QueuedItem; isFirst: bo
         {!isFirst && (
           <Tooltip>
             <TooltipTrigger asChild>
-              <Button variant="ghost" size="icon-sm" className="size-5" onClick={() => moveQueueItemUp(item.id)}>
+              <Button variant="ghost" size="icon-sm" className="size-5" aria-label={t("chat:queue.moveUp")} onClick={() => moveQueueItemUp(item.id)}>
                 <ArrowUpIcon className="size-3" />
               </Button>
             </TooltipTrigger>
@@ -57,7 +57,7 @@ function QueueItemRow({ item, isFirst, onEdit }: { item: QueuedItem; isFirst: bo
         )}
         <Tooltip>
           <TooltipTrigger asChild>
-            <Button variant="ghost" size="icon-sm" className="size-5 text-muted-foreground hover:text-destructive" onClick={() => removeFromQueue(item.id)}>
+            <Button variant="ghost" size="icon-sm" className="size-5 text-muted-foreground hover:text-destructive" aria-label={t("common:actions.remove")} onClick={() => removeFromQueue(item.id)}>
               <Trash2Icon className="size-3" />
             </Button>
           </TooltipTrigger>
@@ -79,6 +79,7 @@ function EditingItemRow({ item, onDone }: { item: QueuedItem; onDone: () => void
   }, [text, item.id, editQueueItem, onDone]);
 
   const handleKeyDown = useCallback((e: KeyboardEvent<HTMLInputElement>) => {
+    if (e.nativeEvent.isComposing) return;
     if (e.key === "Enter") { e.preventDefault(); handleSave(); }
     if (e.key === "Escape") { e.preventDefault(); onDone(); }
   }, [handleSave, onDone]);
@@ -93,10 +94,10 @@ function EditingItemRow({ item, onDone }: { item: QueuedItem; onDone: () => void
         onKeyDown={handleKeyDown}
         className="flex-1 min-w-0 text-xs bg-transparent border-b border-border outline-none py-0.5"
       />
-      <Button variant="ghost" size="icon-sm" className="size-5" onClick={handleSave}>
+      <Button variant="ghost" size="icon-sm" className="size-5" aria-label={t("common:actions.save")} onClick={handleSave}>
         <CheckIcon className="size-3" />
       </Button>
-      <Button variant="ghost" size="icon-sm" className="size-5" onClick={onDone}>
+      <Button variant="ghost" size="icon-sm" className="size-5" aria-label={t("common:actions.cancel")} onClick={onDone}>
         <XIcon className="size-3" />
       </Button>
     </div>
@@ -144,6 +145,7 @@ export const ToolbarQueueTab = memo(function ToolbarQueueTabComponent({
     <button
       type="button"
       onClick={onToggle}
+      aria-expanded={isActive}
       className={cn(
         "flex items-center gap-1.5 h-7 px-2.5 rounded-full text-xs font-medium transition-colors cursor-pointer border",
         isActive

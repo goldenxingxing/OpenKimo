@@ -24,10 +24,12 @@ export function SessionPicker({ value, onChange }: SessionPickerProps) {
   const [inputValue, setInputValue] = useState(value ?? "");
 
   useEffect(() => {
+    let cancelled = false;
     listSessions()
-      .then(setSessions)
+      .then((res) => { if (!cancelled) setSessions(res); })
       .catch(console.error)
-      .finally(() => setLoading(false));
+      .finally(() => { if (!cancelled) setLoading(false); });
+    return () => { cancelled = true; };
   }, []);
 
   useEffect(() => {
@@ -64,7 +66,7 @@ export function SessionPicker({ value, onChange }: SessionPickerProps) {
 
   return (
     <div className="relative">
-      <div className="flex items-center gap-2">
+      <div className="relative z-50 flex items-center gap-2">
         <label className="text-sm font-medium text-muted-foreground whitespace-nowrap">
           Session:
         </label>

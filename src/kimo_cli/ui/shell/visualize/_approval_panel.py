@@ -495,6 +495,8 @@ class ApprovalPromptDelegate:
                     self._panel.selected_index = idx
                     if not self._is_inline_feedback_active():
                         self._submit_current_request(event.current_buffer)
+                    else:
+                        self._maybe_restore_feedback_draft(event.current_buffer)
             case _:
                 pass
 

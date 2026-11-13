@@ -1000,12 +1000,6 @@ class KimoToolset:
             results = await asyncio.gather(*tasks) if tasks else []
             failed_servers = {name: error for name, error in results if error is not None}
 
-            for mcp_config in mcp_configs:
-                # Skip empty MCP configs (no servers defined)
-                if not mcp_config.mcpServers:
-                    logger.debug("Skipping empty MCP config: {mcp_config}", mcp_config=mcp_config)
-                    continue
-
             if failed_servers:
                 _toast_mcp("mcp connection failed")
                 raise MCPRuntimeError(f"Failed to connect MCP servers: {failed_servers}")
@@ -1294,7 +1288,7 @@ def convert_mcp_tool_result(
     All content — text *and* inline media (``data:`` URLs) — is subject to
     a shared *MCP_MAX_OUTPUT_CHARS* character budget.  Text parts are
     truncated in-place; media parts that exceed the remaining budget are
-    dropped and replaced with a descriptive placeholder.
+    dropped.  A single truncation notice is appended when anything is trimmed.
 
     When an ``offloader`` is given, oversized text parts are written to disk
     in full and the truncated text carries a path reference, so truncation

@@ -10,7 +10,12 @@ GREETINGS = {
     "ja": "こんにちは、{name}さん！ようこそ！",
 }
 
-params = json.loads(sys.stdin.read()) if not sys.stdin.isatty() else {}
+try:
+    params = json.loads(sys.stdin.read()) if not sys.stdin.isatty() else {}
+except json.JSONDecodeError:
+    params = {}
+if not isinstance(params, dict):
+    params = {}
 name = params.get("name", "World")
 lang = params.get("lang", "en")
 

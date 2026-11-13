@@ -75,7 +75,8 @@ class Session:
                     line = line.strip()
                     if not line:
                         continue
-                    role = json.loads(line, strict=False).get("role")
+                    record = json.loads(line, strict=False)
+                    role = record.get("role") if isinstance(record, dict) else None
                     if isinstance(role, str) and not role.startswith("_"):
                         return False
         except FileNotFoundError:

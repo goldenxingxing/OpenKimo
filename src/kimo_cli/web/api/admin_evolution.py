@@ -71,6 +71,10 @@ class JobStatus(BaseModel):
 async def _start_job(kind: str, proposal_id: str | None, coro: Any) -> JobStatus:
     global _job
     if _job is not None and _job["status"] == "running":
+        # The caller already created the coroutine; rejecting the job here
+        # would leave it never awaited (RuntimeWarning at GC). Close it first.
+        if asyncio.iscoroutine(coro):
+            coro.close()
         raise HTTPException(
             status.HTTP_409_CONFLICT,
             detail=f"An evolution job is already running ({_job['kind']}); wait for it to finish.",

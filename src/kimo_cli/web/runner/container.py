@@ -44,6 +44,8 @@ def _read_owner_id_from_disk(session_id: UUID) -> str | None:
             data = json.loads(state_file.read_text(encoding="utf-8"))
         except (OSError, ValueError):
             return None
+        if not isinstance(data, dict):
+            return None
         owner = data.get("owner_id")
         return owner if isinstance(owner, str) else None
     return None
@@ -244,7 +246,13 @@ class ContainerSessionProcess(SessionProcess):
         # authenticated owner fall back to a sentinel so they cannot pollute
         # real users' data.
         owner_id_raw = _read_owner_id_from_disk(self.session_id)
-        cmd.extend(["-e", f"KIMO_USER_ID={resolve_owner_id(owner_id_raw)}"])
+        try:
+            owner_id = resolve_owner_id(owner_id_raw)
+        except ValueError:
+            # A dirty state.json must not abort container startup; fall back
+            # to the anonymous sentinel like an ownerless session.
+            owner_id = resolve_owner_id(None)
+        cmd.extend(["-e", f"KIMO_USER_ID={owner_id}"])
 
         # Image + entrypoint command (runs start-sandbox.sh which launches
         # Xvfb, kernel server, browser guard, and finally the worker)

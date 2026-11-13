@@ -755,14 +755,14 @@ def _convert_error(error: AnthropicError | httpx.HTTPError) -> ChatProviderError
         return convert_httpx_error(error)
     # Anthropic SDK errors — check subclasses before parents to avoid
     # misclassification (e.g. APITimeoutError inherits APIConnectionError).
-    if isinstance(error, AnthropicAPIStatusError):
-        return _status_error(error.status_code, error)
     if isinstance(error, AnthropicAuthenticationError):
         return _status_error(getattr(error, "status_code", 401), error)
     if isinstance(error, AnthropicPermissionDeniedError):
         return _status_error(getattr(error, "status_code", 403), error)
     if isinstance(error, AnthropicRateLimitError):
         return _status_error(getattr(error, "status_code", 429), error)
+    if isinstance(error, AnthropicAPIStatusError):
+        return _status_error(error.status_code, error)
     if isinstance(error, AnthropicAPITimeoutError):
         return APITimeoutError(str(error))
     if isinstance(error, AnthropicAPIConnectionError):

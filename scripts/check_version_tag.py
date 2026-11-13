@@ -38,7 +38,7 @@ def main() -> int:
 
     try:
         project_version = load_project_version(args.pyproject)
-    except ValueError as exc:
+    except (ValueError, OSError) as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 1
 

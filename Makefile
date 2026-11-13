@@ -50,6 +50,9 @@ format-pykaos: ## Auto-format pykaos sources with ruff.
 	@echo "==> Formatting pykaos sources"
 	@uv run --project packages/kaos --directory packages/kaos ruff check --fix
 	@uv run --project packages/kaos --directory packages/kaos ruff format
+format-web: ## Auto-format web sources with biome.
+	@echo "==> Formatting web sources"
+	@npm --prefix web run format
 
 .PHONY: gen-changelog gen-docs
 gen-changelog: ## Generate changelog with Kimo Code CLI.

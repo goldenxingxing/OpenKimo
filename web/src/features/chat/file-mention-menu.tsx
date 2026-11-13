@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { type RefObject, useEffect, useRef } from "react";
 import { useTranslation } from "react-i18next";
 import type { TFunction } from "i18next";
 import { cn } from "@/lib/utils";
@@ -72,7 +72,7 @@ const renderSection = ({
   label: string;
   options: MentionOption[];
   activeIndex: number;
-  activeItemRef: React.RefObject<HTMLButtonElement | null>;
+  activeItemRef: RefObject<HTMLButtonElement | null>;
   onHover: (index: number) => void;
   onSelect: (option: MentionOption) => void;
   t: TFunction;
@@ -225,7 +225,7 @@ export const FileMentionMenu = ({
               <div className="flex items-center justify-between text-xs">
                 <span>
                   {flatOptions.length
-                    ? t("mentions.filesReady", { count: flatOptions.length })
+                    ? t("mentions.filesReady", { count: workspaceFileCount })
                     : t("mentions.workspaceIndexed")}
                   {workspaceFileCount >= MAX_WORKSPACE_FILES
                     ? t("mentions.searchDeeperHint")

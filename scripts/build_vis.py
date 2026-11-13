@@ -52,7 +52,7 @@ def check_node_version() -> bool:
             )
             return False
     except Exception:
-        pass
+        return False
     return True
 
 

@@ -51,7 +51,7 @@ const SubagentAnimationPlugin: UIPlugin = {
     if (event.type !== "subagent:start") return null;
 
     const e = event as SubagentStartEvent;
-    const label = e.agentType ?? i18n.t("chat:plugins.subagentAnimation.agentFallback");
+    const label = e.agentType || i18n.t("chat:plugins.subagentAnimation.agentFallback");
     const color = getColor(e.agentType);
 
     return (

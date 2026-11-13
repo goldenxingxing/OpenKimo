@@ -23,7 +23,7 @@ class BroadcastQueue[T]:
 
     async def publish(self, item: T) -> None:
         """Publish an item to all subscription queues."""
-        await asyncio.gather(*(queue.put(item) for queue in self._queues))
+        await asyncio.gather(*(queue.put(item) for queue in self._queues), return_exceptions=True)
 
     def publish_nowait(self, item: T) -> None:
         """Publish an item to all subscription queues without waiting."""

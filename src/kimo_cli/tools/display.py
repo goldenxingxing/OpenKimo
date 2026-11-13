@@ -127,7 +127,7 @@ class WikiApprovalBlock(DisplayBlock):
                 raise ValueError("Wiki approval metadata cannot fit its byte budget")
             largest = max(
                 populated,
-                key=lambda name: len(visible[name][-1].encode("utf-8")),
+                key=lambda name: max(len(v.encode("utf-8")) for v in visible[name]),
             )
             visible[largest].pop()
             block = build()

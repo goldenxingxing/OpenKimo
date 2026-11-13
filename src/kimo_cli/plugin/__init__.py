@@ -48,9 +48,11 @@ def parse_plugin_json(path: Path) -> PluginSpec:
     """Parse a plugin.json file and return a validated PluginSpec."""
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError) as exc:
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
         raise PluginError(f"Failed to read {path}: {exc}") from exc
 
+    if not isinstance(data, dict):
+        raise PluginError(f"plugin.json must be an object in {path}")
     if "name" not in data:
         raise PluginError(f"Missing required field 'name' in {path}")
     if "version" not in data:
@@ -118,7 +120,9 @@ def _set_nested(obj: dict[str, Any], dotted_path: str, value: object) -> None:
     """
     keys = dotted_path.split(".")
     for key in keys[:-1]:
-        if key not in obj or not isinstance(obj[key], dict):
+        if key not in obj:
             obj[key] = {}
+        elif not isinstance(obj[key], dict):
+            raise PluginError(f"inject path '{dotted_path}' conflicts with a non-object at '{key}'")
         obj = obj[key]
     obj[keys[-1]] = value

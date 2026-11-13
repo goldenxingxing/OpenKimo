@@ -201,7 +201,7 @@ export function DualView({ sessionId, refreshKey = 0, agentScope }: DualViewProp
     const map = new Map<string, number>();
     wireEvents.forEach((evt, idx) => {
       const tcId = getWireToolCallId(evt);
-      if (tcId) map.set(tcId, idx);
+      if (tcId && !map.has(tcId)) map.set(tcId, idx);
     });
     return map;
   }, [wireEvents]);

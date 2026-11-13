@@ -2,6 +2,8 @@ import { useCallback, useEffect, useState } from "react";
 
 type Theme = "light" | "dark";
 
+const THEME_KEY = "vis-theme";
+
 function getSystemTheme(): Theme {
   return window.matchMedia("(prefers-color-scheme: dark)").matches
     ? "dark"
@@ -10,13 +12,13 @@ function getSystemTheme(): Theme {
 
 export function useTheme() {
   const [theme, setThemeState] = useState<Theme>(() => {
-    const saved = localStorage.getItem("vis-theme") as Theme | null;
+    const saved = localStorage.getItem(THEME_KEY) as Theme | null;
     return saved ?? getSystemTheme();
   });
 
   useEffect(() => {
     document.documentElement.classList.toggle("dark", theme === "dark");
-    localStorage.setItem("vis-theme", theme);
+    localStorage.setItem(THEME_KEY, theme);
   }, [theme]);
 
   const toggleTheme = useCallback(() => {

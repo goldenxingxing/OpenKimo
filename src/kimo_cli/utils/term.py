@@ -101,7 +101,8 @@ def _cursor_position_unix() -> tuple[int, int] | None:
     finally:
         with contextlib.suppress(OSError):
             os.set_blocking(fd, was_blocking)
-        termios.tcsetattr(fd, termios.TCSADRAIN, oldterm)
+        with contextlib.suppress(OSError):
+            termios.tcsetattr(fd, termios.TCSADRAIN, oldterm)
 
     return None
 

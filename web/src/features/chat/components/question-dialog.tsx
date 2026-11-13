@@ -92,7 +92,7 @@ export function QuestionDialog({
   }, [questionId]);
 
   const currentQuestion: QuestionItem | undefined =
-    questions[currentQuestionIndex];
+    questions[Math.min(currentQuestionIndex, questions.length - 1)];
   const options = currentQuestion?.options ?? [];
   const isMultiSelect = currentQuestion?.multi_select ?? false;
   const otherIndex = options.length;
@@ -352,6 +352,9 @@ export function QuestionDialog({
         const tag = el.tagName;
         if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return;
         if ((el as HTMLElement).isContentEditable) return;
+        // Let a focused button (e.g. Dismiss / Submit) keep its native
+        // Enter/Space activation instead of the window handler eating it.
+        if (tag === "BUTTON" && (event.key === "Enter" || event.key === " ")) return;
       }
 
       const totalOptions = options.length + 1;

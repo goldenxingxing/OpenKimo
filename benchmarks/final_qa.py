@@ -195,9 +195,12 @@ async def main() -> None:
     print(f"{'方案':<34}{'题数':>7}{'准确率':>10}")
     print("-" * 52)
     for label, rows in sorted(
-        judged.items(), key=lambda kv: -statistics.mean(1.0 if r.correct else 0.0 for r in kv[1])
+        judged.items(),
+        key=lambda kv: -(
+            statistics.mean(1.0 if r.correct else 0.0 for r in kv[1]) if kv[1] else 0.0
+        ),
     ):
-        acc = statistics.mean(1.0 if r.correct else 0.0 for r in rows) * 100
+        acc = (statistics.mean(1.0 if r.correct else 0.0 for r in rows) if rows else 0.0) * 100
         print(f"{label:<32}{len(rows):>7}{acc:>9.1f}%")
 
 

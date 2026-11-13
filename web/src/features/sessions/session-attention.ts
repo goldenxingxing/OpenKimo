@@ -106,7 +106,10 @@ export function applyActivity(
   } else {
     // Stopped. Only news if it had been running or waiting.
     const wasActive = before !== undefined && (RUNNING.has(before.state) || before.awaiting);
-    if (wasActive && id !== viewing && !pending.includes(id)) pending = [...pending, id];
+    // A crash straight out of idle is news too: there was no running turn to
+    // fade out, but the session still stopped with an error.
+    const crashed = activity.state === "error";
+    if ((wasActive || crashed) && id !== viewing && !pending.includes(id)) pending = [...pending, id];
   }
   return { last, pending };
 }

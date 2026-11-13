@@ -375,7 +375,7 @@ class ForegroundSubagentRunner:
                     approval_source.kind, approval_source.id
                 )
 
-        if final_response is None:
+        if not final_response:
             self._store.update_instance(agent_id, status="failed")
             output_writer.stage("failed: empty output")
             return ToolError(

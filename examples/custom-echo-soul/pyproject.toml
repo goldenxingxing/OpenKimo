@@ -1,7 +1,7 @@
 [project]
 name = "custom-echo-soul"
 version = "0.1.0"
-description = "Add your description here"
+description = "Example: a custom Echo Soul for the Kimo Code CLI Shell"
 readme = "README.md"
 requires-python = ">=3.13"
 dependencies = ["kimo-cli", "kosong"]

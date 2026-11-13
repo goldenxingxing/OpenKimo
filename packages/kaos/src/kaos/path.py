@@ -32,15 +32,23 @@ class KaosPath:
         return Path(str(self._path))
 
     def __lt__(self, other: KaosPath) -> bool:
+        if not isinstance(other, KaosPath):
+            return NotImplemented
         return self._path.__lt__(other._path)
 
     def __le__(self, other: KaosPath) -> bool:
+        if not isinstance(other, KaosPath):
+            return NotImplemented
         return self._path.__le__(other._path)
 
     def __gt__(self, other: KaosPath) -> bool:
+        if not isinstance(other, KaosPath):
+            return NotImplemented
         return self._path.__gt__(other._path)
 
     def __ge__(self, other: KaosPath) -> bool:
+        if not isinstance(other, KaosPath):
+            return NotImplemented
         return self._path.__ge__(other._path)
 
     def __eq__(self, other: Any) -> bool:

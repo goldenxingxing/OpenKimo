@@ -84,7 +84,8 @@ def main() -> None:
     print(f"{'指标':<14}{'召回率':>10}")
     print("-" * 26)
     for k in TOP_K:
-        print(f"{'recall@' + str(k):<14}{statistics.mean(per_k[k]) * 100:>9.1f}%")
+        mean = statistics.mean(per_k[k]) if per_k[k] else 0.0
+        print(f"{'recall@' + str(k):<14}{mean * 100:>9.1f}%")
 
 
 if __name__ == "__main__":

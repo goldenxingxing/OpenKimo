@@ -103,6 +103,7 @@ class WireServer:
         # soul running stuffs
         self._soul = soul
         self._cancel_event: asyncio.Event | None = None
+        self._replaying = False
         self._pending_requests: dict[str, Request] = {}
         """Maps JSON RPC message IDs to pending `Request`s."""
         self._client_supports_question: bool = False
@@ -123,7 +124,8 @@ class WireServer:
         logger.info("Starting Wire server on stdio")
 
         self._reader, self._writer = await acp.stdio_streams(limit=STDIO_BUFFER_LIMIT)
-        self._write_task = asyncio.create_task(self._write_loop())
+        write_task = asyncio.create_task(self._write_loop())
+        self._write_task = write_task
         if isinstance(self._soul, KimoSoul) and self._soul.runtime.root_wire_hub is not None:
             self._root_hub_queue = self._soul.runtime.root_wire_hub.subscribe()
             self._root_hub_task = asyncio.create_task(self._root_hub_loop())
@@ -134,7 +136,7 @@ class WireServer:
         remove_sigint = install_sigint_handler(loop, stop_event.set)
         read_task = asyncio.create_task(self._read_loop())
         stop_task = asyncio.create_task(stop_event.wait())
-        tasks: set[asyncio.Task[Any]] = {read_task, stop_task}
+        tasks: set[asyncio.Task[Any]] = {read_task, stop_task, write_task}
         pending = tasks
         try:
             done, pending = await asyncio.wait(
@@ -151,6 +153,8 @@ class WireServer:
                         await read_task
             elif read_task in done:
                 read_task.result()
+            elif write_task in done:
+                write_task.result()
         except KeyboardInterrupt:
             logger.info("Wire server interrupted, shutting down")
             if self._cancel_event is not None:
@@ -1109,6 +1113,7 @@ class WireServer:
         events = 0
         requests = 0
         try:
+            self._replaying = True
             if wire_file is None or not wire_file.path.exists():
                 return JSONRPCSuccessResponse(
                     id=msg.id,
@@ -1179,6 +1184,7 @@ class WireServer:
                 ),
             )
         finally:
+            self._replaying = False
             self._cancel_event = None
 
     async def _handle_cancel(
@@ -1194,6 +1200,8 @@ class WireServer:
 
         assert self._cancel_event is not None
         self._cancel_event.set()
+        if self._replaying:
+            return JSONRPCSuccessResponse(id=msg.id, result={})
         # Disarm auto-follow-up. Without this, the moment a background task
         # finishes after the user hit Stop, _background_followup_loop spawns a
         # brand-new autonomous turn (see _run_followup_turn) and the user sees

@@ -153,7 +153,7 @@ class _BtwModalDelegate:
         q_text.append(self._question)
         parts.append(q_text)
         # Separator between Q and A
-        parts.append(Text("─" * max(1, columns - 6), style="grey50"))
+        parts.append(Text("─" * max(1, columns - 4), style="grey50"))
 
         if self._is_loading:
             if self._streaming_text:

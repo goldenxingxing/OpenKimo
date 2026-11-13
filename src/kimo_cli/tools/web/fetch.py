@@ -90,8 +90,8 @@ def _resolve_safe_addresses(url: str) -> tuple[str, list[str]] | None:
             try:
                 addr = socket.getaddrinfo(host, parsed.port or 80)
             except socket.gaierror:
-                # Unresolvable names are left to the HTTP client, which reports a
-                # clearer connection error than a blanket "blocked".
+                # No addresses to pin: the caller reports a clear resolution error
+                # instead of letting the pinned resolver raise an internal OSError.
                 return host, []
             addresses: list[str] = []
             for _, _, _, _, sockaddr in addr:
@@ -200,6 +200,11 @@ class FetchURL(CallableTool2[Params]):
                 brief="Blocked URL",
             )
         host, addresses = resolved
+        if not addresses:
+            return builder.error(
+                f"Failed to resolve host '{host}'. The domain may be misspelled or unreachable.",
+                brief="Host resolution failed",
+            )
         resp_text: str | None = None
         try:
             # Fetching arbitrary web pages can take a while on large/slow sites.

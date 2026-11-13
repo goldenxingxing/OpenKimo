@@ -234,7 +234,7 @@ export function SessionFilesPanel({
 
       <ScrollArea className="min-h-0 flex-1 [&>[data-radix-scroll-area-viewport]>div]:!block">
         <div className="space-y-2 p-3">
-          {isLoading && entries.length === 0 ? (
+          {isLoading && visibleEntries.length === 0 ? (
             <div className="flex min-h-40 flex-col items-center justify-center gap-2 text-sm text-muted-foreground">
               <Loader2Icon className="size-5 animate-spin" />
               <span>{t("files.loading")}</span>

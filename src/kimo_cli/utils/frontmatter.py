@@ -64,6 +64,8 @@ def strip_frontmatter(text: str) -> str:
         return text
     for i in range(1, len(lines)):
         if lines[i].strip() == "---":
+            if not "".join(lines[1:i]).strip():
+                return text
             return "".join(lines[i + 1 :])
     # Malformed frontmatter with no closing ``---``; parse_frontmatter returns
     # None in that case, so we treat the whole input as body.

@@ -111,8 +111,9 @@ def render_mermaid_inline(
     """Render and inline-display a Mermaid diagram. Returns ``False`` on fallback."""
     from kimo_cli.ui.shell.image_preview import display_image
 
-    try:
-        png = render_mermaid_to_png(code, theme=theme)
-    except MermaidRenderError:
-        return False
-    return display_image(png, out=out)
+    with tempfile.TemporaryDirectory(prefix="kimo-mermaid-") as tmp:
+        try:
+            png = render_mermaid_to_png(code, out_path=Path(tmp) / "diagram.png", theme=theme)
+        except MermaidRenderError:
+            return False
+        return display_image(png, out=out)

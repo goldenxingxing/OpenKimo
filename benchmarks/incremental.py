@@ -162,15 +162,15 @@ async def classify(model, client, facts, notes):
                 client,
                 _VERDICT_KEPT.format(q=fact["q"], current=fact["current"], notes=note or "(空)"),
             )
-            return "KEPT" if re.match(r"\s*YES", reply or "", re.I) else "LOST"
+            return "KEPT" if re.search(r"\bYES\b", reply or "", re.I) else "LOST"
         reply = await model.ask(
             client,
             _VERDICT.format(
                 q=fact["q"], current=fact["current"], stale=fact["stale"], notes=note or "(空)"
             ),
         )
-        match = re.search(r"\b(CURRENT|STALE|BOTH|NEITHER)\b", reply or "", re.I)
-        return match.group(1).upper() if match else "NEITHER"
+        matches = re.findall(r"\b(CURRENT|STALE|BOTH|NEITHER)\b", reply or "", re.I)
+        return matches[-1].upper() if matches else "NEITHER"
 
     return list(await asyncio.gather(*(one(f, n) for f, n in zip(facts, notes, strict=True))))
 

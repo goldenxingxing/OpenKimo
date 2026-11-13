@@ -66,6 +66,8 @@ def _migrate_legacy_metadata(session_dir: Path, state: SessionState) -> str:
         return "skip"
     try:
         data = json.loads(metadata_file.read_text(encoding="utf-8"))
+        if not isinstance(data, dict):
+            return "skip"
     except Exception:
         # Leave the file intact for future retry — it may be temporarily unreadable
         return "skip"
@@ -110,7 +112,7 @@ def load_session_state(session_dir: Path) -> SessionState:
         try:
             with open(state_file, encoding="utf-8") as f:
                 state = SessionState.model_validate(json.load(f))
-        except (json.JSONDecodeError, ValidationError, UnicodeDecodeError) as e:
+        except (json.JSONDecodeError, ValidationError, UnicodeDecodeError, OSError) as e:
             logger.warning("Corrupted state file, using defaults: {path}", path=state_file)
             from kimo_cli.telemetry import track
 

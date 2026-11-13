@@ -156,6 +156,8 @@ class AgentTool(CallableTool2[Params]):
                         await task
                     raise
                 if not done:
+                    if task.done():
+                        return await task
                     task.cancel()
                     with contextlib.suppress(asyncio.CancelledError):
                         await task
@@ -215,6 +217,13 @@ class AgentTool(CallableTool2[Params]):
 
                 agent_id = f"a{uuid.uuid4().hex[:8]}"
                 record = None
+
+            bg_type_def = self._runtime.labor_market.require_builtin_type(actual_type)
+            if not bg_type_def.supports_background:
+                return ToolError(
+                    message=f"Subagent type `{actual_type}` does not support background execution.",
+                    brief="Background not supported",
+                )
 
             created_instance = False
             if not params.resume:

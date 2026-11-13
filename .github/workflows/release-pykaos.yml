@@ -5,6 +5,10 @@ on:
     tags:
       - "pykaos-*"
 
+concurrency:
+  group: release-pykaos-${{ github.ref }}
+  cancel-in-progress: false
+
 permissions:
   contents: read
 
@@ -49,6 +53,7 @@ jobs:
         uses: astral-sh/setup-uv@v1
         with:
           version: "0.8.5"
+          enable-cache: true
 
       - name: Build distributions
         run: make build-pykaos

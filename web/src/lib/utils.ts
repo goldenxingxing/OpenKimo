@@ -20,10 +20,13 @@ export function shortenTitle(
   // Normalize: collapse whitespace and trim
   const normalized = title.replace(/\s+/g, " ").trim();
 
-  if (normalized.length <= maxLength) {
+  // Work in Unicode code points so an astral character (e.g. an emoji) is
+  // never split into a lone surrogate by slice().
+  const chars = Array.from(normalized);
+  if (chars.length <= maxLength) {
     return normalized;
   }
 
   // Shorten with ellipsis
-  return `${normalized.slice(0, maxLength - 1)}…`;
+  return `${chars.slice(0, maxLength - 1).join("")}…`;
 }

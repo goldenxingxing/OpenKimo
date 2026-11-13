@@ -76,6 +76,14 @@ function App() {
   // biome-ignore lint/performance/useTopLevelRegex: inline regex is fine here; this hook runs rarely
   const isAdminRoute = window.location.pathname.replace(/\/$/, "") === "/admin";
 
+  // Keep the redirect out of the render phase: a side effect during render can
+  // fire more than once under StrictMode.
+  useEffect(() => {
+    if (isAdminRoute && currentUser && !isAdmin) {
+      window.location.replace("/");
+    }
+  }, [isAdminRoute, currentUser, isAdmin]);
+
   // Handle logout
   const handleLogout = useCallback(async () => {
     try {
@@ -175,10 +183,11 @@ function App() {
       setShowCreateDialog(true);
     } else if (action === "create-in-dir") {
       const workDir = params.get("workDir");
-      if (!workDir) return; // invalid params, ignore silently
-      createSession(workDir).catch(() => {
-        // Errors are already handled globally via sessionsError → toast
-      });
+      if (workDir) {
+        createSession(workDir).catch(() => {
+          // Errors are already handled globally via sessionsError → toast
+        });
+      }
     } else {
       return;
     }
@@ -273,7 +282,6 @@ function App() {
 
     const urlSessionId = getSessionIdFromUrl();
     if (urlSessionId) {
-      console.log("[App] Eagerly restoring session from URL:", urlSessionId);
       selectSession(urlSessionId);
     }
     hasRestoredFromUrlRef.current = true;
@@ -293,7 +301,6 @@ function App() {
       sessions.some((s) => s.sessionId === selectedSessionId) ||
       archivedSessions.some((s) => s.sessionId === selectedSessionId);
     if (!sessionExists) {
-      console.log("[App] Session from URL not found, clearing selection");
       updateUrlWithSession(null);
       selectSession("");
     }
@@ -332,7 +339,6 @@ function App() {
       const reason = status.reason ?? "";
 
       if (reason === "config_update") {
-        console.log("[App] Config update detected, refreshing global config");
         window.dispatchEvent(new Event("kimo:config-update"));
       }
 
@@ -340,10 +346,6 @@ function App() {
         return;
       }
 
-      console.log(
-        "[App] Prompt complete, refreshing session info:",
-        status.sessionId,
-      );
       refreshSession(status.sessionId);
     },
     [applySessionStatus, refreshSession],
@@ -603,8 +605,7 @@ function App() {
 
   if (isAdminRoute) {
     if (!isAdmin) {
-      // Non-admin users attempting to access /admin are redirected to home.
-      window.location.replace("/");
+      // The redirect runs in the effect above; render nothing in the meantime.
       return null;
     }
     return (

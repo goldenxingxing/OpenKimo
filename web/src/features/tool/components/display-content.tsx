@@ -23,6 +23,8 @@ export type DisplayContentProps = ComponentProps<"div"> & {
   display: DisplayItem[];
 };
 
+const MAX_COLLAPSED_LINES = 5;
+
 type MCPResourceData = {
   type: "resource";
   resource: {
@@ -563,7 +565,6 @@ const DiffContent = ({ data }: { data: DiffDisplayData }) => {
     let added = 0;
     let removed = 0;
     let total = 0;
-    const maxCollapsedLines = 5;
 
     // Count lines
     for (const hunk of file.hunks) {
@@ -585,9 +586,9 @@ const DiffContent = ({ data }: { data: DiffDisplayData }) => {
 
     for (const hunk of file.hunks) {
       if (hunk.type !== "hunk") continue;
-      if (lineCount >= maxCollapsedLines) break;
+      if (lineCount >= MAX_COLLAPSED_LINES) break;
 
-      const remainingLines = maxCollapsedLines - lineCount;
+      const remainingLines = MAX_COLLAPSED_LINES - lineCount;
       const linesToTake = Math.min(hunk.lines.length, remainingLines);
 
       if (linesToTake > 0) {
@@ -602,8 +603,7 @@ const DiffContent = ({ data }: { data: DiffDisplayData }) => {
     return { addedLines: added, removedLines: removed, totalLines: total, truncatedHunks: truncated };
   }, [file]);
 
-  const maxCollapsedLines = 5;
-  const hasMoreLines = totalLines > maxCollapsedLines;
+  const hasMoreLines = totalLines > MAX_COLLAPSED_LINES;
   const displayHunks = isExpanded ? file?.hunks ?? [] : truncatedHunks;
 
   if (isLoading) {
@@ -698,7 +698,7 @@ const DiffContent = ({ data }: { data: DiffDisplayData }) => {
           className="w-full border-t border-border/40 bg-muted/20 px-3 py-1.5 text-center text-xs text-muted-foreground cursor-pointer hover:bg-muted/40"
           onClick={() => setIsExpanded(true)}
         >
-          {t("display.showMoreLines", { count: totalLines - maxCollapsedLines })}
+          {t("display.showMoreLines", { count: totalLines - MAX_COLLAPSED_LINES })}
         </button>
       )}
     </div>
@@ -862,8 +862,13 @@ function isImageSearchByImageResult(
     return false;
   }
 
-  const first = data[0];
-  return typeof first === "object" && first !== null && "imageUrl" in first;
+  const first = data[0] as Record<string, unknown> | null;
+  return (
+    typeof first === "object" &&
+    first !== null &&
+    "link" in first &&
+    "title" in first
+  );
 }
 
 /**
@@ -948,7 +953,8 @@ const TextContent = ({ content }: { content: MCPTextData }) => {
  */
 const ResourceContent = ({ content }: { content: MCPResourceData }) => {
   const { t } = useTranslation("tools");
-  const { uri, mimeType, blob, text } = content.resource;
+  const { uri, mimeType, blob, text } =
+    content.resource ?? ({} as MCPResourceData["resource"]);
 
   // Handle image resources
   if (mimeType?.startsWith("image/")) {

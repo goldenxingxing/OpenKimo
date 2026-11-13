@@ -48,7 +48,7 @@ def status(
     if library.experience_file().exists():
         typer.echo(f"Experience index: {library.experience_file()}")
 
-    records = library.iter_session_records(library.get_share_dir() / "sessions")
+    records = library.iter_all_session_records()
     groups = library.task_groups(records)
     if not groups:
         typer.echo("\nNo replayable task evidence yet (records without a task prompt are skipped).")
@@ -100,7 +100,7 @@ def verify(
         evidence_path = asyncio.run(
             verify_mod.verify(config, proposal, task_pattern=task_pattern, limit=limit)
         )
-    except (RuntimeError, FileNotFoundError) as e:
+    except (RuntimeError, FileNotFoundError, ValueError) as e:
         typer.echo(f"Verify failed: {e}", err=True)
         raise typer.Exit(code=1) from None
     evidence = json.loads(evidence_path.read_text(encoding="utf-8"))
@@ -134,7 +134,7 @@ def adopt(
         raise typer.Exit(code=2)
     try:
         entry = library.adopt_proposal(proposal, evidence_path if evidence_path.exists() else None)
-    except (FileNotFoundError, FileExistsError) as e:
+    except (FileNotFoundError, FileExistsError, ValueError) as e:
         typer.echo(f"Adopt failed: {e}", err=True)
         raise typer.Exit(code=1) from None
     typer.echo(f"Adopted: {entry.path}")

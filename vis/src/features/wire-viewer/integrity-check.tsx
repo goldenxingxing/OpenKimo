@@ -1,5 +1,5 @@
 import { type WireEvent } from "@/lib/api";
-import { ShieldCheck, ShieldAlert, AlertCircle } from "lucide-react";
+import { ShieldCheck, ShieldAlert } from "lucide-react";
 
 // ---------- Data structures ----------
 
@@ -68,27 +68,33 @@ export function computeIntegrity(events: WireEvent[]): IntegrityResult {
   }
 
   // --- ToolCall / ToolResult by id ---
-  const toolCallMap = new Map<string, WireEvent>();
+  const toolCallMap = new Map<string, WireEvent[]>();
   for (const ev of events) {
     if (ev.type === "ToolCall") {
       totalPairable++;
       const fn = ev.payload.function as Record<string, unknown> | undefined;
       const id = (ev.payload.id ?? fn?.id ?? "") as string;
       if (id) {
-        toolCallMap.set(id, ev);
+        const calls = toolCallMap.get(id) ?? [];
+        calls.push(ev);
+        toolCallMap.set(id, calls);
       }
     } else if (ev.type === "ToolResult") {
       totalPairable++;
       const callId = ev.payload.tool_call_id as string | undefined;
       if (callId && toolCallMap.has(callId)) {
-        toolCallMap.delete(callId);
+        const calls = toolCallMap.get(callId)!;
+        calls.pop();
+        if (calls.length === 0) toolCallMap.delete(callId);
       } else {
         orphans.push({ event: ev, reason: `ToolResult references unknown tool_call_id: ${callId ?? "(none)"}` });
       }
     }
   }
-  for (const ev of toolCallMap.values()) {
-    orphans.push({ event: ev, reason: "ToolCall without matching ToolResult" });
+  for (const calls of toolCallMap.values()) {
+    for (const ev of calls) {
+      orphans.push({ event: ev, reason: "ToolCall without matching ToolResult" });
+    }
   }
 
   // --- ApprovalRequest / ApprovalResponse by id ---

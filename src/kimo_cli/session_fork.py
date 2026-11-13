@@ -311,7 +311,7 @@ def _copy_referenced_videos(
         for match in re.finditer(r"uploads/([^\"\\<>\s]+)", line):
             fname = match.group(1)
             mime, _ = mimetypes.guess_type(fname)
-            if mime and mime.startswith("video/"):
+            if mime and mime.startswith("video/") and "/" not in fname and ".." not in fname:
                 referenced_videos.add(fname)
 
     files_to_copy = [

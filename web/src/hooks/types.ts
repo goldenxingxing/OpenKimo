@@ -100,10 +100,9 @@ export type LiveMessage = {
     /** Tool call ID for tracking */
     toolCallId?: string;
     /**
-     * Tool result fields (aligned with backend ToolReturnValue)
+     * The output content returned by the tool (for model).
      * @see kosong.tooling.ToolReturnValue
      */
-    /** The output content returned by the tool (for model) */
     output?: string;
     /** An explanatory message to be given to the model */
     message?: string;

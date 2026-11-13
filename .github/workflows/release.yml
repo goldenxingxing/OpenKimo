@@ -63,7 +63,7 @@ jobs:
     needs: create-release
     runs-on: ubuntu-latest
     permissions:
-      contents: write   # create GitHub Release
+      contents: read    # the release is created by the create-release job
       packages: write   # push to ghcr.io
 
     steps:
@@ -131,7 +131,7 @@ jobs:
     needs: create-release
     runs-on: macos-latest   # ARM64 (M-series) runner
     permissions:
-      contents: write       # upload release assets
+      contents: read        # assets go to the releases repo via RELEASES_TOKEN
 
     steps:
       - uses: actions/checkout@v5

@@ -212,6 +212,9 @@ function buildFormFields(state: McpFormState): BuildResult {
       if (Array.isArray(loaded.config.args)) config.args = loaded.config.args;
     } else {
       const [head, ...inlineArgs] = splitCommandLine(command);
+      if (!head) {
+        return { ok: false, error: { code: "commandRequired" } };
+      }
       const args = [...inlineArgs, ...splitCommandLine(state.args)];
       config.command = head;
       if (args.length > 0) config.args = args;

@@ -9,7 +9,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request, status
 from pydantic import BaseModel, Field
 
 from kimo_cli import logger
-from kimo_cli.config import LLMModel, get_config_file, load_config, save_config
+from kimo_cli.config import LLMModel, _write_text_atomic, get_config_file, load_config, save_config
 from kimo_cli.llm import (
     ALL_MODEL_CAPABILITIES,
     ModelCapability,
@@ -187,7 +187,10 @@ def _build_global_config() -> GlobalConfig:
         openai_key = os.environ.get("OPENAI_API_KEY")
         if openai_key:
             model_name = os.environ.get("OPENAI_MODEL_NAME", "gpt-4o")
-            max_ctx = int(os.environ.get("OPENAI_MODEL_MAX_CONTEXT_SIZE", "128000"))
+            try:
+                max_ctx = int(os.environ.get("OPENAI_MODEL_MAX_CONTEXT_SIZE", "128000"))
+            except (TypeError, ValueError):
+                max_ctx = 128000
             if model_name not in config.models:
                 config.models[model_name] = LLMModel(
                     provider="openai",
@@ -207,7 +210,10 @@ def _build_global_config() -> GlobalConfig:
         anthropic_key = os.environ.get("ANTHROPIC_API_KEY")
         if anthropic_key:
             model_name = os.environ.get("ANTHROPIC_MODEL_NAME", "claude-3-5-sonnet-20241022")
-            max_ctx = int(os.environ.get("ANTHROPIC_MODEL_MAX_CONTEXT_SIZE", "200000"))
+            try:
+                max_ctx = int(os.environ.get("ANTHROPIC_MODEL_MAX_CONTEXT_SIZE", "200000"))
+            except (TypeError, ValueError):
+                max_ctx = 200000
             if model_name not in config.models:
                 config.models[model_name] = LLMModel(
                     provider="anthropic",
@@ -456,10 +462,12 @@ async def update_config_toml(
         # Validate the config first
         load_config_from_string(request.content)
 
-        # Write to file
+        # Write to file. Reuse save_config's atomic writer: a plain write_text
+        # truncates the file first, so a disk-full error would leave a
+        # half-written config.toml behind.
         config_file = get_config_file()
         config_file.parent.mkdir(parents=True, exist_ok=True)
-        config_file.write_text(request.content, encoding="utf-8")
+        _write_text_atomic(config_file, request.content)
 
         # Config only reaches a session worker when it (re)starts; restart
         # idle workers so provider edits apply to live sessions instead of

@@ -104,6 +104,13 @@ def save_mcp_text(content: str) -> None:
             stream.flush()
             os.fsync(stream.fileno())
         os.replace(temp_name, mcp_file)
+        if os.name != "nt":
+            with contextlib.suppress(OSError):
+                dir_fd = os.open(mcp_file.parent, os.O_RDONLY)
+                try:
+                    os.fsync(dir_fd)
+                finally:
+                    os.close(dir_fd)
     finally:
         # Gone already on the success path, where os.replace moved it.
         with contextlib.suppress(FileNotFoundError):

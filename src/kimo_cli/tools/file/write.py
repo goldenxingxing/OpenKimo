@@ -1,7 +1,10 @@
+import stat
 from collections.abc import Callable
 from pathlib import Path
 from typing import Literal, override
 
+from kaos import get_current_kaos
+from kaos.local import LocalKaos
 from kaos.path import KaosPath
 from kosong.tooling import CallableTool2, ToolError, ToolReturnValue
 from pydantic import BaseModel, Field
@@ -22,6 +25,23 @@ from kimo_cli.utils.logging import logger
 from kimo_cli.utils.path import is_within_workspace, kaos_path_from_user_input
 
 _BASE_DESCRIPTION = load_desc(Path(__file__).parent / "write.md")
+
+
+def _is_plain_single_link(path: KaosPath) -> bool:
+    """Whether ``path`` is still a regular, singly-linked local file.
+
+    Used to tell a concurrent *edit* (same inode, new bytes) apart from a link
+    swap. A swap must be classified by the no-follow/inode boundary in
+    ``write_verified_text`` so the caller gets the real reason; on remote
+    filesystems the question is moot and the caller keeps the generic message.
+    """
+    if not isinstance(get_current_kaos(), LocalKaos):
+        return True
+    try:
+        st = path.unsafe_to_local_path().lstat()
+    except OSError:
+        return True
+    return stat.S_ISREG(st.st_mode) and st.st_nlink == 1
 
 
 class Params(BaseModel):
@@ -161,6 +181,23 @@ class WriteFile(CallableTool2[Params]):
                 )
                 if not result:
                     return result.rejection_error()
+
+            # Approval can pause for an arbitrary length of time, so revalidate
+            # the target's identity against the managed-Wiki boundary before
+            # looking at its contents: containment must win over the clobber
+            # check, otherwise a swap to a Wiki file reports the generic
+            # "file changed" error instead of the actionable one.
+            if err := reject_managed_wiki_target(p, self._runtime):
+                return err
+
+            # Re-check the snapshot taken before approval: refuse to clobber
+            # edits made while the approval dialog was open.
+            current_text = await p.read_text(errors="replace") if await p.exists() else None
+            if current_text != old_text and _is_plain_single_link(p):
+                return ToolError(
+                    message="File changed after approval; please retry the write.",
+                    brief="File changed",
+                )
 
             # Final mutation revalidates the post-approval target through a
             # no-follow file descriptor; the earlier path check is not enough.

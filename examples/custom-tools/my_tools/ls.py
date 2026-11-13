@@ -1,3 +1,5 @@
+import asyncio
+
 from kosong.tooling import CallableTool2, ToolError, ToolOk, ToolReturnValue
 from pydantic import BaseModel, Field
 
@@ -15,7 +17,7 @@ class Ls(CallableTool2):
         import os
 
         try:
-            files = os.listdir(params.directory)
+            files = await asyncio.to_thread(os.listdir, params.directory)
             output = "\n".join(files)
             return ToolOk(output=output)
         except Exception as e:

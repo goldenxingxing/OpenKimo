@@ -24,6 +24,9 @@ const WINDOWS_DRIVE_REGEX = /^[A-Za-z]:[\\/]/;
 /** `uploads/...` or `uploads\...` — the legacy relative form. */
 const RELATIVE_UPLOADS_REGEX = /^uploads[\\/]/;
 
+/** An absolute path only counts as an upload if it lands in an uploads dir. */
+const ABSOLUTE_UPLOADS_REGEX = /[\\/]uploads[\\/][^\\/]+$/;
+
 /**
  * Match `<image path="...">` / `<video path="...">` and pull out the session
  * id and filename, with either separator around the `uploads` segment.
@@ -60,9 +63,10 @@ export function isUploadedFilePath(candidate: string): boolean {
     return false;
   }
   return (
-    candidate.startsWith("/") ||
-    candidate.startsWith("\\\\") || // UNC share
-    WINDOWS_DRIVE_REGEX.test(candidate) ||
+    ((candidate.startsWith("/") ||
+      candidate.startsWith("\\\\") || // UNC share
+      WINDOWS_DRIVE_REGEX.test(candidate)) &&
+      ABSOLUTE_UPLOADS_REGEX.test(candidate)) ||
     RELATIVE_UPLOADS_REGEX.test(candidate)
   );
 }

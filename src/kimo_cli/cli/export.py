@@ -93,7 +93,7 @@ def _last_user_message_timestamp(session_dir: Path) -> float | None:
 
     last_turn_begin: float | None = None
     try:
-        with wire_file.open(encoding="utf-8") as f:
+        with wire_file.open(encoding="utf-8", errors="replace") as f:
             for line in f:
                 line = line.strip()
                 if not line:
@@ -199,7 +199,7 @@ def _collect_recent_log_files(session_dir: Path) -> list[Path]:
     total_size = 0
     for mtime, size, path in candidates:
         if total_size + size > _MAX_LOG_BYTES:
-            break
+            continue
         result.append((mtime, path))
         total_size += size
 

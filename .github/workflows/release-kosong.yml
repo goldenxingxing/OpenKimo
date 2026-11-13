@@ -5,6 +5,10 @@ on:
     tags:
       - "kosong-*"
 
+concurrency:
+  group: release-kosong-${{ github.ref }}
+  cancel-in-progress: false
+
 permissions:
   contents: read
 

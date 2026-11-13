@@ -418,6 +418,27 @@ function buildTimeline(events: WireEvent[]): BuildTimelineResult {
     });
   }
 
+  // Close unclosed tool calls (ToolCall without a matching ToolResult)
+  for (const [tcId, call] of openToolCalls) {
+    bars.push({
+      label: call.name,
+      eventIndex: call.eventIndex,
+      startSec: call.startTime,
+      endSec: lastT,
+      durationSec: lastT - call.startTime,
+      depth: 2,
+      color: "purple",
+      striped: true,
+      tooltipData: {
+        kind: "tool",
+        toolName: call.name,
+        toolCallId: tcId,
+        hasError: false,
+        argsSummary: call.argsSummary,
+      },
+    });
+  }
+
   // ── Build sub-agent bars ──
   const SUBAGENT_COLORS: Record<string, BarColor> = {
     coder: "violet",
@@ -455,7 +476,7 @@ function buildTimeline(events: WireEvent[]): BuildTimelineResult {
   const gaps: GapIndicator[] = [];
   if (totalSec > 0) {
     const toolBars = bars
-      .filter((b) => b.depth === 2)
+      .filter((b) => b.depth >= 2)
       .sort((a, b) => a.startSec - b.startSec);
     for (let i = 1; i < toolBars.length; i++) {
       const prev = toolBars[i - 1];
@@ -665,13 +686,15 @@ function TokenSparkline({
   const H = 24;
   const PAD_Y = 2;
 
+  const visible = tokenData.filter(
+    (d) => d.timeSec >= rangeStart && d.timeSec <= rangeStart + rangeDuration,
+  );
   const maxTokens = Math.max(
-    ...tokenData.map((d) => d.inputTokens + d.outputTokens),
+    ...visible.map((d) => d.inputTokens + d.outputTokens),
     1,
   );
 
-  const points = tokenData
-    .filter((d) => d.timeSec >= rangeStart && d.timeSec <= rangeStart + rangeDuration)
+  const points = visible
     .map((d) => {
       const x = ((d.timeSec - rangeStart) / rangeDuration) * W;
       const y =
@@ -968,7 +991,7 @@ export function TimelineView({ events, onScrollToIndex }: TimelineViewProps) {
             <Legend color="purple" label="Tool" />
             <Legend color="cyan" label="Generation" />
             <Legend color="amber" label="Approval" />
-            {result.bars.some((b) => b.color === "indigo") && (
+            {result.bars.some((b) => b.depth === 3) && (
               <Legend color="indigo" label="Sub-agent" />
             )}
           </div>
@@ -1032,8 +1055,8 @@ export function TimelineView({ events, onScrollToIndex }: TimelineViewProps) {
                   <div
                     className="absolute top-0 bottom-0 bg-orange-500/8 border-l border-dashed border-orange-500/40 z-10 cursor-pointer hover:bg-orange-500/15 transition-colors"
                     style={{
-                      left: `calc(${LABEL_W}px + (100% - ${LABEL_W}px - 72px) * ${leftPct / 100})`,
-                      width: `calc((100% - ${LABEL_W}px - 72px) * ${widthPct / 100})`,
+                      left: `calc(${LABEL_W + 8}px + (100% - ${LABEL_W}px - 80px) * ${leftPct / 100})`,
+                      width: `calc((100% - ${LABEL_W}px - 80px) * ${widthPct / 100})`,
                     }}
                     onClick={() => onScrollToIndex(c.eventIndex)}
                   />
@@ -1064,7 +1087,7 @@ export function TimelineView({ events, onScrollToIndex }: TimelineViewProps) {
                 key={`grid-${tick.sec}`}
                 className="absolute top-0 bottom-0 pointer-events-none z-0"
                 style={{
-                  left: `calc(${LABEL_W}px + (100% - ${LABEL_W}px - 72px) * ${leftPct / 100})`,
+                  left: `calc(${LABEL_W + 8}px + (100% - ${LABEL_W}px - 80px) * ${leftPct / 100})`,
                 }}
               >
                 <div className="w-px h-full bg-muted-foreground/5" />
@@ -1077,8 +1100,8 @@ export function TimelineView({ events, onScrollToIndex }: TimelineViewProps) {
             <div
               className="absolute top-0 bottom-0 bg-blue-500/10 border border-blue-500/30 rounded-sm pointer-events-none z-20"
               style={{
-                left: `calc(${LABEL_W}px + (100% - ${LABEL_W}px - 72px) * ${dragLeftPct / 100})`,
-                width: `calc((100% - ${LABEL_W}px - 72px) * ${dragWidthPct / 100})`,
+                left: `calc(${LABEL_W + 8}px + (100% - ${LABEL_W}px - 80px) * ${dragLeftPct / 100})`,
+                width: `calc((100% - ${LABEL_W}px - 80px) * ${dragWidthPct / 100})`,
               }}
             />
           )}

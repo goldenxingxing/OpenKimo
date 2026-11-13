@@ -162,23 +162,26 @@ def _bfs_by_basename(root: Path, name: str) -> Path | None:
     visited = 0
     while queue:
         current, depth = queue.popleft()
+        subdirs: list[Path] = []
         try:
-            entries = list(os.scandir(current))
+            # Iterate entry by entry instead of materialising the whole
+            # directory: one huge directory must not exhaust memory before
+            # the visited budget can stop the walk.
+            with os.scandir(current) as entries:
+                for entry in entries:
+                    visited += 1
+                    if visited > _MAX_VISITED_ENTRIES:
+                        return None
+                    if entry.name == name:
+                        return Path(entry.path)
+                    if (
+                        entry.is_dir(follow_symlinks=False)
+                        and depth < _MAX_SEARCH_DEPTH
+                        and entry.name not in _SKIP_DIR_NAMES
+                    ):
+                        subdirs.append(Path(entry.path))
         except OSError:
             continue
-        subdirs: list[Path] = []
-        for entry in entries:
-            visited += 1
-            if visited > _MAX_VISITED_ENTRIES:
-                return None
-            if entry.name == name:
-                return Path(entry.path)
-            if (
-                entry.is_dir(follow_symlinks=False)
-                and depth < _MAX_SEARCH_DEPTH
-                and entry.name not in _SKIP_DIR_NAMES
-            ):
-                subdirs.append(Path(entry.path))
         # Preferred dirs first (then alphabetical), so the agent's own output
         # tree is exhausted before generic branches of the workspace.
         subdirs.sort(key=lambda p: (p.name not in _PREFERRED_DIR_NAMES, p.name))
@@ -268,10 +271,13 @@ def _resolve_path(path: str) -> Path:
     resolved = Path(path).expanduser()
     try:
         resolved = resolved.resolve()
-    except FileNotFoundError:
+    except (OSError, RuntimeError, ValueError):
+        # resolve() is non-strict, so FileNotFoundError is not what a bad path
+        # raises: symlink loops (RuntimeError), embedded NUL (ValueError)
+        # and permission errors (OSError) all need the same 400.
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Path does not exist: {path}",
+            detail=f"Invalid path: {path}",
         ) from None
 
     if not resolved.exists():
@@ -497,7 +503,12 @@ async def resolve_path(request: ResolvePathRequest) -> ResolvePathResponse:
 
     if not request.work_dir:
         return ResolvePathResponse(found=False)
-    work_root = Path(request.work_dir).expanduser().resolve()
+    try:
+        work_root = Path(request.work_dir).expanduser().resolve()
+    except (OSError, RuntimeError, ValueError):
+        # A symlink loop or an unreadable component must degrade to "not
+        # found", not escape as a 500.
+        return ResolvePathResponse(found=False)
     if not work_root.is_dir():
         return ResolvePathResponse(found=False)
 

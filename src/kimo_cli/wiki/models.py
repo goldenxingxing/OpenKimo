@@ -80,6 +80,7 @@ def validate_relative_source_path(value: str) -> str:
         or windows_path.drive
         or windows_path.is_absolute()
         or value.startswith(("//", "\\\\"))
+        or not path.parts
         or "." in path.parts
         or ".." in path.parts
         or path.as_posix() != value

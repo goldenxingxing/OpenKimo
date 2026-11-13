@@ -220,6 +220,9 @@ async def main() -> None:
             noise_rows += 1
 
     total = len(turns)
+    if not total:
+        print("没有真实用户发言，跳过统计")
+        return
     has_n = counts["库里有相关的"]
     print(f"{total} 条真实用户发言，每轮取 top-{TOP_K}\n")
     print(f"  ① 库里存在相关记忆          : {has_n:>4} / {total}  ({has_n / total * 100:.1f}%)")

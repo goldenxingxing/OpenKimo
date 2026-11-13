@@ -93,7 +93,7 @@ _STOP = {
 
 
 def keywords(question: str) -> list[str]:
-    words = re.findall(r"[A-Za-z][A-Za-z'-]+", question)
+    words = re.findall(r"[A-Za-z][A-Za-z-]+", question)
     return [w for w in words if w.casefold() not in _STOP and len(w) > 2]
 
 
@@ -158,7 +158,10 @@ def main() -> None:
     print(f"{'查询方式':<16}" + "".join(f"{'recall@' + str(k):>12}" for k in TOP_K))
     print("-" * 52)
     for style in styles:
-        row = "".join(f"{statistics.mean(scores[style][k]) * 100:>11.1f}%" for k in TOP_K)
+        row = "".join(
+            f"{(statistics.mean(scores[style][k]) * 100 if scores[style][k] else 0.0):>11.1f}%"
+            for k in TOP_K
+        )
         print(f"{style:<16}{row}")
 
 

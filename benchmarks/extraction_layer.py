@@ -51,8 +51,6 @@ PER_SAMPLE = int(os.environ.get("BENCH_PER_SAMPLE", "60"))
 WINDOW = 20
 TOP_K = 8
 
-_PRODUCTION = None  # filled from the shipped prompt
-
 
 def shipped_prompt() -> str:
     from carryover.extract import EXTRACTION_PROMPT

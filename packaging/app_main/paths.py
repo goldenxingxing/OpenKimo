@@ -197,7 +197,7 @@ def load_brand_json() -> dict:
     if p.brand_json.exists():
         try:
             return json.loads(p.brand_json.read_text(encoding="utf-8"))
-        except json.JSONDecodeError:
+        except (OSError, UnicodeDecodeError, json.JSONDecodeError):
             pass
     return {}
 

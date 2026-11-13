@@ -1348,9 +1348,7 @@ def _build_llm_section(
         or values.get("LLM_PROVIDER")
         or ""
     ).strip()
-    default_original = explicit_default or (
-        entries[0]["name"] if entries else ""
-    ).strip()
+    default_original = explicit_default or str(entries[0]["name"] if entries else "").strip()
     default_value = default_original.lower()
     controller.initial_default = default_original
 

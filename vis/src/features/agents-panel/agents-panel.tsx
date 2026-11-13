@@ -79,12 +79,14 @@ export function AgentsPanel({
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
+    let cancelled = false;
     setLoading(true);
     setError(null);
     getSubagents(sessionId, refreshKey > 0)
-      .then(setAgents)
-      .catch((err) => setError(err.message))
-      .finally(() => setLoading(false));
+      .then((res) => { if (!cancelled) setAgents(res); })
+      .catch((err) => { if (!cancelled) setError(err instanceof Error ? err.message : String(err)); })
+      .finally(() => { if (!cancelled) setLoading(false); });
+    return () => { cancelled = true; };
   }, [sessionId, refreshKey]);
 
   const grouped = useMemo(() => {
@@ -174,7 +176,7 @@ export function AgentsPanel({
         {Array.from(grouped.entries()).map(([type, list]) => (
           <div key={type}>
             <div className="flex items-center gap-2 px-1 py-1.5">
-              <span className={`text-[10px] font-semibold uppercase tracking-wider ${getTypeColor(type).split(" ")[1]}`}>
+              <span className={`text-[10px] font-semibold uppercase tracking-wider ${getTypeColor(type).split(" ").filter((c) => c.startsWith("text-") || c.startsWith("dark:text-")).join(" ")}`}>
                 {type}
               </span>
               <div className="h-px flex-1 bg-border/50" />

@@ -146,6 +146,7 @@ class ContextRetrieve(CallableTool2[Params]):
                 try:
                     msg = Message.model_validate(json.loads(line, strict=False))
                 except (ValidationError, json.JSONDecodeError):
+                    out.append(f"## Message {i}\n[unreadable archive line]\n")
                     continue
                 out.append(f"## Message {i}\nRole: {msg.role}\nContent:\n")
                 for part in msg.content:

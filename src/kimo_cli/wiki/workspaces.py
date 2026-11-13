@@ -127,7 +127,7 @@ class WorkspaceRegistry:
             return None
         try:
             candidate = (root / source.path).resolve(strict=True)
-        except OSError:
+        except (OSError, ValueError):
             return None
         if not candidate.is_relative_to(root) or not candidate.is_file():
             return None

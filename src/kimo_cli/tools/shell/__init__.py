@@ -168,9 +168,6 @@ class Shell(CallableTool2[Params]):
             )
 
     async def _run_in_background(self, params: Params) -> ToolReturnValue:
-        if self._shell_path is None:
-            return self._unavailable()
-
         tool_call = get_current_tool_call_or_none()
         if tool_call is None:
             return ToolResultBuilder().error(

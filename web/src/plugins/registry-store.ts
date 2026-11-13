@@ -216,11 +216,6 @@ export async function importPluginFromUrl(url: string): Promise<ImportResult> {
     installedAt: Date.now(),
   };
 
-  const all = addPlugin(plugin);
-  const warning =
-    all.find((p) => p.id === plugin.id)?.importUrl !== url
-      ? undefined
-      : undefined;
-
-  return { plugin, warning };
+  addPlugin(plugin);
+  return { plugin };
 }

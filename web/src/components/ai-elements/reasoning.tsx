@@ -75,11 +75,13 @@ export const Reasoning = memo(
     });
 
     const [hasAutoClosed, setHasAutoClosed] = useState(false);
+    const [hasStreamed, setHasStreamed] = useState(false);
     const [startTime, setStartTime] = useState<number | null>(null);
 
     // Track duration when streaming starts and ends
     useEffect(() => {
       if (isStreaming) {
+        setHasStreamed(true);
         if (startTime === null) {
           setStartTime(Date.now());
         }
@@ -95,6 +97,7 @@ export const Reasoning = memo(
         !disableAutoClose &&
         defaultOpen &&
         !isStreaming &&
+        hasStreamed &&
         isOpen &&
         !hasAutoClosed
       ) {
@@ -112,6 +115,7 @@ export const Reasoning = memo(
       defaultOpen,
       setIsOpen,
       hasAutoClosed,
+      hasStreamed,
       disableAutoClose,
     ]);
 

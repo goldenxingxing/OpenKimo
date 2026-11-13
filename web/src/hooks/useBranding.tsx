@@ -39,16 +39,22 @@ export function BrandingProvider({ children }: { children: ReactNode }) {
   const [config, setConfig] = useState<BrandingConfig | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const isInitializedRef = useRef(false);
+  const requestIdRef = useRef(0);
 
   const refresh = useCallback(async () => {
+    const requestId = ++requestIdRef.current;
     setIsLoading(true);
     try {
       const data = await getBranding();
+      if (requestId !== requestIdRef.current) return;
       setConfig(data);
     } catch (err) {
+      if (requestId !== requestIdRef.current) return;
       console.error("[useBranding] Failed to load branding:", err);
     } finally {
-      setIsLoading(false);
+      if (requestId === requestIdRef.current) {
+        setIsLoading(false);
+      }
     }
   }, []);
 

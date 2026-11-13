@@ -244,8 +244,9 @@ def load_custom_theme(path: str | Path) -> CustomTheme:
 
     Recognised sections: ``name``, ``base`` (``dark``/``light``), and the
     override tables ``diff`` / ``toolbar`` / ``mcp`` / ``prompt`` /
-    ``task_browser``. Unknown sections or a missing file raise
-    ``ValueError``/``OSError`` so the caller can report and fall back.
+    ``task_browser``. Unknown sections are silently ignored; a missing file
+    or malformed content raises ``OSError``/``ValueError`` so the caller can
+    report and fall back.
     """
     import json
     import tomllib

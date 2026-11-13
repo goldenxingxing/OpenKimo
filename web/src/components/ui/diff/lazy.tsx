@@ -9,7 +9,10 @@ let diffModulePromise: Promise<DiffModule> | null = null;
 
 const loadDiffModule = async (): Promise<DiffModule> => {
   if (!diffModulePromise) {
-    diffModulePromise = import("./index");
+    diffModulePromise = import("./index").catch((error: unknown) => {
+      diffModulePromise = null;
+      throw error;
+    });
   }
   return diffModulePromise;
 };

@@ -202,12 +202,13 @@ def _build_replay_turns_from_history(history: Sequence[Message]) -> list[_Replay
         elif message.role == "tool":
             if current_turn is None:
                 continue
-            assert message.tool_call_id is not None
+            if message.tool_call_id is None:
+                continue
             if any(
                 isinstance(part, TextPart) and part.text.startswith("<system>ERROR")
                 for part in message.content
             ):
-                result = ToolError(message="", output="", brief="")
+                result = ToolError(message=message_stringify(message), output="", brief="")
             else:
                 result = ToolOk(output=message.content)
             current_turn.events.append(

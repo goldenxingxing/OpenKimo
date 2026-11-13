@@ -68,9 +68,16 @@ export function MemoryPanel() {
           {t("tabs.recent")}
         </Button>
       </div>
-      {tab === "persistent" && <PersistentTab />}
-      {tab === "suggested" && <SuggestedTab state={candidatesState} />}
-      {tab === "recent" && <RecentTab />}
+      {/* Keep tabs mounted so switching back does not refetch or lose input. */}
+      <div className={tab === "persistent" ? "" : "hidden"}>
+        <PersistentTab />
+      </div>
+      <div className={tab === "suggested" ? "" : "hidden"}>
+        <SuggestedTab state={candidatesState} />
+      </div>
+      <div className={tab === "recent" ? "" : "hidden"}>
+        <RecentTab />
+      </div>
     </div>
   );
 }
@@ -82,13 +89,18 @@ function SuggestedTab({
 }) {
   const { t, i18n } = useTranslation(["memory", "common"]);
   const { candidates, loading, error, promote, dismiss } = state;
+  const [busy, setBusy] = useState(false);
 
   const decide = async (action: () => Promise<void>, done: string) => {
+    if (busy) return;
+    setBusy(true);
     try {
       await action();
       toast.success(done);
     } catch (e) {
       toast.error((e as Error).message);
+    } finally {
+      setBusy(false);
     }
   };
 
@@ -115,12 +127,13 @@ function SuggestedTab({
               {t(KIND_LABEL_KEYS[c.kind])} · {fmtTime(c.created_at, i18n.language)}
             </span>
             <div className="flex gap-2">
-              <Button size="sm" onClick={() => decide(() => promote(c.id), t("suggested.kept"))}>
+              <Button size="sm" disabled={busy} onClick={() => decide(() => promote(c.id), t("suggested.kept"))}>
                 {t("suggested.keep")}
               </Button>
               <Button
                 size="sm"
                 variant="outline"
+                disabled={busy}
                 onClick={() => decide(() => dismiss(c.id), t("suggested.discarded"))}
               >
                 {t("suggested.discard")}
@@ -141,16 +154,20 @@ function PersistentTab() {
   const { entries, loading, error, refresh, add, update, remove } = usePersistentMemory();
   const [newKind, setNewKind] = useState<MemoryKind>("user");
   const [newContent, setNewContent] = useState("");
+  const [adding, setAdding] = useState(false);
 
   const handleAdd = async () => {
     const trimmed = newContent.trim();
-    if (!trimmed) return;
+    if (!trimmed || adding) return;
+    setAdding(true);
     try {
       await add(newKind, trimmed);
       setNewContent("");
       toast.success(t("persistent.added"));
     } catch (e) {
       toast.error((e as Error).message);
+    } finally {
+      setAdding(false);
     }
   };
 
@@ -179,7 +196,7 @@ function PersistentTab() {
             rows={3}
           />
           <div className="flex justify-end">
-            <Button size="sm" onClick={handleAdd} disabled={!newContent.trim()}>
+            <Button size="sm" onClick={handleAdd} disabled={!newContent.trim() || adding}>
               <Plus className="mr-1 h-3.5 w-3.5" /> {t("persistent.add")}
             </Button>
           </div>

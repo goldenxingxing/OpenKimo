@@ -146,8 +146,13 @@ class StrReplaceFile(CallableTool2[Params]):
             original_content = content
             edits = [params.edit] if isinstance(params.edit, Edit) else params.edit
 
-            # Apply all edits
+            # Apply all edits, counting the replacements actually performed.
+            total_replacements = 0
             for edit in edits:
+                if edit.replace_all:
+                    total_replacements += content.count(edit.old)
+                else:
+                    total_replacements += 1 if edit.old in content else 0
                 content = self._apply_edit(content, edit)
 
             # Check if any changes were made
@@ -181,14 +186,6 @@ class StrReplaceFile(CallableTool2[Params]):
             # Final mutation revalidates the post-approval target through a
             # no-follow file descriptor; the earlier path check is not enough.
             await write_verified_text(p, self._runtime, content)
-
-            # Count changes for success message
-            total_replacements = 0
-            for edit in edits:
-                if edit.replace_all:
-                    total_replacements += original_content.count(edit.old)
-                else:
-                    total_replacements += 1 if edit.old in original_content else 0
 
             return ToolReturnValue(
                 is_error=False,

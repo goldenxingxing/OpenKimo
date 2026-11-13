@@ -120,14 +120,18 @@ def _resolve_source(target: str) -> tuple[Path, Path | None]:
             typer.echo(f"Error: download failed: {exc}", err=True)
             raise typer.Exit(1) from exc
 
-        return _extract_zip_to_plugin(zip_path, tmp)
+        plugin_dir, cleanup = _extract_zip_to_plugin(zip_path, tmp)
+        zip_path.unlink(missing_ok=True)
+        return plugin_dir, cleanup
 
     # Git URL
     if target.startswith(("https://", "git@", "http://")) and (
         ".git/" in target
         or target.endswith(".git")
         or "github.com/" in target
+        or "github.com:" in target
         or "gitlab.com/" in target
+        or "gitlab.com:" in target
     ):
         import subprocess
 
@@ -332,6 +336,9 @@ def info_cmd(
     from kimo_cli.plugin import parse_plugin_json
     from kimo_cli.plugin.manager import get_plugins_dir
 
+    if not name or name in (".", "..") or Path(name).name != name:
+        typer.echo(f"Error: invalid plugin name: {name}", err=True)
+        raise typer.Exit(1)
     plugin_json = get_plugins_dir() / name / "plugin.json"
     if not plugin_json.exists():
         typer.echo(f"Error: Plugin '{name}' not found", err=True)

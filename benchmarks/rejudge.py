@@ -36,7 +36,8 @@ async def one_round(model: Model, client: httpx.AsyncClient, rows) -> float:
         )
         return 1.0 if re.match(r"\s*CORRECT", verdict or "", re.I) else 0.0
 
-    return statistics.mean(await asyncio.gather(*(mark(r) for r in rows))) * 100
+    marks = await asyncio.gather(*(mark(r) for r in rows))
+    return statistics.mean(marks) * 100 if marks else 0.0
 
 
 async def main() -> None:

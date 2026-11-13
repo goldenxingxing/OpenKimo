@@ -152,7 +152,7 @@ export function PluginSystemProvider({ children }: { children: ReactNode }) {
     register(plugin: UIPlugin) {
       pluginsRef.current = [...pluginsRef.current.filter((p) => p.id !== plugin.id), plugin];
       return () => {
-        pluginsRef.current = pluginsRef.current.filter((p) => p.id !== plugin.id);
+        pluginsRef.current = pluginsRef.current.filter((p) => p !== plugin);
       };
     },
     unregister(pluginId: string) {
@@ -199,7 +199,7 @@ export function PluginSystemProvider({ children }: { children: ReactNode }) {
             const existing = prev.find((s) => s.pluginId === plugin.id);
             if (existing) {
               return prev.map((s) =>
-                s.pluginId === plugin.id ? { ...s, event } : s,
+                s.pluginId === plugin.id ? { ...s, event, plugin } : s,
               );
             }
             return [...prev, { pluginId: plugin.id, plugin, event }];

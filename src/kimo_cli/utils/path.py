@@ -98,8 +98,11 @@ async def list_directory(work_dir: KaosPath) -> str:
       entries per directory.
     * Truncated levels show ``... and N more`` so the LLM knows more exists.
     """
+    try:
+        entries, total = await _collect_entries(work_dir, _LIST_DIR_ROOT_WIDTH)
+    except OSError:
+        return "[not readable]"
     lines: list[str] = []
-    entries, total = await _collect_entries(work_dir, _LIST_DIR_ROOT_WIDTH)
     remaining = total - len(entries)
 
     for i, (name, is_dir) in enumerate(entries):

@@ -117,7 +117,7 @@ def main():
         "LlamaIndex BM25 + 中文双字预切": lambda t, q: llama_bm25(t, q, prepare=bigrammed),
     }
     print(f"{DATA.name}：{sum(len(q) for _, q in data)} 题\n")
-    print(f"{'方案':<36}" + "".join(f"{'recall@' + str(k):>11}" for k in TOP_K))
+    print(f"{'方案':<34}" + "".join(f"{'recall@' + str(k):>11}" for k in TOP_K))
     print("-" * (34 + 11 * len(TOP_K)))
     for label, fn in systems.items():
         rows = []

@@ -321,7 +321,7 @@ async def test_print_stream_json_does_not_wait_for_background_tasks(
     run_soul_calls: list[str] = []
     read_count = 0
 
-    def fake_read_next_command():
+    async def fake_read_next_command():
         nonlocal read_count
         read_count += 1
         if read_count == 1:

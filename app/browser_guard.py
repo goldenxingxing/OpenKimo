@@ -662,9 +662,6 @@ class BrowserCDPGuard:
                 logger.error("无法获取窗口ID")
                 return
 
-            bounds: Dict = window_state.get("bounds", {})
-            current_state = bounds.get("windowState", "")
-
             # 获取当前窗口状态
             bounds_state = await self._send_cdp_command(
                 ws, "Browser.getWindowBounds", {"windowId": window_id}, timeout=3.0

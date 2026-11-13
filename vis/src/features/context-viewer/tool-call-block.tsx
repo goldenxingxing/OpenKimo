@@ -55,7 +55,10 @@ export function ToolMessage({ message }: ToolMessageProps) {
           tabIndex={0}
           onClick={() => navigateToWire(message.tool_call_id!)}
           onKeyDown={(e) => {
-            if (e.key === "Enter") navigateToWire(message.tool_call_id!);
+            if (e.key === "Enter" || e.key === " ") {
+              e.preventDefault();
+              navigateToWire(message.tool_call_id!);
+            }
           }}
           className="inline-flex items-center gap-0.5 ml-6 mt-0.5 text-[10px] text-blue-600 dark:text-blue-400 hover:underline cursor-pointer"
         >
@@ -79,7 +82,7 @@ export function ToolMessage({ message }: ToolMessageProps) {
             </pre>
           ) : (
             <pre className="overflow-auto whitespace-pre-wrap text-[11px] font-mono text-muted-foreground max-h-96">
-              {JSON.stringify(message.content, null, 2)}
+              {message.content == null ? "No content" : JSON.stringify(message.content, null, 2)}
             </pre>
           )}
         </div>

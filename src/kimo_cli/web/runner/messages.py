@@ -7,6 +7,7 @@ from fastapi import WebSocket
 from pydantic import BaseModel, ConfigDict
 from starlette.websockets import WebSocketState
 
+from kimo_cli import logger
 from kimo_cli.web.models import SessionStatus
 
 
@@ -53,5 +54,6 @@ async def send_history_complete(ws: WebSocket) -> bool:
     try:
         await ws.send_text(new_history_complete_message().model_dump_json())
         return True
-    except Exception:
+    except Exception as exc:
+        logger.debug("Failed to send history_complete: {err}", err=exc)
         return False

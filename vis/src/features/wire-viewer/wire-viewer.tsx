@@ -277,7 +277,7 @@ export function WireViewer({ sessionId, refreshKey = 0, onNavigateToContext, scr
   );
 
   // Error navigation: track current error position
-  const errorNavRef = useRef(0);
+  const errorNavRef = useRef(-1);
 
   const navigateError = useCallback(
     (direction: "next" | "prev") => {
@@ -287,7 +287,9 @@ export function WireViewer({ sessionId, refreshKey = 0, onNavigateToContext, scr
           (errorNavRef.current + 1) % errorIndices.length;
       } else {
         errorNavRef.current =
-          (errorNavRef.current - 1 + errorIndices.length) % errorIndices.length;
+          errorNavRef.current <= 0
+            ? errorIndices.length - 1
+            : errorNavRef.current - 1;
       }
       const targetIndex = errorIndices[errorNavRef.current];
       // Find position in filtered list
@@ -526,7 +528,6 @@ function KeyboardHelp() {
           <Shortcut keys="e" desc="Next error" />
           <Shortcut keys="/" desc="Focus search" />
           <Shortcut keys="Esc" desc="Close panel" />
-          <Shortcut keys="1 / 2 / 3" desc="Switch tab" />
         </div>
       )}
       <button

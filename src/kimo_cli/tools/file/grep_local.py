@@ -466,6 +466,9 @@ class Grep(CallableTool2[Params]):
             except TimeoutError:
                 await _kill_process(process)
                 timed_out = True
+            except Exception:
+                await _kill_process(process)
+                raise
 
             output = stdout_buf.decode("utf-8", errors="replace")
             stderr_str = stderr_buf.decode("utf-8", errors="replace")

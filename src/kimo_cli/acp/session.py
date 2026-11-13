@@ -170,6 +170,8 @@ class ACPSession:
             if followup_task is not None:
                 with suppress(asyncio.CancelledError):
                     await followup_task
+        except Exception as exc:
+            logger.warning("Background follow-up task failed: {error}", error=exc)
         finally:
             await self._cli.close()
 
@@ -194,6 +196,10 @@ class ACPSession:
         token = _current_turn_id.set(self._turn_state.id)
         kaos_token = set_current_kaos(self._kaos) if self._kaos is not None else None
         self._followup_armed = True
+        # A user turn re-arms auto-follow-up after a run of failures; without
+        # this the session stays disabled for its whole lifetime.
+        self._followup_failures = 0
+        self._followup_disabled = False
         try:
             await self._pump_turn(self._cli.run(user_input, self._turn_state.cancel_event))
         except LLMNotSet as e:
@@ -415,15 +421,19 @@ class ACPSession:
                     await manager.completion_event.wait()
             except TimeoutError:
                 pass
-            manager.completion_event.clear()
-            manager.reconcile()
-
-            # Let a burst settle: five subagents finishing together should
-            # produce one report, not five turns.
-            if coalesce_s:
-                await asyncio.sleep(coalesce_s)
+            try:
                 manager.completion_event.clear()
                 manager.reconcile()
+
+                # Let a burst settle: five subagents finishing together should
+                # produce one report, not five turns.
+                if coalesce_s:
+                    await asyncio.sleep(coalesce_s)
+                    manager.completion_event.clear()
+                    manager.reconcile()
+            except Exception:
+                logger.exception("Background follow-up reconcile failed; retrying next poll")
+                continue
 
             if not self._followup_armed:
                 logger.debug("Background completion ignored: no user turn yet")

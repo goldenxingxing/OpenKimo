@@ -48,7 +48,11 @@ class ApiCache {
     // 3. Otherwise, call fetcher, store result, return it
     const promise = fetcher().then(
       (data) => {
-        this.store.set(key, { data, timestamp: Date.now() });
+        // Only write back if this request still owns the entry; invalidate()
+        // or a newer request may have replaced it in the meantime.
+        if (this.store.get(key)?.promise === promise) {
+          this.store.set(key, { data, timestamp: Date.now() });
+        }
         this.evictIfNeeded();
         return data;
       },

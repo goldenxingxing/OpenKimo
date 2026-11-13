@@ -23,6 +23,7 @@ from prompt_toolkit.widgets import Box, Frame, RadioList, TextArea
 
 from kimo_cli.session import Session
 from kimo_cli.utils.datetime import format_relative_time
+from kimo_cli.utils.logging import logger
 
 SessionScope = Literal["current", "all"]
 
@@ -240,11 +241,11 @@ class SessionPickerApp:
             self._reload_version += 1
             event.app.create_background_task(self._reload_and_refresh(event.app))
 
-        @kb.add("up")
+        @kb.add("up", eager=True)
         def _up(event: KeyPressEvent) -> None:
             self._move_selection(-1)
 
-        @kb.add("down")
+        @kb.add("down", eager=True)
         def _down(event: KeyPressEvent) -> None:
             self._move_selection(1)
 
@@ -284,7 +285,15 @@ class SessionPickerApp:
         self._radio_list._selected_index = 0  # pyright: ignore[reportPrivateUsage]
         app.invalidate()
 
-        await self._load_sessions(version)
+        try:
+            await self._load_sessions(version)
+        except Exception:
+            logger.exception("Failed to reload sessions")
+            if version != self._reload_version:
+                return
+            self._sync_radio_list()
+            app.invalidate()
+            return
 
         if version != self._reload_version:
             return  # stale reload; a newer toggle already started

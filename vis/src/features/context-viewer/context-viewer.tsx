@@ -77,7 +77,9 @@ function MetadataRow({ message }: { message: ContextMessage }) {
 /** Dedicated viewer for _system_prompt — the most important context for debugging */
 function SystemPromptRow({ message }: { message: ContextMessage }) {
   const [expanded, setExpanded] = useState(false);
-  const content = typeof message.content === "string" ? message.content : String((message as Record<string, unknown>).content ?? "");
+  const content = typeof message.content === "string"
+    ? message.content
+    : JSON.stringify((message as Record<string, unknown>).content, null, 2) || "";
   const charCount = content.length;
   const estimatedTokens = Math.round(charCount / 4);
 
@@ -121,6 +123,7 @@ export function ContextViewer({ sessionId, refreshKey = 0, onNavigateToWire, scr
   const virtuosoRef = useRef<VirtuosoHandle>(null);
 
   useEffect(() => {
+    let cancelled = false;
     setLoading(true);
     setError(null);
     const fetch = agentScope
@@ -128,10 +131,11 @@ export function ContextViewer({ sessionId, refreshKey = 0, onNavigateToWire, scr
       : getContextMessages(sessionId, refreshKey > 0);
     fetch
       .then((res) => {
-        setAllMessages(res.messages);
+        if (!cancelled) setAllMessages(res.messages);
       })
-      .catch((err) => setError(err.message))
-      .finally(() => setLoading(false));
+      .catch((err) => { if (!cancelled) setError(err.message); })
+      .finally(() => { if (!cancelled) setLoading(false); });
+    return () => { cancelled = true; };
   }, [sessionId, refreshKey, agentScope]);
 
   const visibleMessages = useMemo(
@@ -178,7 +182,7 @@ export function ContextViewer({ sessionId, refreshKey = 0, onNavigateToWire, scr
         }
       }
       if (msg.role === "tool") {
-        const raw = JSON.stringify(msg.content).toLowerCase();
+        const raw = (JSON.stringify(msg.content) ?? "").toLowerCase();
         if (raw.includes(q)) { matches.push(idx); return; }
       }
     });

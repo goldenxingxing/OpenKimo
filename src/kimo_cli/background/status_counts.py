@@ -10,7 +10,9 @@ from kimo_cli.utils.logging import logger
 from .models import is_terminal_status
 from .store import BackgroundTaskStore
 
-INTERRUPTED_NOTIFICATION_TYPES = frozenset({"task.failed", "task.killed", "task.lost"})
+INTERRUPTED_NOTIFICATION_TYPES = frozenset(
+    {"task.failed", "task.killed", "task.lost", "task.timed_out"}
+)
 
 
 def background_status_counts(
@@ -58,7 +60,11 @@ def _unseen_interrupted_count(notifications_dir: Path) -> int:
     if not notifications_dir.is_dir():
         return 0
     count = 0
-    for path in sorted(notifications_dir.iterdir()):
+    try:
+        entries = sorted(notifications_dir.iterdir())
+    except OSError:
+        return 0
+    for path in entries:
         if not path.is_dir():
             continue
         try:

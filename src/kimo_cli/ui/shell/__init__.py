@@ -192,7 +192,6 @@ class Shell:
         self._running_input_handler: Callable[[UserInput], None] | None = None
         self._running_interrupt_handler: Callable[[], None] | None = None
         self._active_approval_sink: Any | None = None
-        self._active_view: Any | None = None
         self._pending_approval_requests = deque[ApprovalRequest]()
         self._current_prompt_approval_request: ApprovalRequest | None = None
         self._approval_modal: ApprovalPromptDelegate | None = None
@@ -804,7 +803,9 @@ class Shell:
         except (Reload, SwitchToWeb, SwitchToVis):
             # just propagate
             raise
-        except (asyncio.CancelledError, KeyboardInterrupt):
+        except asyncio.CancelledError:
+            raise
+        except KeyboardInterrupt:
             # Handle Ctrl-C during slash command execution, return to shell prompt
             logger.debug("Slash command interrupted by KeyboardInterrupt")
             console.print("[red]Interrupted by user[/red]")
@@ -856,8 +857,8 @@ class Shell:
             runtime = self.soul.runtime if isinstance(self.soul, KimoSoul) else None
             show_thinking_stream = runtime.config.show_thinking_stream if runtime else False
             # Capture view reference via closure — _clear_active_view sets
-            # _active_view=None inside visualize()'s finally (before run_soul
-            # returns), so we must capture the view object independently.
+            # _active_approval_sink=None inside visualize()'s finally (before
+            # run_soul returns), so we must capture the view object independently.
 
             def _on_view_ready(view: Any) -> None:
                 nonlocal captured_view
@@ -1276,7 +1277,6 @@ class Shell:
 
     def _set_active_view(self, view: Any) -> None:
         self._active_approval_sink = view
-        self._active_view = view
         # In interactive mode, approvals are handled by the prompt modal,
         # not by the live view sink. Don't flush to avoid losing requests.
         if self._prompt_session is not None:
@@ -1294,7 +1294,6 @@ class Shell:
 
     def _clear_active_view(self) -> None:
         self._active_approval_sink = None
-        self._active_view = None
         # Re-queue any approval requests that were forwarded to the sink
         # but not yet resolved.  Without this, those requests would be
         # silently lost when the live view closes between turns.

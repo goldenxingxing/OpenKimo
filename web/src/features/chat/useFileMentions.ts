@@ -155,7 +155,13 @@ const crawlWorkspace = async ({
 
     // "." should be treated as undefined for API root
     const path = current === "." ? undefined : current;
-    const entries = await listDirectory(sessionId, path);
+    let entries: SessionFileEntry[] = [];
+    try {
+      entries = await listDirectory(sessionId, path);
+    } catch {
+      // One unreadable directory must not discard the files found so far.
+      continue;
+    }
 
     for (const entry of entries) {
       const fullPath =
@@ -321,10 +327,6 @@ export const useFileMentions = ({
   }, [activeIndex, flatOptions.length]);
 
   useEffect(() => {
-    setActiveIndex(0);
-  }, []);
-
-  useEffect(() => {
     setWorkspaceFiles([]);
     setDirectoryFiles([]);
     setWorkspaceStatus("idle");
@@ -383,21 +385,27 @@ export const useFileMentions = ({
     loadWorkspaceFiles();
   }, [range, sessionId, listDirectory, workspaceStatus, loadWorkspaceFiles]);
 
-  // Debounced directory query when query contains "/"
+  // Debounced directory query when query contains "/". Only the directory
+  // prefix matters: typing further within the same directory must not
+  // re-issue listDirectory.
+  const directoryQuery = range?.query ?? "";
+  const directorySlashIndex = directoryQuery.lastIndexOf("/");
+  const directoryPrefix =
+    directorySlashIndex >= 0
+      ? directoryQuery.slice(0, directorySlashIndex)
+      : null;
+
   useEffect(() => {
     if (directoryQueryTimerRef.current) {
       clearTimeout(directoryQueryTimerRef.current);
       directoryQueryTimerRef.current = null;
     }
-    const query = range?.query ?? "";
-    const slashIndex = query.lastIndexOf("/");
-    if (slashIndex < 0 || !(sessionId && listDirectory)) {
+    if (directoryPrefix === null || !(sessionId && listDirectory)) {
       directoryRequestRef.current += 1;
       setDirectoryFiles([]);
       return;
     }
-    const dirPrefix = query.slice(0, slashIndex);
-    const dirPath = dirPrefix === "" ? undefined : dirPrefix;
+    const dirPath = directoryPrefix === "" ? undefined : directoryPrefix;
     const capturedSessionId = sessionId;
     directoryRequestRef.current += 1;
     const requestId = directoryRequestRef.current;
@@ -430,7 +438,7 @@ export const useFileMentions = ({
         directoryQueryTimerRef.current = null;
       }
     };
-  }, [range?.query, sessionId, listDirectory]);
+  }, [directoryPrefix, sessionId, listDirectory]);
 
   // The range the reader dismissed with Escape. Escape closes the menu on
   // keydown, and the matching keyup runs the composer's selection handler,
@@ -472,6 +480,7 @@ export const useFileMentions = ({
       dismissedRangeRef.current = previous;
       return null;
     });
+    setActiveIndex(0);
   }, []);
 
   const selectOption = useCallback(

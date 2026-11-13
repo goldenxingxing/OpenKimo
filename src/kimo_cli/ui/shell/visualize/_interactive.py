@@ -441,7 +441,7 @@ class _PromptLiveView(_LiveView):
 
         # ↑ on empty buffer: pop last queued message back to input for editing.
         # should_handle already verified buffer is empty.
-        if key == "up" and self._queued_messages:
+        if key == "up" and self._queued_messages and self._current_approval_request_panel is None:
             buf = event.current_buffer
             recalled = self._queued_messages.pop()
             buf.document = Document(recalled.command, len(recalled.command))

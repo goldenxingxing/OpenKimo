@@ -106,6 +106,7 @@ const extToLang: Record<string, string> = {
   // Config files
   dockerfile: "docker",
   gitignore: "ignore",
+  makefile: "makefile",
 
   // Other
   graphql: "graphql",

@@ -1,4 +1,4 @@
-import { memo, useState, type ComponentProps, type ReactNode } from "react";
+import { memo, useRef, useState, type ComponentProps, type ReactNode } from "react";
 import { isValidElement } from "react";
 import { Streamdown, type StreamdownProps } from "streamdown";
 import { cn } from "@/lib/utils";
@@ -9,7 +9,7 @@ import type { Element } from "hast";
  * Escape HTML-like tags outside of code blocks.
  */
 const escapeHtmlOutsideCodeBlocks = (text: string): string => {
-  const codeBlockRegex = /(^|\n)```[a-z]*\n[\s\S]*?\n```|`[^`\n]+`/g;
+  const codeBlockRegex = /(^|\n)```[\w+#.-]*\n[\s\S]*?\n```|`[^`\n]+`/g;
   const codeBlocks: { start: number; end: number }[] = [];
 
   let match;
@@ -88,11 +88,17 @@ function SimpleCodeBlock({
   className?: string;
 }) {
   const [copied, setCopied] = useState(false);
+  const resetTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const handleCopy = async () => {
-    await navigator.clipboard.writeText(code);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
+    try {
+      await navigator.clipboard.writeText(code);
+      setCopied(true);
+      if (resetTimer.current !== null) clearTimeout(resetTimer.current);
+      resetTimer.current = setTimeout(() => setCopied(false), 2000);
+    } catch {
+      // Clipboard API unavailable (non-secure context) or permission denied.
+    }
   };
 
   return (
@@ -165,7 +171,8 @@ export const Markdown = memo(
         : children}
     </Streamdown>
   ),
-  (prev, next) => prev.children === next.children,
+  (prev, next) =>
+    prev.children === next.children && prev.className === next.className,
 );
 
 Markdown.displayName = "Markdown";

@@ -270,7 +270,6 @@ type JSONRPCOutMessage = (
     | JSONRPCEventMessage
     | JSONRPCRequestMessage
 )
-JSONRPC_OUT_METHODS = {"event", "request"}
 
 
 class ErrorCodes:

@@ -126,10 +126,12 @@ export const ChatPromptComposer = memo(function ChatPromptComposerComponent({
   useEffect(() => {
     if (!inputReady) return;
     if (lastFocusedSessionRef.current === sessionId) return;
-    lastFocusedSessionRef.current = sessionId;
     // Defer past this render: right after a switch the textarea can still
     // be disabled, and focusing a disabled control does nothing.
-    const raf = requestAnimationFrame(() => textareaRef.current?.focus());
+    const raf = requestAnimationFrame(() => {
+      textareaRef.current?.focus();
+      lastFocusedSessionRef.current = sessionId;
+    });
     return () => cancelAnimationFrame(raf);
   }, [inputReady, sessionId]);
 

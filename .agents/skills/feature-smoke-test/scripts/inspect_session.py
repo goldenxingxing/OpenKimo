@@ -33,6 +33,8 @@ def truncate(text: str, max_text: int) -> str:
     text = " ".join(text.split())
     if len(text) <= max_text:
         return text
+    if max_text < 3:
+        return text[: max(0, max_text)]
     return text[: max_text - 3] + "..."
 
 
@@ -207,7 +209,7 @@ def print_jsonl_summary(title: str, path: Path, tail_lines: int, max_text: int) 
     if path.name == "context.jsonl":
         counter = Counter(record.get("role", "<raw>") for record in records)
         print("roles:", ", ".join(f"{key}={value}" for key, value in sorted(counter.items())))
-        tail = records[-tail_lines:]
+        tail = records[-tail_lines:] if tail_lines > 0 else []
         for idx, record in enumerate(tail, start=max(1, len(records) - len(tail) + 1)):
             print(f"[{idx}] {summarize_context_record(record, max_text)}")
     else:
@@ -218,7 +220,7 @@ def print_jsonl_summary(title: str, path: Path, tail_lines: int, max_text: int) 
             for record in records
         )
         print("types:", ", ".join(f"{key}={value}" for key, value in sorted(counter.items())))
-        tail = records[-tail_lines:]
+        tail = records[-tail_lines:] if tail_lines > 0 else []
         for idx, record in enumerate(tail, start=max(1, len(records) - len(tail) + 1)):
             print(f"[{idx}] {summarize_wire_record(record, max_text)}")
 
@@ -234,7 +236,7 @@ def print_file_inventory(session_dir: Path) -> None:
 
 
 def tail_text_file(path: Path, tail_lines: int, max_text: int) -> list[str]:
-    if not path.exists():
+    if not path.exists() or tail_lines <= 0:
         return []
     lines = path.read_text(errors="replace").splitlines()
     return [truncate(line, max_text) for line in lines[-tail_lines:]]

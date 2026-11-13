@@ -2,19 +2,16 @@ import { v4 as uuidV4 } from "uuid";
 
 import i18n from "@/i18n";
 
+const _isMac =
+  typeof navigator !== "undefined" &&
+  navigator.platform.toLowerCase().includes("mac");
+
 /**
  * Check if running on macOS.
  */
 export function isMacOS(): boolean {
-  if (typeof navigator === "undefined") {
-    return false;
-  }
-  return navigator.platform.toLowerCase().includes("mac");
+  return _isMac;
 }
-
-const _isMac =
-  typeof navigator !== "undefined" &&
-  navigator.platform.toLowerCase().includes("mac");
 
 /**
  * Check if the platform-specific modifier key is pressed (Cmd on macOS, Ctrl elsewhere).
@@ -35,12 +32,10 @@ export function getApiBaseUrl(): string {
 }
 
 /**
- * Generate a unique message ID
- * Uses crypto.randomUUID for true uniqueness to avoid key collisions
- * when switching sessions or reconnecting WebSocket
+ * Generate a unique message ID from a UUID v4, avoiding key collisions when
+ * switching sessions or reconnecting the WebSocket.
  */
 export const createMessageId = (prefix: "user" | "assistant"): string => {
-  // Fallback for older browsers
   return `${prefix}-${uuidV4()}`;
 };
 
@@ -48,6 +43,10 @@ export const createMessageId = (prefix: "user" | "assistant"): string => {
  * Format relative time for session display
  */
 export const formatRelativeTime = (date: Date): string => {
+  // A null or invalid date would otherwise throw / produce a NaN "days" label.
+  if (!(date instanceof Date) || Number.isNaN(date.getTime())) {
+    return i18n.t("common:relativeTime.justNow");
+  }
   const now = new Date();
   const diff = now.getTime() - date.getTime();
   const minutes = Math.floor(diff / 60000);

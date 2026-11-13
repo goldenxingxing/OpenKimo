@@ -50,7 +50,7 @@ for arg in "$@"; do
             PORT="${arg#--port=}"
             # `--port=` and `--port=abc` reached uvicorn as-is and failed there,
             # after the banner had already said it was starting.
-            if ! [[ "$PORT" =~ ^[0-9]+$ ]] || [ "$PORT" -lt 1 ] || [ "$PORT" -gt 65535 ]; then
+            if ! [[ "$PORT" =~ ^[0-9]+$ ]] || [ "${#PORT}" -gt 5 ] || [ "$PORT" -lt 1 ] || [ "$PORT" -gt 65535 ]; then
                 echo "ERROR: --port must be a number between 1 and 65535 (got '$PORT')."
                 exit 1
             fi
@@ -202,7 +202,7 @@ start_local() {
     # Checked on the resolved value, not just on --port: KIMO_WEB_PORT comes
     # out of .env, which nobody validates, and an unusable port there failed
     # inside uvicorn after the banner had already announced the address.
-    if ! [[ "$LISTEN_PORT" =~ ^[0-9]+$ ]] || [ "$LISTEN_PORT" -lt 1 ] || [ "$LISTEN_PORT" -gt 65535 ]; then
+    if ! [[ "$LISTEN_PORT" =~ ^[0-9]+$ ]] || [ "${#LISTEN_PORT}" -gt 5 ] || [ "$LISTEN_PORT" -lt 1 ] || [ "$LISTEN_PORT" -gt 65535 ]; then
         echo "ERROR: port must be a number between 1 and 65535 (got '$LISTEN_PORT')."
         exit 1
     fi

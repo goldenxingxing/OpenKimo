@@ -147,13 +147,18 @@ def _parse_editor_output(text: str) -> dict:
     if text.startswith("```"):
         text = re.sub(r"^```[a-zA-Z]*\n?", "", text)
         text = re.sub(r"\n?```$", "", text.strip())
-    start = text.find("{")
-    if start < 0:
-        raise ValueError(f"Editor output contains no JSON object: {text[:200]!r}")
-    obj, _ = json.JSONDecoder().raw_decode(text[start:])
-    if not isinstance(obj, dict):
-        raise ValueError("Editor output JSON is not an object")
-    return obj
+    decoder = json.JSONDecoder()
+    for start, char in enumerate(text):
+        if char != "{":
+            continue
+        try:
+            obj, _ = decoder.raw_decode(text[start:])
+        except json.JSONDecodeError:
+            continue
+        if not isinstance(obj, dict):
+            raise ValueError("Editor output JSON is not an object")
+        return obj
+    raise ValueError(f"Editor output contains no JSON object: {text[:200]!r}")
 
 
 def _evidence_records():

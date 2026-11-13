@@ -26,7 +26,8 @@ async def collect_git_context(work_dir: KaosPath) -> str:
     cwd = str(work_dir)
 
     # Quick check: is this a git repo?
-    if await _run_git(["rev-parse", "--is-inside-work-tree"], cwd) is None:
+    inside_work_tree = await _run_git(["rev-parse", "--is-inside-work-tree"], cwd)
+    if inside_work_tree != "true":
         return ""
 
     # Run all git commands in parallel for speed

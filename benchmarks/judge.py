@@ -120,7 +120,7 @@ async def answer_and_judge(
     verdict = await model.ask(
         client, _JUDGE_PROMPT.format(question=question, gold=gold, given=given)
     )
-    return Judged(question, gold, given, correct=bool(re.match(r"\s*CORRECT", verdict, re.I)))
+    return Judged(question, gold, given, correct=bool(re.match(r"\s*CORRECT\b", verdict, re.I)))
 
 
 async def score_all(
@@ -141,6 +141,6 @@ async def score_all(
             name: [answer_and_judge(model, client, q, g, n) for q, g, n in rows]
             for name, rows in retrieved.items()
         }
-        for name, coros in tasks.items():
-            out[name] = list(await asyncio.gather(*coros))
+        results = await asyncio.gather(*(asyncio.gather(*coros) for coros in tasks.values()))
+        out = {name: list(res) for name, res in zip(tasks, results, strict=True)}
     return out

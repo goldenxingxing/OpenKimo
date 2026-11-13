@@ -383,7 +383,7 @@ class QuestionPromptDelegate:
         return self._is_inline_other_active()
 
     def running_prompt_hides_input_buffer(self) -> bool:
-        return self._panel is not None
+        return self._panel is not None and not self._awaiting_other_input
 
     def running_prompt_accepts_submission(self) -> bool:
         return self._panel is not None
@@ -422,7 +422,8 @@ class QuestionPromptDelegate:
             return
         if self._awaiting_other_input:
             if key == "enter":
-                self._submit_other_input(event.current_buffer)
+                if event.current_buffer.text.strip():
+                    self._submit_other_input(event.current_buffer)
             else:
                 self._clear_buffer(event.current_buffer)
                 self._awaiting_other_input = False
@@ -560,8 +561,12 @@ class QuestionPromptDelegate:
         self._awaiting_other_input = False
 
     def _save_and_clear_buffer(self, buffer: Buffer) -> None:
-        if self._panel is not None and buffer.text:
-            self._panel.save_other_draft(buffer.text)
+        # An empty buffer only means "drop the stored draft" when the buffer is
+        # actually the Other input; on every other row it is empty by
+        # construction and saving it would wipe a draft kept for Other.
+        panel = self._panel
+        if panel is not None and (buffer.text or panel.is_other_selected):
+            panel.save_other_draft(buffer.text)
         self._clear_buffer(buffer)
 
     def _restore_draft_to_buffer(self, buffer: Buffer) -> None:

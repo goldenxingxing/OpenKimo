@@ -4,13 +4,18 @@ type ToasterProps = React.ComponentProps<typeof Sonner>;
 
 // Error toasts must not auto-dismiss: keep them visible until the user
 // explicitly closes them via the close button.
-const originalToastError = toast.error.bind(toast);
-toast.error = ((message: Parameters<typeof toast.error>[0], options?: Parameters<typeof toast.error>[1]) =>
-  originalToastError(message, {
-    duration: Number.POSITIVE_INFINITY,
-    closeButton: true,
-    ...options,
-  })) as typeof toast.error;
+type PatchedToastError = typeof toast.error & { __kimoPatched?: boolean };
+
+if (!(toast.error as PatchedToastError).__kimoPatched) {
+  const originalToastError = toast.error.bind(toast);
+  toast.error = ((message: Parameters<typeof toast.error>[0], options?: Parameters<typeof toast.error>[1]) =>
+    originalToastError(message, {
+      duration: Number.POSITIVE_INFINITY,
+      closeButton: true,
+      ...options,
+    })) as typeof toast.error;
+  (toast.error as PatchedToastError).__kimoPatched = true;
+}
 
 const Toaster = ({ ...props }: ToasterProps) => {
   return (

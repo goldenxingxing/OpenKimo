@@ -7,6 +7,7 @@ from typing import Any
 from fastapi import Depends, HTTPException, Request, status
 from starlette.requests import HTTPConnection
 
+from kimo_cli import logger
 from kimo_cli.web.db.crud import get_user_session
 from kimo_cli.web.db.database import get_db
 
@@ -30,15 +31,12 @@ def user_from_connection(connection: HTTPConnection) -> dict[str, Any] | None:
 
     # Local-owner mode: a loopback deployment may run without a login page.
     # The local owner is returned as the identity so sessions and memory get
-    # its stable owner_id instead of the unauthenticated sentinel.  Reading it
-    # here (not just in get_current_user) keeps every call site — the bearer
-    # fallback in AuthMiddleware, /api/sessions, /api/memory — on the same
-    # rule, so an owner_id is never lost to the sentinel by accident.
+    # its stable owner_id instead of the unauthenticated sentinel.
     scope = getattr(connection, "scope", None)
     app = scope.get("app") if isinstance(scope, dict) else None
     if app is not None:
         # Local owner only applies when no bearer gate is configured — a
-        # deployment that sets a token keeps its token auth.  Reading it here
+        # deployment that sets a token keeps its token auth. Reading it here
         # (not just in get_current_user) keeps every call site — the bearer
         # fallback in AuthMiddleware, /api/sessions, /api/memory — on the same
         # rule, so an owner_id is never lost to the sentinel by accident.
@@ -68,7 +66,8 @@ def user_from_connection(connection: HTTPConnection) -> dict[str, Any] | None:
         finally:
             db.close()
         return user
-    except Exception:
+    except Exception as exc:
+        logger.warning("Failed to resolve user session: {err}", err=exc)
         return None
 
 
@@ -119,7 +118,8 @@ def get_current_user_sse(request: Request) -> dict[str, Any] | None:
             return get_user_session(db, query_token)
         finally:
             db.close()
-    except Exception:
+    except Exception as exc:
+        logger.warning("Failed to resolve SSE user session: {err}", err=exc)
         return None
 
 

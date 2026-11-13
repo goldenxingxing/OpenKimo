@@ -34,7 +34,7 @@ def is_sensitive_file(path: str) -> bool:
         return False
     for pattern in SENSITIVE_PATTERNS:
         if "/" in pattern:
-            if path.endswith(pattern) or ("/" + pattern) in path:
+            if path == pattern or path.endswith("/" + pattern):
                 return True
         else:
             if fnmatch.fnmatch(name, pattern):

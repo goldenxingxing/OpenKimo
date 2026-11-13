@@ -50,16 +50,17 @@
   --destructive-foreground: oklch(0.141 0.005 285.823);
 }
 
-* {
-  border-color: var(--border);
-}
-
 html,
 body {
   margin: 0;
   padding: 0;
   height: 100%;
   overflow: hidden;
+}
+
+html {
+  scrollbar-color: color-mix(in oklch, var(--muted-foreground) 50%, transparent) transparent;
+  scrollbar-width: thin;
 }
 
 body {
@@ -122,6 +123,7 @@ body {
 }
 
 /* Markdown prose styles for streamdown */
+@layer base {
 .streamdown-prose h1 { font-size: 1.5em; font-weight: 700; margin: 0.5em 0; }
 .streamdown-prose h2 { font-size: 1.25em; font-weight: 600; margin: 0.5em 0; }
 .streamdown-prose h3 { font-size: 1.1em; font-weight: 600; margin: 0.4em 0; }
@@ -163,6 +165,7 @@ body {
   background: var(--muted);
   font-weight: 600;
 }
+}
 
 ::-webkit-scrollbar {
   width: 6px;
@@ -174,7 +177,6 @@ body {
 }
 
 ::-webkit-scrollbar-thumb {
-  background: var(--muted-foreground);
+  background: color-mix(in oklch, var(--muted-foreground) 50%, transparent);
   border-radius: 3px;
-  opacity: 0.5;
 }

@@ -440,13 +440,13 @@ export const MessageBranchPrevious = ({
 
   return (
     <Button
+      {...props}
       aria-label={t("message.previousBranch")}
       disabled={totalBranches <= 1}
       onClick={goToPrevious}
       size="icon-sm"
       type="button"
       variant="ghost"
-      {...props}
     >
       {children ?? <ChevronLeftIcon size={14} />}
     </Button>
@@ -465,13 +465,13 @@ export const MessageBranchNext = ({
 
   return (
     <Button
+      {...props}
       aria-label={t("message.nextBranch")}
       disabled={totalBranches <= 1}
       onClick={goToNext}
       size="icon-sm"
       type="button"
       variant="ghost"
-      {...props}
     >
       {children ?? <ChevronRightIcon size={14} />}
     </Button>
@@ -527,6 +527,7 @@ export const MessageResponse = memo(
   // raw * _ ~~ stayed on screen until the conversation was rebuilt from history.
   (prevProps, nextProps) =>
     prevProps.children === nextProps.children &&
+    prevProps.className === nextProps.className &&
     prevProps.mode === nextProps.mode &&
     prevProps.parseIncompleteMarkdown ===
       nextProps.parseIncompleteMarkdown,

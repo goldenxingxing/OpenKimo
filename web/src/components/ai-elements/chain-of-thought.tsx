@@ -186,10 +186,10 @@ export type ChainOfThoughtContentProps = ComponentProps<
 
 export const ChainOfThoughtContent = memo(
   ({ className, children, ...props }: ChainOfThoughtContentProps) => {
-    const { isOpen } = useChainOfThought();
+    const { isOpen, setIsOpen } = useChainOfThought();
 
     return (
-      <Collapsible open={isOpen}>
+      <Collapsible onOpenChange={setIsOpen} open={isOpen}>
         <CollapsibleContent
           className={cn(
             "mt-2 space-y-3",

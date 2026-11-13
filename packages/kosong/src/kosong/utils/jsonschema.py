@@ -31,7 +31,7 @@ def deref_json_schema(schema: JsonDict) -> JsonDict:
 
     def resolve_pointer(root: JsonDict, pointer: str) -> JsonType:
         """Resolve a JSON Pointer (e.g. ``#/$defs/User``) inside the schema."""
-        parts = pointer.lstrip("#/").split("/")
+        parts = [p.replace("~1", "/").replace("~0", "~") for p in pointer.lstrip("#/").split("/")]
         current: JsonType = root
         try:
             for part in parts:

@@ -23,7 +23,7 @@ class DenwaRenji:
         if self._pending_dmail is not None:
             raise DenwaRenjiError("Only one D-Mail can be sent at a time")
         # Pydantic `ge=0` already rejects negative checkpoint_id; this check
-        # was unreachable defensive programming.
+        # rejects ids at or beyond the number of recorded checkpoints.
         if dmail.checkpoint_id >= self._n_checkpoints:
             raise DenwaRenjiError("There is no checkpoint with the given ID")
         self._pending_dmail = dmail

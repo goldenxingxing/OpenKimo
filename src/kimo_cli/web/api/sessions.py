@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import contextlib
 import json
 import mimetypes
 import os
@@ -375,15 +376,18 @@ async def list_sessions(
         owner_filter=owner_filter,
     )
 
-    for session in sessions:
+    # Resolve every session's background counts in parallel: awaiting one
+    # worker-thread round-trip per session serialized up to `limit` waits.
+    async def _counts(session_dir: Any) -> tuple[int, int]:
+        if session_dir is None:
+            return 0, 0
+        return await asyncio.to_thread(background_status_counts, Path(session_dir))
+
+    counts = await asyncio.gather(*(_counts(session.session_dir) for session in sessions))
+
+    for session, (background_tasks, background_interrupted) in zip(sessions, counts, strict=True):
         session_process = runner.get_session(session.session_id)
         session.is_running = session_process is not None and session_process.is_running
-        if session.session_dir:
-            background_tasks, background_interrupted = await asyncio.to_thread(
-                background_status_counts, Path(session.session_dir)
-            )
-        else:
-            background_tasks, background_interrupted = 0, 0
         if session_process:
             session.status = session_process.status.model_copy(
                 update={
@@ -643,8 +647,9 @@ async def upload_session_file(
     upload_dir = session_dir / "uploads"
     upload_dir.mkdir(parents=True, exist_ok=True)
 
-    # Read and validate file size
-    content = await file.read()
+    # Read at most the limit plus one byte, so an oversized upload is rejected
+    # before the whole body is buffered in memory.
+    content = await file.read(MAX_UPLOAD_SIZE + 1)
     if len(content) > MAX_UPLOAD_SIZE:
         raise HTTPException(
             status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
@@ -1699,6 +1704,23 @@ async def get_discovered_agents(work_dir: str | None = None) -> list[DiscoveredA
     return await asyncio.to_thread(_discover_agents_sync, work_dir)
 
 
+async def _communicate_with_timeout(
+    proc: asyncio.subprocess.Process, timeout: float
+) -> tuple[bytes, bytes]:
+    """Run ``communicate`` with a timeout, killing the child if it expires.
+
+    ``asyncio.wait_for`` cancels the wait but not the process; without this a
+    slow git would be left running as an orphan after the timeout.
+    """
+    try:
+        return await asyncio.wait_for(proc.communicate(), timeout=timeout)
+    except TimeoutError:
+        with contextlib.suppress(ProcessLookupError):
+            proc.kill()
+        await proc.wait()
+        raise
+
+
 @router.get("/{session_id}/git-diff", summary="Get git diff stats")
 async def get_session_git_diff(session_id: UUID, http_request: Request) -> GitDiffStats:
     """get git diff stats for the session's work directory"""
@@ -1743,7 +1765,7 @@ async def get_session_git_diff(session_id: UUID, http_request: Request) -> GitDi
                 stderr=asyncio.subprocess.PIPE,
                 env=get_clean_env(),
             )
-            stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=5.0)
+            stdout, _ = await _communicate_with_timeout(proc, 5.0)
 
             # Parse output
             for line in stdout.decode().strip().split("\n"):
@@ -1781,7 +1803,7 @@ async def get_session_git_diff(session_id: UUID, http_request: Request) -> GitDi
             stderr=asyncio.subprocess.DEVNULL,
             env=get_clean_env(),
         )
-        untracked_stdout, _ = await asyncio.wait_for(untracked_proc.communicate(), timeout=5.0)
+        untracked_stdout, _ = await _communicate_with_timeout(untracked_proc, 5.0)
 
         # Add untracked files to the result
         for line in untracked_stdout.decode().strip().split("\n"):

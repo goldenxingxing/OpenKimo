@@ -87,6 +87,7 @@ class ToolResultBuilder:
             # strip the check while truncate_line silently misbehaves.
             raise ValueError("max_line_length must exceed the truncation marker length")
         self._buffer: list[str] = []
+        self._offload_seed: list[str] = []
         self._n_chars = 0
         self._n_lines = 0
         self._truncation_happened = False
@@ -153,6 +154,7 @@ class ToolResultBuilder:
                 if self._offloader is not None:
                     overflow.append(original_line[kept:])
 
+            self._offload_seed.append(original_line[:kept])
             self._buffer.append(line)
             chars_written += len(line)
             self._n_chars += len(line)
@@ -173,7 +175,8 @@ class ToolResultBuilder:
             return
         if self._sink is None:
             self._sink = self._offloader.new_sink(tool_name=self._tool_name)
-            self._sink.write("".join(self._buffer))
+            self._sink.write("".join(self._offload_seed))
+            self._offload_seed.clear()
         self._sink.write(text)
 
     def _close_sink(self) -> None:

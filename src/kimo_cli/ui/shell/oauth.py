@@ -5,7 +5,8 @@ from typing import TYPE_CHECKING
 
 from kimo_cli.auth.platforms import is_managed_provider_key, parse_managed_provider_key
 from kimo_cli.cli import Reload
-from kimo_cli.config import save_config
+from kimo_cli.config import LLMModel, save_config
+from kimo_cli.exception import ConfigError
 from kimo_cli.soul.kimosoul import KimoSoul
 from kimo_cli.ui.shell.console import console
 from kimo_cli.ui.shell.setup import select_platform, setup_platform
@@ -75,18 +76,24 @@ async def logout(app: Shell, args: str) -> None:
         console.print("[yellow]Current provider is not managed; nothing to logout.[/yellow]")
         return
 
-    if provider_key in config.providers:
-        del config.providers[provider_key]
-    removed_default = False
+    removed_provider = config.providers.pop(provider_key, None)
+    removed_models: dict[str, LLMModel] = {}
+    prev_default = config.default_model
     for key, model in list(config.models.items()):
         if model.provider != provider_key:
             continue
-        del config.models[key]
+        removed_models[key] = config.models.pop(key)
         if config.default_model == key:
-            removed_default = True
-    if removed_default:
-        config.default_model = ""
-    save_config(config)
+            config.default_model = ""
+    try:
+        save_config(config)
+    except (ConfigError, OSError) as exc:
+        if removed_provider is not None:
+            config.providers[provider_key] = removed_provider
+        config.models.update(removed_models)
+        config.default_model = prev_default
+        console.print(f"[red]Failed to save config: {exc}[/red]")
+        return
     console.print("[green]✓[/green] Logged out successfully.")
 
     from kimo_cli.telemetry import track

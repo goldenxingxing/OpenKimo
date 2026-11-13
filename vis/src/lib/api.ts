@@ -364,7 +364,7 @@ export async function deleteSession(sessionId: string): Promise<void> {
       const detail = await res.json().catch(() => ({}));
       throw new Error(detail.detail || `Delete failed: ${res.status}`);
     }
-    apiCache.invalidate("sessions");
+    apiCache.clear();
   } catch (e) {
     if (e instanceof DOMException && e.name === "AbortError") {
       throw new Error("Delete request timed out");

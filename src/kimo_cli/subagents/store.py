@@ -73,7 +73,13 @@ class SubagentStore:
 
     def instance_dir(self, agent_id: str, *, create: bool = False) -> Path:
         # Reject traversal sequences in agent_id to prevent escaping root/.
-        if ".." in agent_id or "/" in agent_id or "\\" in agent_id:
+        if (
+            not agent_id
+            or agent_id == "."
+            or ".." in agent_id
+            or "/" in agent_id
+            or "\\" in agent_id
+        ):
             raise ValueError(f"Invalid agent_id (contains traversal): {agent_id!r}")
         path = self.root / agent_id
         if create:

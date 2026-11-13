@@ -189,7 +189,7 @@ class SSHKaos:
         try:
             st = await self._sftp.stat(str(path), follow_symlinks=follow_symlinks)
         except asyncssh.SFTPError as e:
-            raise OSError from e
+            raise OSError(e.code, e.reason) from e
 
         return StatResult(
             st_mode=_build_st_mode(st),

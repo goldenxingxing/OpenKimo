@@ -77,6 +77,9 @@ export const PromptToolbar = memo(function PromptToolbarComponent({
   const toggleTab = useCallback((tab: TabId) => {
     setActiveTab((prev) => (prev === tab ? null : tab));
   }, []);
+  const toggleQueueTab = useCallback(() => toggleTab("queue"), [toggleTab]);
+  const toggleChangesTab = useCallback(() => toggleTab("changes"), [toggleTab]);
+  const toggleTodoTab = useCallback(() => toggleTab("todo"), [toggleTab]);
 
   if (!(hasTabs || activityStatus || hasContext || planMode)) return null;
 
@@ -108,7 +111,7 @@ export const PromptToolbar = memo(function PromptToolbarComponent({
           <ToolbarQueueTab
             count={queue.length}
             isActive={activeTab === "queue"}
-            onToggle={() => toggleTab("queue")}
+            onToggle={toggleQueueTab}
           />
         )}
 
@@ -116,7 +119,7 @@ export const PromptToolbar = memo(function PromptToolbarComponent({
           <ToolbarChangesTab
             stats={stats}
             isActive={activeTab === "changes"}
-            onToggle={() => toggleTab("changes")}
+            onToggle={toggleChangesTab}
           />
         )}
 
@@ -125,7 +128,7 @@ export const PromptToolbar = memo(function PromptToolbarComponent({
             items={todoItems}
             stale={todoStale}
             isActive={activeTab === "todo"}
-            onToggle={() => toggleTab("todo")}
+            onToggle={toggleTodoTab}
           />
         )}
 

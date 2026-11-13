@@ -27,7 +27,7 @@ class NotificationManager:
         return self._store
 
     def new_id(self) -> str:
-        return f"n{uuid.uuid4().hex[:8]}"
+        return f"n{uuid.uuid4().hex}"
 
     def _initial_delivery(self, event: NotificationEvent) -> NotificationDelivery:
         return NotificationDelivery(sinks={sink: NotificationSinkState() for sink in event.targets})
@@ -117,6 +117,7 @@ class NotificationManager:
                 result = on_notification(view)
                 if result is not None:
                     await result
+                delivered.append(self.ack(sink, view.event.id))
             except Exception:
                 logger.exception(
                     "Notification handler failed for {sink}/{id}, leaving claimed for recovery",
@@ -124,7 +125,6 @@ class NotificationManager:
                     id=view.event.id,
                 )
                 continue
-            delivered.append(self.ack(sink, view.event.id))
         return delivered
 
     def ack(self, sink: str, notification_id: str) -> NotificationView:

@@ -125,9 +125,11 @@ export function bulkTargets(
 }
 
 /** Compact number formatting: 1234 -> "1.2K". */
+const COMPACT_COUNT = new Intl.NumberFormat("en-US", {
+  notation: "compact",
+  maximumFractionDigits: 1,
+});
+
 export function formatCount(value: number): string {
-  return new Intl.NumberFormat("en-US", {
-    notation: "compact",
-    maximumFractionDigits: 1,
-  }).format(value);
+  return COMPACT_COUNT.format(value);
 }

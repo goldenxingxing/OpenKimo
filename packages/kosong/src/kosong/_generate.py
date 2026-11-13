@@ -40,7 +40,8 @@ async def generate(
             response header as soon as it is available (before streaming starts).
 
     Returns:
-        A tuple of the generated message and the token usage (if available).
+        A `GenerateResult` with the generated message and metadata such as the token usage
+        (if available).
         All parts in the message are guaranteed to be complete and merged as much as possible.
 
     Raises:

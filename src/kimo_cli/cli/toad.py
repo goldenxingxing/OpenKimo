@@ -42,10 +42,12 @@ def _extract_project_dir(extra_args: list[str]) -> Path | None:
     while idx < len(extra_args):
         arg = extra_args[idx]
         if arg in ("--work-dir", "-w"):
-            if idx + 1 < len(extra_args):
-                work_dir = extra_args[idx + 1]
-                idx += 2
-                continue
+            if idx + 1 >= len(extra_args):
+                typer.echo(f"Error: {arg} requires a value.", err=True)
+                raise typer.Exit(code=2)
+            work_dir = extra_args[idx + 1]
+            idx += 2
+            continue
         elif arg.startswith("--work-dir=") or arg.startswith("-w="):
             work_dir = arg.split("=", 1)[1]
         elif arg.startswith("-w") and len(arg) > 2:

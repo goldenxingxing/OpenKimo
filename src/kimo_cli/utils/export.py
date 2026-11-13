@@ -121,8 +121,8 @@ def _format_tool_result_md(msg: Message, tool_name: str, hint: str) -> str:
     """Format a tool result message as a collapsible markdown block."""
     call_id = msg.tool_call_id or "unknown"
 
-    # Use _format_content_part_md for consistency with the rest of the module
-    # (message_stringify loses ThinkPart and leaks <system> tags)
+    # Use _format_content_part_md so ThinkPart blocks are preserved as
+    # <details> sections instead of being dropped by message_stringify.
     result_parts: list[str] = []
     for part in msg.content:
         text = _format_content_part_md(part)
@@ -527,6 +527,8 @@ _SENSITIVE_FILE_PATTERNS: tuple[str, ...] = (
 def is_sensitive_file(filename: str) -> bool:
     """Return True if *filename* looks like it may contain secrets."""
     name = filename.lower()
+    if name in (".env.example", ".env.sample", ".env.template"):
+        return False
     return any(pat in name for pat in _SENSITIVE_FILE_PATTERNS)
 
 

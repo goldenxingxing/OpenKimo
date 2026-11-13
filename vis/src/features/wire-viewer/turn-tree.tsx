@@ -21,8 +21,7 @@ interface SubagentNode {
   eventIndex: number;
   taskToolCallId: string;
   agentType?: string;
-  agentId?: string;
-  innerEvents: { type: string; summary: string }[];
+  innerEvents: { type: string; summary: string; eventIndex: number }[];
 }
 
 interface StepNode {
@@ -117,13 +116,12 @@ function buildTree(events: WireEvent[]): TurnNode[] {
           eventIndex: event.index,
           taskToolCallId: taskId,
           agentType: event.payload.subagent_type as string | undefined,
-          agentId: event.payload.agent_id as string | undefined,
           innerEvents: [],
         };
         subagentMap.set(taskId, node);
         currentStep.subagents.push(node);
       }
-      node.innerEvents.push({ type: innerType, summary });
+      node.innerEvents.push({ type: innerType, summary, eventIndex: event.index });
     } else if (event.type === "CompactionBegin" && currentTurn) {
       currentTurn.hasCompaction = true;
     } else if (isErrorEvent(event)) {
@@ -362,10 +360,10 @@ function SubagentNodeItem({
           {turns > 0 && `${turns}T `}{toolCalls.length > 0 && `${toolCalls.length}TC`}
         </span>
       </button>
-      {expanded && toolCalls.map((tc, i) => (
+      {expanded && toolCalls.map((tc) => (
         <button
-          key={i}
-          onClick={() => onScrollToIndex(node.eventIndex)}
+          key={tc.eventIndex}
+          onClick={() => onScrollToIndex(tc.eventIndex)}
           className="flex items-center gap-1 w-full pl-14 pr-2 py-0.5 text-left hover:bg-muted/50 transition-colors text-[9px] text-muted-foreground truncate"
         >
           {tc.summary}

@@ -908,12 +908,11 @@
 }
 
 tr[data-comment-highlight="true"] {
-  @apply !bg-[var(--color-yellow)]/20;
+  background-color: rgba(234, 179, 8, 0.2);
   transition: background-color 150ms ease;
 }
 
 .dark tr[data-comment-highlight="true"] {
-  @apply !bg-[var(--color-yellow)]/20;
   background-color: rgba(188, 133, 255, 0.22);
 }
 

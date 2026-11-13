@@ -55,7 +55,7 @@ class SimpleToolset:
         # Check if the return annotation is ToolReturnValue
         # Supports both actual type and string annotation (when using
         # `from __future__ import annotations`)
-        if return_annotation is ToolReturnValue:
+        if isinstance(return_annotation, type) and issubclass(return_annotation, ToolReturnValue):
             pass
         elif isinstance(return_annotation, str):
             # String annotation - check if it matches ToolReturnValue
@@ -128,6 +128,7 @@ class SimpleToolset:
                 ret = await tool.call(arguments)
                 return ToolResult(tool_call_id=tool_call.id, return_value=ret)
             except Exception as e:
-                return ToolResult(tool_call_id=tool_call.id, return_value=ToolRuntimeError(str(e)))
+                message = str(e) or type(e).__name__
+                return ToolResult(tool_call_id=tool_call.id, return_value=ToolRuntimeError(message))
 
         return asyncio.create_task(_call())

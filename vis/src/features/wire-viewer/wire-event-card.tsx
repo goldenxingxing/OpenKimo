@@ -442,9 +442,13 @@ function ExpandedPayload({ payload }: { payload: Record<string, unknown> }) {
   const text = JSON.stringify(payload, null, 2);
 
   const handleCopy = async () => {
-    await navigator.clipboard.writeText(text);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch {
+      // Clipboard may be unavailable (e.g. non-secure context); ignore.
+    }
   };
 
   return (

@@ -22,6 +22,20 @@ NAME = "EnterPlanMode"
 
 _DESCRIPTION = load_desc(Path(__file__).parent / "enter_description.md")
 
+_PLAN_MODE_INSTRUCTIONS = (
+    "You MUST NOT edit code files — only read and plan.\n"
+    "Plan file: {plan_path}\n"
+    "Workflow: identify key questions about the codebase → "
+    "use Agent(subagent_type='explore') to investigate if needed → "
+    "design approach → "
+    "modify the plan file with WriteFile or StrReplaceFile "
+    "(create it with WriteFile first if it does not exist) → "
+    "call ExitPlanMode.\n"
+    "Use AskUserQuestion only to clarify missing requirements or choose "
+    "between approaches.\n"
+    "Do NOT use AskUserQuestion to ask about plan approval."
+)
+
 
 class Params(BaseModel):
     pass
@@ -79,18 +93,8 @@ class EnterPlanMode(CallableTool2[Params]):
             return ToolReturnValue(
                 is_error=False,
                 output=(
-                    f"Plan mode activated (auto-approved; approval checks are bypassed).\n"
-                    f"You MUST NOT edit code files — only read and plan.\n"
-                    f"Plan file: {plan_path}\n"
-                    f"Workflow: identify key questions about the codebase → "
-                    f"use Agent(subagent_type='explore') to investigate if needed → "
-                    f"design approach → "
-                    f"modify the plan file with WriteFile or StrReplaceFile "
-                    f"(create it with WriteFile first if it does not exist) → "
-                    f"call ExitPlanMode.\n"
-                    f"Use AskUserQuestion only to clarify missing requirements or choose "
-                    f"between approaches.\n"
-                    f"Do NOT use AskUserQuestion to ask about plan approval."
+                    "Plan mode activated (auto-approved; approval checks are bypassed).\n"
+                    + _PLAN_MODE_INSTRUCTIONS.format(plan_path=plan_path)
                 ),
                 message="Plan mode on (auto)",
                 display=[BriefDisplayBlock(text="Plan mode on (auto)")],
@@ -171,17 +175,7 @@ class EnterPlanMode(CallableTool2[Params]):
             return ToolReturnValue(
                 is_error=False,
                 output=(
-                    f"Plan mode activated. You MUST NOT edit code files — only read and plan.\n"
-                    f"Plan file: {plan_path}\n"
-                    f"Workflow: identify key questions about the codebase → "
-                    f"use Agent(subagent_type='explore') to investigate if needed → "
-                    f"design approach → "
-                    f"modify the plan file with WriteFile or StrReplaceFile "
-                    f"(create it with WriteFile first if it does not exist) → "
-                    f"call ExitPlanMode.\n"
-                    f"Use AskUserQuestion only to clarify missing requirements or choose "
-                    f"between approaches.\n"
-                    f"Do NOT use AskUserQuestion to ask about plan approval."
+                    "Plan mode activated. " + _PLAN_MODE_INSTRUCTIONS.format(plan_path=plan_path)
                 ),
                 message="Plan mode on",
                 display=[BriefDisplayBlock(text="Plan mode on")],

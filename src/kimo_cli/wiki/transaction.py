@@ -186,15 +186,7 @@ class WikiTransaction:
             if recovery.writes_quarantined:
                 raise WikiRecoveryRequired("Wiki writes are quarantined pending journal repair")
             self._revalidate()
-            journal: _Journal | None = None
-            try:
-                journal = self._write_prepared_journal()
-            except BaseException:
-                # No target can be replaced until record.json is durable. Debris
-                # without that record is therefore safe to discard immediately.
-                if journal is not None and not journal.record_path.exists():
-                    _remove_tree_durably(journal.directory)
-                raise
+            journal = self._write_prepared_journal()
 
             journal = _read_journal(self.layout, journal.directory)
             for target in journal.targets:

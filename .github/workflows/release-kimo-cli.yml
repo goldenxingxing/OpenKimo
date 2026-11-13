@@ -5,6 +5,10 @@ on:
     tags:
       - "[0-9]*"
 
+concurrency:
+  group: release-kimo-cli-${{ github.ref }}
+  cancel-in-progress: false
+
 permissions:
   contents: write
 
@@ -12,6 +16,7 @@ jobs:
   validate:
     name: Validate tag
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -40,6 +45,7 @@ jobs:
   build:
     name: Build binaries (${{ matrix.target }})
     needs: validate
+    timeout-minutes: 90
     strategy:
       fail-fast: false
       matrix:
@@ -397,8 +403,10 @@ jobs:
               with zipfile.ZipFile(archive_path, "w", compression=zipfile.ZIP_DEFLATED) as archive_file:
                   # Add the directory contents with kimo/ as the root
                   for item in onedir_path.rglob("*"):
-                      if item.is_file():
-                          arcname = f"kimo/{item.relative_to(onedir_path)}"
+                      arcname = f"kimo/{item.relative_to(onedir_path)}"
+                      if item.is_dir():
+                          archive_file.writestr(f"{arcname}/", "")
+                      elif item.is_file():
                           archive_file.write(item, arcname=arcname)
           else:
               archive_name = f"kimo-{tag}-{target}-onedir.tar.gz"
@@ -432,6 +440,7 @@ jobs:
     name: Publish GitHub Release
     needs: build
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - name: Download all build artifacts
         uses: actions/download-artifact@v4
@@ -472,6 +481,7 @@ jobs:
     name: Publish Python package
     needs: [validate, release]
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     env:
       KIMO_WEB_STRICT_VERSION: "1"
       KIMO_WEB_EXPECT_VERSION: ${{ github.ref_name }}

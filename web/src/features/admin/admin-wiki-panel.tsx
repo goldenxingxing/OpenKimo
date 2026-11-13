@@ -179,6 +179,7 @@ export function AdminWikiPanel() {
     if (!selected) {
       pageRequest.current++;
       setPage(null);
+      setPageLoading(false);
       return;
     }
     const summary = overview?.pages.find((item) => item.path === selected);
@@ -187,6 +188,7 @@ export function AdminWikiPanel() {
       // Nothing to fetch: the server cannot parse it either.
       setPage(null);
       setPageError(null);
+      setPageLoading(false);
       return;
     }
     loadPage(selected);

@@ -49,7 +49,7 @@ def main() -> int:
 
     try:
         root_project = load_project_table(args.root_pyproject)
-    except ValueError as exc:
+    except (OSError, ValueError) as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 1
 
@@ -68,7 +68,7 @@ def main() -> int:
     ):
         try:
             package_version = load_project_version(pyproject_path)
-        except ValueError as exc:
+        except (OSError, ValueError) as exc:
             errors.append(str(exc))
             continue
 

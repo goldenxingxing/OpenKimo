@@ -780,7 +780,7 @@ def copy_app_main(resources: Path, cfg: BuildConfig | None = None) -> None:
     if dest.exists():
         shutil.rmtree(dest)
     shutil.copytree(src, dest, ignore=shutil.ignore_patterns("__pycache__", "*.pyc"))
-    if cfg and cfg.default_port:
+    if cfg and cfg.default_port is not None:
         _patch_default_port(dest, cfg.default_port)
 
 

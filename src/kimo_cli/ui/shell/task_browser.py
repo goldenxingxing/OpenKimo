@@ -132,6 +132,10 @@ class TaskBrowserModel:
             ("class:header.meta", f" filter={scope} "),
             ("class:status.running", f" {counts['running']} running "),
             ("class:status.info", f" {counts['starting']} starting "),
+            (
+                "class:status.info",
+                f" {counts.get('created', 0) + counts.get('awaiting_approval', 0)} pending ",
+            ),
             ("class:status.error", f" {counts['failed']} failed "),
             ("class:status.success", f" {counts['completed']} completed "),
             ("class:status.warning", f" {counts['killed'] + counts['lost']} interrupted "),
@@ -185,12 +189,12 @@ class TaskBrowserModel:
 
         path = self.manager.resolve_output_path(view.spec.id)
         total_size = path.stat().st_size if path.exists() else 0
+        max_bytes = max(self.config.read_max_bytes * 10, _FULL_OUTPUT_MAX_BYTES)
         output = self.manager.tail_output(
             view.spec.id,
-            max_bytes=max(self.config.read_max_bytes * 10, _FULL_OUTPUT_MAX_BYTES),
+            max_bytes=max_bytes,
             max_lines=_FULL_OUTPUT_MAX_LINES,
         )
-        max_bytes = max(self.config.read_max_bytes * 10, _FULL_OUTPUT_MAX_BYTES)
         if total_size > max_bytes:
             return (
                 f"[showing last {max_bytes} bytes of {total_size} bytes]\n\n"

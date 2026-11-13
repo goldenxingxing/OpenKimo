@@ -302,6 +302,7 @@ export function AdminSkillsPanel() {
       try {
         await deleteSkill(skill.name);
         await load();
+        await loadUsage();
         toast.success(t("toasts.deleted", { name: skill.name }));
         setDeleteTarget(null);
       } catch (error) {
@@ -310,7 +311,7 @@ export function AdminSkillsPanel() {
         setBusy(null);
       }
     },
-    [load, t],
+    [load, loadUsage, t],
   );
 
   const upload = useCallback(

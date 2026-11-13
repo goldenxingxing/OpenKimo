@@ -115,6 +115,8 @@ def prune(path: Path, keep_names: set[str], *, allow_empty: bool = False) -> Non
     try:
         with os.fdopen(fd, "w", encoding="utf-8") as f:
             f.write(new_text)
+            f.flush()
+            os.fsync(f.fileno())
         os.replace(tmp, path)
     except Exception:
         try:
@@ -200,6 +202,8 @@ def update_providers(path: Path, providers: list[dict[str, Any]]) -> None:
     try:
         with os.fdopen(fd, "w", encoding="utf-8") as f:
             f.write(new_text)
+            f.flush()
+            os.fsync(f.fileno())
         os.replace(tmp, path)
     except Exception:
         try:
@@ -305,6 +309,8 @@ def update_models(path: Path, models: list[dict[str, Any]]) -> None:
     try:
         with os.fdopen(fd, "w", encoding="utf-8") as f:
             f.write(new_text)
+            f.flush()
+            os.fsync(f.fileno())
         os.replace(tmp, path)
     except Exception:
         try:
@@ -353,6 +359,8 @@ def set_default_model(path: Path, default: str) -> None:
     try:
         with os.fdopen(fd, "w", encoding="utf-8") as f:
             f.write(new_text)
+            f.flush()
+            os.fsync(f.fileno())
         os.replace(tmp, path)
     except Exception:
         try:
@@ -429,6 +437,8 @@ def set_skipped_skill_dirs(path: Path, dirs: list[str]) -> None:
     try:
         with os.fdopen(fd, "w", encoding="utf-8") as f:
             f.write(new_text)
+            f.flush()
+            os.fsync(f.fileno())
         os.replace(tmp, path)
     except Exception:
         try:
@@ -512,6 +522,8 @@ def set_compaction_ratio(path: Path, ratio: float) -> None:
     try:
         with os.fdopen(fd, "w", encoding="utf-8") as f:
             f.write(new_text)
+            f.flush()
+            os.fsync(f.fileno())
         os.replace(tmp, path)
     except Exception:
         try:

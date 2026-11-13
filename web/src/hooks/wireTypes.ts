@@ -519,7 +519,10 @@ export function extractEvent(message: WireMessage): WireEvent | null {
     return null;
   }
 
-  const params = message.params as { type: string; payload: unknown };
+  const params = message.params as { type?: string; payload?: unknown };
+  if (typeof params.type !== "string" || params.type.length === 0) {
+    return null;
+  }
   const type = EVENT_TYPE_ALIASES[params.type] ?? params.type;
   return {
     type,

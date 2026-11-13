@@ -628,10 +628,13 @@ plt.rcParams['axes.unicode_minus'] = False
         try:
             if self.kc:
                 self.kc.stop_channels()
+        except Exception as e:
+            print(f"Error stopping channels: {str(e)}")
+        try:
             if self.km:
                 self.km.shutdown_kernel()
         except Exception as e:
-            print(f"Error during kernel shutdown: {str(e)}")
+            print(f"Error shutting down kernel: {str(e)}")
         finally:
             self.kc = None
             self.km = None

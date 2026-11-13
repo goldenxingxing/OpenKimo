@@ -148,7 +148,7 @@ ask_int() {
   local __value
   while true; do
     ask __value "$__prompt" "$__default"
-    if [[ "$__value" =~ ^[0-9]+$ ]] && [ "$__value" -ge "$__min" ] && [ "$__value" -le "$__max" ]; then
+    if [[ "$__value" =~ ^[0-9]+$ ]] && [ "$((10#$__value))" -ge "$__min" ] && [ "$((10#$__value))" -le "$__max" ]; then
       printf -v "$__var" "%s" "$__value"
       return 0
     fi
@@ -223,7 +223,7 @@ check_prereqs() {
     missing=1
   fi
 
-  if ! docker info >/dev/null 2>&1; then
+  if command -v docker >/dev/null 2>&1 && ! docker info >/dev/null 2>&1; then
     err "Docker daemon 未运行，请启动 Docker Desktop / dockerd 后重试"
     missing=1
   fi
@@ -398,7 +398,10 @@ onboard_env() {
 # `Projects/OpenKimo/data/sessions`, dying under `set -e` before starting
 # anything.
 envq() {
-  printf "'%s'" "$(printf '%s' "$1" | sed "s/'/'\\\\''/g")"
+  # Compose's dotenv parser does not interpret backslash escapes, so split a
+  # single quote into adjacent quoted segments ('"'"') that both bash and
+  # compose concatenate back into a literal "'".
+  printf "'%s'" "$(printf '%s' "$1" | sed "s/'/'\"'\"'/g")"
 }
 
   # ---- Write .env ----
@@ -502,7 +505,17 @@ print_summary() {
   section "部署完成 🎉"
   printf "  Web UI:    ${C_CYAN}http://localhost:%s${C_RESET}\n" "${port:-5494}"
   if [ -n "$token" ] && [ "$token" != "change-me" ]; then
-    printf "  带 Token:  ${C_CYAN}http://localhost:%s/?token=%s${C_RESET}\n" "${port:-5494}" "$token"
+    # Percent-encode: a custom token containing '&', '#', '=' or '%' would
+    # otherwise truncate the URL or be read as extra query parameters.
+    local _enc="" _c _i
+    for ((_i = 0; _i < ${#token}; _i++)); do
+      _c="${token:_i:1}"
+      case "$_c" in
+        [A-Za-z0-9._~-]) _enc+="$_c" ;;
+        *) printf -v _c '%%%02X' "'$_c"; _enc+="$_c" ;;
+      esac
+    done
+    printf "  带 Token:  ${C_CYAN}http://localhost:%s/?token=%s${C_RESET}\n" "${port:-5494}" "$_enc"
   fi
   echo
   local admin_password

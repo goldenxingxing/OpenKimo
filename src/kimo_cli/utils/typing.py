@@ -7,7 +7,7 @@ def flatten_union(tp: Any) -> tuple[Any, ...]:
     If `tp` is a `UnionType`, return its flattened arguments as a tuple.
     Otherwise, return a tuple with `tp` as the only element.
     """
-    if isinstance(tp, TypeAliasType):
+    while isinstance(tp, TypeAliasType):
         tp = tp.__value__
     origin = get_origin(tp)
     if origin in (UnionType, Union):

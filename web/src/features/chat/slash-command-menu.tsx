@@ -47,7 +47,11 @@ export const SlashCommandMenu = ({
             <div className="px-3 pb-1 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
               {t("commands.heading")}
             </div>
-            <div className="max-h-80 overflow-y-auto px-1 [-webkit-overflow-scrolling:touch]">
+            <div
+              role="listbox"
+              aria-label={t("commands.heading")}
+              className="max-h-80 overflow-y-auto px-1 [-webkit-overflow-scrolling:touch]"
+            >
               {options.map((option, index) => {
                 const isActive = index === activeIndex;
                 return (
@@ -55,6 +59,8 @@ export const SlashCommandMenu = ({
                     key={option.id}
                     ref={isActive ? activeItemRef : null}
                     type="button"
+                    role="option"
+                    aria-selected={isActive}
                     className={cn(
                       "flex w-full items-center gap-2 rounded-md px-2 py-1 text-left text-sm transition-colors my-0.5",
                       isActive

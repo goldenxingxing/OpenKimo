@@ -47,12 +47,13 @@ export function OpenInButton({
   const { t } = useTranslation("chat");
   const isMac = isMacOS();
 
+  // biome-ignore lint/correctness/useExhaustiveDependencies: t re-snapshots translated labels when the language changes
   const targets = useMemo<OpenTarget[]>(
     () =>
       ALL_OPEN_TARGETS.filter(
         (t) => BUTTON_TARGET_IDS.has(t.id) && (!t.macOnly || isMac),
       ).map((t) => ({ ...t, icon: ICON_MAP[t.id] })),
-    [isMac],
+    [isMac, t],
   );
 
   const handleOpen = useCallback(

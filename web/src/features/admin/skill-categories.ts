@@ -103,7 +103,6 @@ const CATEGORY_ALIASES: Record<string, KnownCategoryId> = {
   content: "writing",
   copywriting: "writing",
   translation: "writing",
-  comms: "comms",
   email: "comms",
   productivity: "comms",
   documents: "docs",

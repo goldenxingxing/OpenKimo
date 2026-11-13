@@ -40,8 +40,6 @@ type ProviderType = Literal[
 
 type ModelCapability = Literal["image_in", "video_in", "thinking", "always_thinking"]
 ALL_MODEL_CAPABILITIES: set[ModelCapability] = set(get_args(ModelCapability.__value__))
-DEFAULT_UNKNOWN_CONTEXT_COMPLETION_TOKENS = 32_000
-DEFAULT_COMPLETION_TOKEN_SAFETY_MARGIN = 1_024
 MEDIA_TOKEN_ESTIMATE = 2_000
 
 

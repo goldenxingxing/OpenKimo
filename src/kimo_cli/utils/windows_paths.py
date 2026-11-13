@@ -28,7 +28,13 @@ def posix_path_to_windows(path: str) -> str:
         return path.replace("/", "\\")
 
     # Cygwin drive: /cygdrive/c/... -> C:\...
-    if path.startswith("/cygdrive/") and len(path) >= 11 and path[11:12] in ("/", ""):
+    if (
+        path.startswith("/cygdrive/")
+        and len(path) >= 11
+        and path[10].isascii()
+        and path[10].isalpha()
+        and path[11:12] in ("/", "")
+    ):
         drive = path[10].upper()
         rest = path[11:].replace("/", "\\") or "\\"
         return drive + ":" + rest
@@ -37,6 +43,7 @@ def posix_path_to_windows(path: str) -> str:
     if (
         len(path) >= 2
         and path[0] == "/"
+        and path[1].isascii()
         and path[1].isalpha()
         and (len(path) == 2 or path[2] == "/")
     ):

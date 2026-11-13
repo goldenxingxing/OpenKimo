@@ -84,7 +84,10 @@ def _write_verified_local(target: Path, root: Path, content: str, append: bool) 
     """Write through a stable local file descriptor or fail closed."""
     if not hasattr(os, "O_NOFOLLOW"):
         raise ManagedWikiMutationBlocked("secure no-follow writes are unavailable")
-    root = root.resolve(strict=True)
+    try:
+        root = root.resolve(strict=True)
+    except OSError as exc:
+        raise ManagedWikiMutationBlocked("managed Wiki root cannot be verified") from exc
     resolved = target.resolve(strict=False)
     if resolved.is_relative_to(root):
         raise ManagedWikiMutationBlocked("target resolves inside managed Wiki")
@@ -119,7 +122,10 @@ def _write_verified_windows(target: Path, root: Path, content: str, append: bool
     aliased managed-root target is rejected; ordinary one-link workspace files
     remain writable.
     """
-    root = root.resolve(strict=True)
+    try:
+        root = root.resolve(strict=True)
+    except OSError as exc:
+        raise ManagedWikiMutationBlocked("managed Wiki root cannot be verified") from exc
     resolved = target.resolve(strict=False)
     if resolved.is_relative_to(root):
         raise ManagedWikiMutationBlocked("target resolves inside managed Wiki")

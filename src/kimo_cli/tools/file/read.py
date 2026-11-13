@@ -38,8 +38,8 @@ class Params(BaseModel):
     n_lines: int = Field(
         description=(
             "The number of lines to read. "
-            f"By default read up to {MAX_LINES} lines, which is the max allowed value. "
-            "Set this value when the file is too large to read at once."
+            f"By default read up to {MAX_LINES} lines; larger values are capped "
+            "at this limit. Set this value when the file is too large to read at once."
         ),
         default=MAX_LINES,
         ge=1,

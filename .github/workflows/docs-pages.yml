@@ -5,6 +5,11 @@ on:
     branches:
       - main
 
+# Deployments should queue rather than cancel an in-progress publish.
+concurrency:
+  group: pages-deploy
+  cancel-in-progress: false
+
 permissions:
   contents: read
   pages: write
@@ -14,6 +19,7 @@ jobs:
   deploy:
     # Only run on the original repository, not on forks
     if: github.repository == 'goldenxingxing/OpenKimo'
+    timeout-minutes: 20
     runs-on: ubuntu-latest
     environment:
       name: github-pages

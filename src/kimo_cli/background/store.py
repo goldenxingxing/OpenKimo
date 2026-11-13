@@ -245,6 +245,12 @@ class BackgroundTaskStore:
             f.seek(start)
             content = f.read()
 
+        if start > 0:
+            # The byte cut may fall inside a multi-byte UTF-8 sequence; drop
+            # its orphaned continuation bytes so the head does not decode to
+            # U+FFFD.
+            while content and (content[0] & 0xC0) == 0x80:
+                content = content[1:]
         text = content.decode("utf-8", errors="replace")
         lines = text.splitlines()
         if len(lines) > max_lines:

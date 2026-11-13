@@ -305,7 +305,7 @@ class AsyncTransport:
             except _TransientError:
                 # Still failing — leave file for next startup
                 logger.debug("Retry of {path} failed, will try again later", path=path)
-            except json.JSONDecodeError:
+            except (json.JSONDecodeError, TypeError):
                 # Corrupted file — delete it
                 logger.debug("Removing corrupted telemetry file: {path}", path=path)
                 path.unlink(missing_ok=True)

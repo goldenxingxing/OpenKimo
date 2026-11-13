@@ -42,7 +42,7 @@ def find_available_port(host: str, start_port: int, max_attempts: int = 10) -> i
             try:
                 s.bind((host, port))
                 return port
-            except OSError:
+            except (OSError, OverflowError):
                 continue
     raise RuntimeError(
         f"Cannot find available port in range {start_port}-{start_port + max_attempts - 1}"
@@ -80,7 +80,7 @@ def get_network_addresses() -> list[str]:
                     addr = addr_info.get("addr")
                     if addr and not addr.startswith("127.") and addr not in addresses:
                         addresses.append(addr)
-    except (ImportError, Exception):
+    except Exception:
         pass
 
     return addresses

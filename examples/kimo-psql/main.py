@@ -169,7 +169,11 @@ class PsqlProcess:
 
         if pid == 0:
             # Child process: exec psql
-            os.execvp("psql", self.psql_args)
+            try:
+                os.execvp("psql", self.psql_args)
+            except OSError as e:
+                os.write(2, f"kimo-psql: failed to exec psql: {e}\n".encode())
+                os._exit(127)
         else:
             # Parent process
             self._pid = pid
@@ -237,10 +241,12 @@ class PsqlProcess:
                 os.waitpid(self._pid, 0)
             except (ProcessLookupError, ChildProcessError):
                 pass
+            self._pid = None
 
         if self._master_fd is not None:
             with contextlib.suppress(OSError):
                 os.close(self._master_fd)
+            self._master_fd = None
 
         # Restore original terminal settings
         if self._original_termios and sys.stdin.isatty():

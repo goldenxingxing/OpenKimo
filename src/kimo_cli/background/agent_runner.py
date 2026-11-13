@@ -50,6 +50,7 @@ class BackgroundAgentRunner:
         self._resumed = resumed
         self._builder = SubagentBuilder(runtime)
         self._approval_update_tasks: set[asyncio.Task[None]] = set()
+        self._approval_update_lock = asyncio.Lock()
 
     async def run(self) -> None:
         assert self._runtime.approval_runtime is not None
@@ -123,7 +124,7 @@ class BackgroundAgentRunner:
                 for task in list(self._approval_update_tasks):
                     task.cancel()
                 for task in list(self._approval_update_tasks):
-                    with contextlib.suppress(asyncio.CancelledError):
+                    with contextlib.suppress(asyncio.CancelledError, Exception):
                         await task
                 self._runtime.approval_runtime.unsubscribe(approval_subscription)
                 self._runtime.approval_runtime.cancel_by_source("background_agent", self._task_id)
@@ -244,26 +245,31 @@ class BackgroundAgentRunner:
         task.add_done_callback(self._log_approval_update_failure)
 
     async def _apply_approval_runtime_event(self, event: ApprovalRuntimeEvent) -> None:
-        request = event.request
-        if event.kind == "request_created":
-            await asyncio.to_thread(
-                self._manager._mark_task_awaiting_approval,
-                self._task_id,
-                request.description,
-            )
-        elif event.kind == "request_resolved":
-            assert self._runtime.approval_runtime is not None
-            pending_for_task = [
-                pending
-                for pending in self._runtime.approval_runtime.list_pending()
-                if pending.source.kind == "background_agent" and pending.source.id == self._task_id
-            ]
-            if pending_for_task:
-                return
-            await asyncio.to_thread(
-                self._manager._mark_task_running,
-                self._task_id,
-            )
+        # Events arrive as separate tasks; holding a lock keeps their
+        # to_thread state writes in dispatch order so a resolved request
+        # cannot overwrite a newer awaiting_approval state (or vice versa).
+        async with self._approval_update_lock:
+            request = event.request
+            if event.kind == "request_created":
+                await asyncio.to_thread(
+                    self._manager._mark_task_awaiting_approval,
+                    self._task_id,
+                    request.description,
+                )
+            elif event.kind == "request_resolved":
+                assert self._runtime.approval_runtime is not None
+                pending_for_task = [
+                    pending
+                    for pending in self._runtime.approval_runtime.list_pending()
+                    if pending.source.kind == "background_agent"
+                    and pending.source.id == self._task_id
+                ]
+                if pending_for_task:
+                    return
+                await asyncio.to_thread(
+                    self._manager._mark_task_running,
+                    self._task_id,
+                )
 
     @staticmethod
     def _log_approval_update_failure(task: asyncio.Task[None]) -> None:

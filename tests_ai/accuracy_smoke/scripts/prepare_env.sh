@@ -30,6 +30,11 @@ if [ ! -d "${TARGET_DIR}" ]; then
 fi
 
 echo "Checking out Terminal-Bench-2 pinned ref: ${TERMINAL_BENCH_2_REF}"
+if ! git -C "${TARGET_DIR}" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+  echo "Terminal-Bench-2 cache is not a git repository: ${TARGET_DIR}" >&2
+  exit 1
+fi
+git -C "${TARGET_DIR}" remote set-url origin "${CLONE_URL}"
 git -C "${TARGET_DIR}" fetch --depth 1 origin "${TERMINAL_BENCH_2_REF}"
 git -C "${TARGET_DIR}" reset --hard FETCH_HEAD
 

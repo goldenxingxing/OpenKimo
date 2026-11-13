@@ -56,13 +56,15 @@ def _status_line(state: ServerState, port: int) -> str:
 def _write_terminal_init(p: paths_mod.AppPaths) -> Path:
     """Materialise a one-shot init script for ``Open Terminal Here``."""
     script = p.app_support / "shell-init.command"
+    bin_dirs = shlex.quote(str(p.userbase_bin) + ":" + str(p.bundled_python_bin))
+    greeting = shlex.quote("▶ " + p.app_name + " Python env active.")
     script.write_text(
         "#!/bin/bash\n"
-        f'cd "{p.work_dir}"\n'
-        f'export PYTHONUSERBASE="{p.userbase}"\n'
-        f'export PIP_CONFIG_FILE="{p.pip_conf}"\n'
-        f'export PATH="{p.userbase_bin}:{p.bundled_python_bin}:$PATH"\n'
-        f'echo "▶ {p.app_name} Python env active. python: $(python --version)"\n'
+        f"cd {shlex.quote(str(p.work_dir))}\n"
+        f"export PYTHONUSERBASE={shlex.quote(str(p.userbase))}\n"
+        f"export PIP_CONFIG_FILE={shlex.quote(str(p.pip_conf))}\n"
+        f'export PATH={bin_dirs}:"$PATH"\n'
+        f'echo {greeting} "python: $(python --version)"\n'
         'exec "$SHELL" -i\n'
     )
     script.chmod(0o755)

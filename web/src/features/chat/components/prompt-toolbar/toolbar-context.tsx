@@ -15,6 +15,8 @@ import { cn } from "@/lib/utils";
 import type { TokenUsage } from "@/hooks/wireTypes";
 import { useTranslation } from "react-i18next";
 
+const COMPACT_NUMBER = new Intl.NumberFormat("en-US", { notation: "compact" });
+
 type ToolbarContextIndicatorProps = {
   usagePercent: number;
   usedTokens: number;
@@ -34,12 +36,8 @@ export const ToolbarContextIndicator = memo(
     const { t } = useTranslation("tokens");
     const usedPercent = maxTokens > 0 ? usedTokens / maxTokens : 0;
 
-    const used = new Intl.NumberFormat("en-US", {
-      notation: "compact",
-    }).format(usedTokens);
-    const total = new Intl.NumberFormat("en-US", {
-      notation: "compact",
-    }).format(maxTokens);
+    const used = COMPACT_NUMBER.format(usedTokens);
+    const total = COMPACT_NUMBER.format(maxTokens);
 
     return (
       <HoverCard openDelay={200} closeDelay={150}>
@@ -102,7 +100,7 @@ export const ToolbarContextIndicator = memo(
                 <div className="flex items-center justify-between text-xs font-medium border-t mt-1 pt-1">
                   <span>{t("context.totalInput")}</span>
                   <span>
-                    {new Intl.NumberFormat("en-US", { notation: "compact" }).format(
+                    {COMPACT_NUMBER.format(
                       tokenUsage.input_other +
                       tokenUsage.input_cache_read +
                       tokenUsage.input_cache_creation
@@ -142,7 +140,7 @@ const RawUsageRow = ({
     <div className="flex items-center justify-between text-xs">
       <span className="text-muted-foreground">{label}</span>
       <span>
-        {new Intl.NumberFormat("en-US", { notation: "compact" }).format(value)}
+        {COMPACT_NUMBER.format(value)}
       </span>
     </div>
   );

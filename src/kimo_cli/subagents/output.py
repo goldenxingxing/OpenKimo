@@ -26,19 +26,19 @@ class SubagentOutputWriter:
         self._extra_paths = extra_paths
 
     def stage(self, name: str) -> None:
-        self._append(f"[stage] {name}\n")
+        self._append(f"\n[stage] {name}\n")
 
     def tool_call(self, tc: ToolCall) -> None:
         name = tc.function.name if tc.function else "?"
-        self._append(f"[tool] {name}\n")
+        self._append(f"\n[tool] {name}\n")
 
     def tool_result(self, tr: ToolResult) -> None:
         status = "error" if tr.return_value.is_error else "success"
         brief = getattr(tr.return_value, "brief", None)
         if brief:
-            self._append(f"[tool_result] {status}: {brief}\n")
+            self._append(f"\n[tool_result] {status}: {brief}\n")
         else:
-            self._append(f"[tool_result] {status}\n")
+            self._append(f"\n[tool_result] {status}\n")
 
     def text(self, text: str) -> None:
         if text:
@@ -49,7 +49,7 @@ class SubagentOutputWriter:
             self._append(f"\n[summary]\n{text}\n")
 
     def error(self, message: str) -> None:
-        self._append(f"[error] {message}\n")
+        self._append(f"\n[error] {message}\n")
 
     def write_wire_message(self, msg: object) -> None:
         """Dispatch a wire message to the appropriate writer method."""

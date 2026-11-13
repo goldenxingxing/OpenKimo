@@ -25,9 +25,10 @@ import urllib.error
 import urllib.parse
 import urllib.request
 import uuid
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any
 
 
 @dataclass(frozen=True)
@@ -66,6 +67,13 @@ class ApiError(RuntimeError):
 
 #: Longest a Retry-After is allowed to hold up a release sync.
 MAX_RETRY_AFTER_SECONDS = 60
+
+#: Upper bound on each HTTP call so a hung peer cannot block CI forever.
+REQUEST_TIMEOUT_SECONDS = 30
+
+
+def _urlopen(request: urllib.request.Request) -> Any:
+    return urllib.request.urlopen(request, timeout=REQUEST_TIMEOUT_SECONDS)
 
 
 def _is_rate_limited(headers) -> bool:
@@ -117,7 +125,7 @@ class ApiClient:
         *,
         token: str,
         token_style: str,
-        opener: Callable[[urllib.request.Request], Any] = urllib.request.urlopen,
+        opener: Callable[[urllib.request.Request], Any] = _urlopen,
         sleeper: Callable[[float], None] = time.sleep,
     ):
         if token_style not in {"bearer", "query"}:
@@ -159,9 +167,7 @@ class ApiClient:
                     error.code == 403 and _is_rate_limited(error.headers)
                 )
                 if not rate_limited and error.code < 500:
-                    raise ApiError(
-                        error.code, f"request failed with HTTP {error.code}"
-                    ) from None
+                    raise ApiError(error.code, f"request failed with HTTP {error.code}") from None
                 if attempt == 2:
                     raise ApiError(
                         error.code,
@@ -191,9 +197,7 @@ class ApiClient:
         if fields is not None:
             data = urllib.parse.urlencode(fields).encode()
             headers["Content-Type"] = "application/x-www-form-urlencoded"
-        request = urllib.request.Request(
-            self._url(path), data=data, headers=headers, method=method
-        )
+        request = urllib.request.Request(self._url(path), data=data, headers=headers, method=method)
         response = self._open(request)
         payload = response.read()
         if not payload:
@@ -203,9 +207,7 @@ class ApiClient:
     def download(self, path: str, destination: Path) -> None:
         headers = self._headers()
         headers["Accept"] = "application/octet-stream"
-        request = urllib.request.Request(
-            self._url(path), headers=headers, method="GET"
-        )
+        request = urllib.request.Request(self._url(path), headers=headers, method="GET")
         response = self._open(request)
         with destination.open("wb") as output:
             while True:
@@ -225,17 +227,14 @@ class ApiClient:
         body = bytearray()
         for name, value in fields.items():
             body.extend(f"--{boundary}\r\n".encode())
-            body.extend(
-                f'Content-Disposition: form-data; name="{name}"\r\n\r\n'.encode()
-            )
+            body.extend(f'Content-Disposition: form-data; name="{name}"\r\n\r\n'.encode())
             body.extend(str(value).encode())
             body.extend(b"\r\n")
         content_type = mimetypes.guess_type(file_path.name)[0] or "application/octet-stream"
         body.extend(f"--{boundary}\r\n".encode())
         body.extend(
             (
-                f'Content-Disposition: form-data; name="file"; '
-                f'filename="{file_path.name}"\r\n'
+                f'Content-Disposition: form-data; name="file"; filename="{file_path.name}"\r\n'
             ).encode()
         )
         body.extend(f"Content-Type: {content_type}\r\n\r\n".encode())
@@ -311,9 +310,7 @@ class GiteeReleaseTarget:
     def sync_metadata(self, release: Release) -> int:
         encoded_tag = urllib.parse.quote(release.tag, safe="")
         try:
-            existing = self.api.request_json(
-                "GET", f"{self.releases_path}/tags/{encoded_tag}"
-            )
+            existing = self.api.request_json("GET", f"{self.releases_path}/tags/{encoded_tag}")
         except ApiError as error:
             if error.status != 404:
                 raise
@@ -331,9 +328,7 @@ class GiteeReleaseTarget:
         }
         if existing is None:
             fields["target_commitish"] = self.default_branch()
-            synchronized = self.api.request_json(
-                "POST", self.releases_path, fields=fields
-            )
+            synchronized = self.api.request_json("POST", self.releases_path, fields=fields)
         else:
             synchronized = self.api.request_json(
                 "PATCH",
@@ -342,16 +337,12 @@ class GiteeReleaseTarget:
             )
         return int(synchronized["id"])
 
-    def replace_asset(
-        self, release_id: int, asset: Asset, file_path: Path
-    ) -> None:
+    def replace_asset(self, release_id: int, asset: Asset, file_path: Path) -> None:
         attachments_path = f"{self.releases_path}/{release_id}/attach_files"
         attachments = self.api.request_json("GET", attachments_path)
         for attachment in attachments:
             if attachment.get("name") == asset.name:
-                self.api.request_json(
-                    "DELETE", f"{attachments_path}/{attachment['id']}"
-                )
+                self.api.request_json("DELETE", f"{attachments_path}/{attachment['id']}")
         self.api.upload(attachments_path, fields={}, file_path=file_path)
 
     def sync(self, release: Release) -> None:
@@ -395,17 +386,13 @@ def main() -> None:
         token=require_environment("GITEE_ACCESS_TOKEN"),
         token_style="query",
     )
-    source = GitHubReleaseSource(
-        github_api, github_owner, github_repository
-    )
+    source = GitHubReleaseSource(github_api, github_owner, github_repository)
     target = GiteeReleaseTarget(gitee_api, gitee_owner, gitee_repository)
     release = source.get_release(arguments.tag)
 
     target.sync(release)
 
-    print(
-        f"Synchronized {release.tag} with {len(release.assets)} download link(s) to Gitee"
-    )
+    print(f"Synchronized {release.tag} with {len(release.assets)} download link(s) to Gitee")
 
 
 if __name__ == "__main__":

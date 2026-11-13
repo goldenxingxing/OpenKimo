@@ -79,7 +79,7 @@ def _read_epoch(path: Path) -> int:
     if not isinstance(data, dict):
         raise ValueError(f"Invalid lease payload in {path}: {data!r}")
     epoch = data.get("epoch", 0)
-    if not isinstance(epoch, int) or epoch < 0:
+    if not isinstance(epoch, int) or isinstance(epoch, bool) or epoch < 0:
         raise ValueError(f"Invalid lease epoch in {path}: {epoch!r}")
     return epoch
 

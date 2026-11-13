@@ -1,10 +1,10 @@
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 
 
 def format_relative_time(timestamp: float) -> str:
     """Format a timestamp as a relative time string."""
-    now = datetime.now()
-    dt = datetime.fromtimestamp(timestamp)
+    now = datetime.now(UTC)
+    dt = datetime.fromtimestamp(timestamp, UTC)
     diff = now - dt
     if diff < timedelta(minutes=5):
         return "just now"
@@ -16,7 +16,7 @@ def format_relative_time(timestamp: float) -> str:
         return f"{hours}h ago"
     if diff < timedelta(days=7):
         return f"{diff.days}d ago"
-    return dt.strftime("%m-%d")
+    return dt.astimezone().strftime("%m-%d")
 
 
 def format_duration(seconds: int) -> str:

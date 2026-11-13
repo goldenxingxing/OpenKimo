@@ -9,7 +9,6 @@ cli = typer.Typer(help="Run OpenKimo Agent Tracing Visualizer.")
 
 @cli.callback(invoke_without_command=True)
 def vis(
-    ctx: typer.Context,
     host: Annotated[
         str | None,
         typer.Option("--host", "-h", help="Bind to specific IP address"),

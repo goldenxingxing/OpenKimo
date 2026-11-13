@@ -5,11 +5,15 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
 cd "$PROJECT_DIR"
 
+# The downloaded spec is only an input to the generator; never leave it behind
+# on either the success or the failure path.
+trap 'rm -f "$PROJECT_DIR/openapi.json"' EXIT
+
 API_PORT="${API_PORT:-5494}"
 API_URL="http://127.0.0.1:${API_PORT}/openapi.json"
 
 echo "Fetching OpenAPI spec from $API_URL..."
-if ! curl -sf -o openapi.json "$API_URL"; then
+if ! curl -sf --max-time 30 -o openapi.json "$API_URL"; then
     echo "Error: Failed to fetch OpenAPI spec. Is the backend running on port $API_PORT?"
     echo "Start it with: uv run ikimo web --port $API_PORT"
     exit 1
@@ -30,6 +34,10 @@ rm -rf src/lib/api
 # Try docker without sudo first, fall back to sudo if needed
 DOCKER_CMD="docker"
 if ! docker info &> /dev/null; then
+    if ! command -v sudo &> /dev/null; then
+        echo "Error: Cannot access docker and sudo is not installed."
+        exit 1
+    fi
     if sudo docker info &> /dev/null; then
         DOCKER_CMD="sudo docker"
         echo "Note: Using sudo for docker"
@@ -55,6 +63,6 @@ if [ -n "$(find src/lib/api -user root 2>/dev/null)" ]; then
 fi
 
 echo "Formatting generated code..."
-bun run format
+bunx biome check --write src/lib/api
 
 echo "Done! API client generated successfully."

@@ -218,9 +218,13 @@ function CopyableJson({ data }: { data: unknown }) {
     typeof data === "string" ? data : JSON.stringify(data, null, 2);
 
   const handleCopy = async () => {
-    await navigator.clipboard.writeText(text);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch {
+      // Clipboard may be unavailable (e.g. non-secure context); ignore.
+    }
   };
 
   return (

@@ -176,8 +176,8 @@ SYSTEMS = {
 def main() -> None:
     turns, queries = turns_and_queries()
     print(f"{len(turns)} 轮原文，{len(queries)} 次查询\n")
-    print(f"{'方案':<32}{'建库':>10}{'查询中位':>12}{'磁盘':>10}{'写后再查':>12}")
-    print("-" * 78)
+    print(f"{'方案':<30}{'建库':>10}{'查询中位':>12}{'磁盘':>11}{'写后再查':>12}")
+    print("-" * 75)
     for label, fn in SYSTEMS.items():
         try:
             ingest, q_ms, disk, after = fn(turns, queries)

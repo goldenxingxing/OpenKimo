@@ -1,4 +1,4 @@
-"""Re-export shim for the macOS configtoml module (pure-Python, OS-agnostic)."""
+"""Re-export shim for the configtoml module (pure-Python, OS-agnostic)."""
 
 from __future__ import annotations
 

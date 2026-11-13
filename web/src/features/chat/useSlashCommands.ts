@@ -73,9 +73,16 @@ const detectSlash = (text: string, caret: number | null): SlashRange | null => {
     return null;
   }
 
+  // The replacement must cover the whole word, not just up to the caret:
+  // otherwise inserting a command leaves the tail of the word behind.
+  let end = safeCaret;
+  while (end < text.length && !WHITESPACE_REGEX.test(text[end])) {
+    end += 1;
+  }
+
   return {
     start: slashIndex,
-    end: safeCaret,
+    end,
     query,
   };
 };
@@ -195,11 +202,10 @@ export const useSlashCommands = ({
     [text, applyDetectedRange],
   );
 
+  // Also called on blur: closing must not record a dismissal, or coming back
+  // to the same command would stay closed. Escape records it explicitly.
   const closeMenu = useCallback(() => {
-    setRange((previous) => {
-      dismissedRangeRef.current = previous;
-      return null;
-    });
+    setRange(null);
   }, []);
 
   const selectOption = useCallback(
@@ -299,10 +305,13 @@ export const useSlashCommands = ({
 
       if (event.key === "Escape") {
         event.preventDefault();
-        closeMenu();
+        setRange((previous) => {
+          dismissedRangeRef.current = previous;
+          return null;
+        });
       }
     },
-    [range, options, selectOption, closeMenu],
+    [range, options, selectOption],
   );
 
   return {

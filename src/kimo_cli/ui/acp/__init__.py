@@ -16,7 +16,8 @@ _DEPRECATED_MESSAGE = (
 
 class ACPServerSingleSession:
     def __init__(self, soul: Soul):
-        self.soul = soul
+        # Deprecated shim: every method raises, so the soul is never read.
+        pass
 
     def on_connect(self, conn: acp.Client) -> None:
         logger.info("ACP client connected")

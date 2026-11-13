@@ -25,7 +25,7 @@ export function ToolTokenBreakdown({ events }: ToolTokenBreakdownProps) {
   const breakdown = useMemo(() => {
     const byTool = new Map<string, ToolStats>();
 
-    // Track cumulative token totals from the most recent StatusUpdate
+    // Accumulate token totals from per-step StatusUpdate deltas
     let lastInputTotal = 0;
     let lastOutputTotal = 0;
 
@@ -377,7 +377,7 @@ export function UsageChart({ events, onScrollToIndex }: UsageChartProps) {
             cx={toSvgX(p.x)}
             cy={toSvgY(p.contextUsage)}
             r={1.5}
-            className={`${p.contextUsage > 0.8 ? "fill-red-500" : "fill-primary"} opacity-40 hover:opacity-100 hover:r-3`}
+            className={`${p.contextUsage > 0.8 ? "fill-red-500" : "fill-primary"} opacity-40 hover:opacity-100 hover:[r:3px]`}
           />
         ))}
       </svg>

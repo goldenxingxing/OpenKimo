@@ -102,7 +102,7 @@ select = [
 
 [tool.pyright]
 typeCheckingMode = "standard"
-pythonVersion = "3.14"
+pythonVersion = "3.12"
 include = [
     "src/**/*.py",
     "tests/**/*.py",

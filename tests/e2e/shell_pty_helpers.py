@@ -174,7 +174,16 @@ class ShellPTYProcess:
 
     def send_text(self, text: str) -> None:
         _print_trace("STDIN", text)
-        os.write(self.master_fd, text.encode("utf-8"))
+        data = text.encode("utf-8")
+        while data:
+            try:
+                written = os.write(self.master_fd, data)
+            except BlockingIOError:
+                select.select([], [self.master_fd], [], 0.05)
+                continue
+            if written <= 0:
+                break
+            data = data[written:]
 
     def send_key(self, key: str) -> None:
         key_map = {

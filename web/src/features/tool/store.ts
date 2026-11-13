@@ -62,7 +62,7 @@ export function handleToolResult(
   if (isError || isReplay) return;
 
   try {
-    const args = JSON.parse(toolArguments);
+    const args = JSON.parse(toolArguments) as Record<string, unknown>;
     const { addNewFile } = useToolEventsStore.getState();
 
     // WriteFile: track by tool name (path/file_path is too generic)
@@ -72,16 +72,16 @@ export function handleToolResult(
       lower.includes("write-file") ||
       lower.includes("write_file")
     ) {
-      const filePath = args.path || args.file_path;
-      if (filePath) {
+      const filePath = args.path ?? args.file_path;
+      if (typeof filePath === "string" && filePath) {
         addNewFile(filePath);
       }
     }
 
     // Generic output parameters - these always indicate file creation
-    if (args.output_file) addNewFile(args.output_file);
-    if (args.output_path) addNewFile(args.output_path);
-    if (args.download_dir) addNewFile(args.download_dir);
+    if (typeof args.output_file === "string") addNewFile(args.output_file);
+    if (typeof args.output_path === "string") addNewFile(args.output_path);
+    if (typeof args.download_dir === "string") addNewFile(args.download_dir);
   } catch {
     // Ignore parse errors
   }

@@ -8,6 +8,7 @@ import io
 import json
 import re
 import shutil
+import tempfile
 import zipfile
 from collections.abc import Iterator
 from hashlib import md5
@@ -634,7 +635,10 @@ def download_session(work_dir_hash: str, session_id: str) -> StreamingResponse:
     if session_dir is None:
         raise HTTPException(status_code=404, detail="Session not found")
 
-    buf = io.BytesIO()
+    # Small archives stay in memory; large ones spill to a temp file so a few
+    # concurrent downloads cannot each pin an archive-sized buffer. It must
+    # outlive this function (StreamingResponse streams it), so no `with` here.
+    buf = tempfile.SpooledTemporaryFile(max_size=8 * 1024 * 1024, mode="w+b")  # noqa: SIM115
     with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
         for file_path in sorted(session_dir.rglob("*")):
             if file_path.is_file():
@@ -732,7 +736,14 @@ async def import_session(file: UploadFile) -> dict[str, Any]:
         # Extract - handle both flat ZIPs and ZIPs with a single top-level directory.
         # Decompressing 200 MB and moving the files around takes real time, so
         # it runs in a worker thread instead of on the event loop.
-        await asyncio.to_thread(_extract_and_flatten, zf, session_dir)
+        try:
+            await asyncio.to_thread(_extract_and_flatten, zf, session_dir)
+        except Exception:
+            # A failed extraction leaves a half-populated directory that the
+            # session scanner would still list (has_wire=False). Remove it so a
+            # failed import does not masquerade as a session.
+            shutil.rmtree(session_dir, ignore_errors=True)
+            raise
 
     return {
         "session_id": session_id,

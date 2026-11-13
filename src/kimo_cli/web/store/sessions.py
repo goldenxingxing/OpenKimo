@@ -106,7 +106,7 @@ def _derive_title_from_wire(session_dir: Path) -> str:
                             msg = Message(role="user", content=user_input)
                             text = msg.extract_text(" ")
                             return shorten(fold_message_markup(text), width=300)
-                except json.JSONDecodeError:
+                except (json.JSONDecodeError, AttributeError, TypeError):
                     continue
     except Exception as e:
         logger.debug("Failed to extract session title: {err}", err=e)

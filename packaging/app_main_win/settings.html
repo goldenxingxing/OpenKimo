@@ -291,7 +291,7 @@
       card.className = "provider";
       card.dataset.pid = String(++providerSeq);
 
-      const caps = Array.isArray(entry.capabilities) && entry.capabilities.length
+      const caps = Array.isArray(entry.capabilities)
         ? new Set(entry.capabilities.map(String))
         : new Set(CAPABILITIES);
 
@@ -305,7 +305,9 @@
         : PROVIDER_TYPES.concat([entryType]);
       const typeOptions = typeChoices.map((t) => {
         const sel = (entryType || PROVIDER_TYPES[0]) === t ? " selected" : "";
-        return `<option value="${t}"${sel}>${t}</option>`;
+        const safe = String(t).replace(/[&<>"']/g, (ch) =>
+          ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[ch]);
+        return `<option value="${safe}"${sel}>${safe}</option>`;
       }).join("");
 
       const capBoxes = CAPABILITIES.map((c) => {
@@ -501,7 +503,7 @@
           max_context_size: ctx,
         };
         const caps = Array.from(card.querySelectorAll(".cap:checked")).map((c) => c.value);
-        if (caps.length) entry.capabilities = caps;
+        entry.capabilities = caps;
         list.push(entry);
         if (card.querySelector(".p-default").checked) defaultName = name;
       });

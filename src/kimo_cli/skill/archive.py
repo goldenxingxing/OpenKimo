@@ -104,7 +104,7 @@ def _extract_skill_archive(data: bytes, destination: Path, limits: ArchiveLimits
                 resolved = target.resolve()
                 if not resolved.is_relative_to(destination.resolve()):
                     raise ValueError("unsafe archive path")
-                if entry.is_dir():
+                if entry.is_dir() or stat.S_ISDIR(entry.external_attr >> 16):
                     _mkdir(target)
                     continue
                 _mkdir(target.parent)

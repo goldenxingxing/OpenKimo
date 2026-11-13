@@ -75,7 +75,7 @@ function useHoverReveal(delayMs: number = HOVER_REVEAL_DELAY_MS) {
     setOpen(false);
   };
 
-  return { open, start, stop, close: () => setOpen(false) };
+  return { open, start, stop, close: stop };
 }
 
 /** Small menu that appears under a path link after a hover delay. */
@@ -160,7 +160,7 @@ export const escapeHtmlOutsideCodeBlocks = (text: string): string => {
   // 3. Display math: $$...$$ (can span multiple lines)
   // 4. Inline math: $...$ (no newlines, non-empty, no leading/trailing space)
   const codeBlockRegex =
-    /(^|\n)```[a-z]*\n[\s\S]*?\n```|`[^`\n]+`|\$\$[\s\S]*?\$\$|\$(?!\s)[^$\n]+(?<!\s)\$/g;
+    /(^|\n)(```|~~~)[a-z]*\n[\s\S]*?\n\2|`[^`\n]+`|\$\$[\s\S]*?\$\$|\$(?!\s)[^$\n]+(?<!\s)\$/g;
   const codeBlocks: { start: number; end: number }[] = [];
 
   // Find all valid code blocks

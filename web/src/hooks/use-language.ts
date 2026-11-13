@@ -1,11 +1,7 @@
 import { useCallback } from "react";
 import { useTranslation } from "react-i18next";
 
-import {
-  LANGUAGE_STORAGE_KEY,
-  normalizeLanguage,
-  type SupportedLang,
-} from "@/i18n";
+import { normalizeLanguage, type SupportedLang } from "@/i18n";
 
 type UseLanguageResult = {
   language: SupportedLang;
@@ -20,9 +16,9 @@ export function useLanguage(): UseLanguageResult {
 
   const setLanguage = useCallback(
     (next: SupportedLang) => {
-      if (typeof window !== "undefined") {
-        window.localStorage.setItem(LANGUAGE_STORAGE_KEY, next);
-      }
+      // i18next's detector already caches the choice (caches: ["localStorage"]);
+      // writing here only duplicated it, and a blocked storage could abort the
+      // language change before it started.
       i18n.changeLanguage(next).catch(() => undefined);
     },
     [i18n],
