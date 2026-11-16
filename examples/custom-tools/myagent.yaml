@@ -1,0 +1,14 @@
+version: 1
+agent:
+  extend: default
+  tools:
+    - "kimo_cli.tools.multiagent:Task"
+    - "kimo_cli.tools.todo:SetTodoList"
+    - "kimo_cli.tools.shell:Shell"
+    - "kimo_cli.tools.file:ReadFile"
+    - "kimo_cli.tools.file:Glob"
+    - "kimo_cli.tools.file:Grep"
+    - "kimo_cli.tools.file:WriteFile"
+    - "kimo_cli.tools.file:StrReplaceFile"
+    - "kimo_cli.tools.web:FetchURL"
+    - "my_tools.ls:Ls" # custom tool

@@ -1,0 +1,34 @@
+name: "Translator"
+on:
+  issues:
+    types: [opened, edited]
+  issue_comment:
+    types: [created, edited]
+  discussion:
+    types: [created, edited]
+  discussion_comment:
+    types: [created, edited]
+  pull_request_target:
+    types: [opened, edited]
+  pull_request_review_comment:
+    types: [created, edited]
+
+concurrency:
+  group: translator-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  translate:
+    permissions:
+      issues: write
+      discussions: write
+      pull-requests: write
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: lizheming/github-translate-action@c55aac477e98562d4faed9f77c54ab8306ae6ebf # 1.1.2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          IS_MODIFY_TITLE: true
+          APPEND_TRANSLATION: true

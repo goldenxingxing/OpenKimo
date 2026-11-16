@@ -1,0 +1,111 @@
+{
+  "categories": {
+    "entities": "Entities",
+    "concepts": "Concepts",
+    "comparisons": "Comparisons",
+    "sources": "Sources",
+    "queries": "Queries",
+    "lint": "Lint"
+  },
+  "errors": {
+    "loadWiki": "Failed to load the Wiki.",
+    "loadPage": "Failed to load the page.",
+    "search": "Search failed.",
+    "health": "Health check failed.",
+    "history": "Failed to load history.",
+    "finishEditFirst": "Save or discard the edit in progress first.",
+    "invalidSlug": "The page name may use letters, digits, _ and -, and cannot start with -.",
+    "pageExists": "A page with that name already exists.",
+    "editConflict": "This page changed since you opened it. Copy your edit, discard it, and reapply it to the latest version.",
+    "save": "Failed to save the page.",
+    "deleteConflict": "This page changed since you opened it; reload it before deleting.",
+    "delete": "Failed to delete the page."
+  },
+  "toasts": {
+    "created": "Page created",
+    "saved": "Page saved",
+    "deleted": "Page deleted"
+  },
+  "header": {
+    "title": "Global Knowledge Base",
+    "description": "Durable knowledge shared by every session and workspace. Agents write it through the <code>Wiki</code> tool; edits here go through the same transaction, so the index and the change log stay in step.",
+    "revision": "revision {{revision}}",
+    "pages_one": "{{count}} page",
+    "pages_other": "{{count}} pages",
+    "unreadable_one": "{{count}} unreadable",
+    "unreadable_other": "{{count}} unreadable",
+    "refresh": "Refresh",
+    "newPage": "New page"
+  },
+  "views": {
+    "pages": "Pages",
+    "health": "Health",
+    "history": "History"
+  },
+  "list": {
+    "searchPlaceholder": "Search titles and content",
+    "all": "All",
+    "searching": "Searching…",
+    "noMatches": "No matches.",
+    "empty": "The knowledge base is empty. Agents add pages when you ask them to remember something, or create one here.",
+    "emptyCategory": "No pages in this category."
+  },
+  "editor": {
+    "newPage": "New page",
+    "editTitle": "Edit {{path}}",
+    "discard": "Discard",
+    "save": "Save",
+    "title": "Title",
+    "titlePlaceholder": "What this page is about",
+    "category": "Category",
+    "pageName": "Page name",
+    "tags": "Tags (comma-separated)",
+    "tagsPlaceholder": "process, release",
+    "body": "Content (Markdown; link pages with [[category/page-name]])",
+    "rules": "Pages cannot contain credentials, local file paths or file:// links. Existing sources are kept when you edit."
+  },
+  "page": {
+    "unreadableTitle": "This page cannot be read",
+    "unreadableHint": "Fix or remove the file under <code>{{root}}</code>; it is left out of search and the index until it parses.",
+    "loading": "Loading…",
+    "meta": "{{path}} · r{{revision}} · updated {{updated}} · created {{created}}",
+    "edit": "Edit",
+    "delete": "Delete",
+    "links": "Links:",
+    "noSuchPage": "No such page",
+    "sources": "Sources ({{count}})",
+    "noSources": "None — written by hand.",
+    "selectPrompt": "Select a page to read it, or create a new one."
+  },
+  "health": {
+    "title": "Health",
+    "description": "Unreadable pages, dead links, orphans, duplicates, unresolved conflicts and sources that have changed or disappeared.",
+    "recheck": "Re-check",
+    "checking": "Checking…",
+    "noIssues_one": "No issues across {{count}} page.",
+    "noIssues_other": "No issues across {{count}} pages.",
+    "issues": {
+      "malformed_page": "malformed page",
+      "dead_link": "dead link",
+      "missing_provenance": "missing provenance",
+      "stale_provenance": "stale provenance",
+      "conflict_marker": "conflict marker",
+      "orphan": "orphan",
+      "duplicate_hash": "duplicate hash",
+      "duplicate_claim": "duplicate claim"
+    }
+  },
+  "history": {
+    "title": "History",
+    "description": "Every committed change, newest first, from <code>log.md</code>.",
+    "refresh": "Refresh",
+    "loading": "Loading…",
+    "empty": "No changes yet."
+  },
+  "deleteDialog": {
+    "title": "Delete this page?",
+    "description": "<path>{{path}}</path> will be removed from the Wiki and its index. The deletion is recorded in the history, but the content is not kept.",
+    "cancel": "Cancel",
+    "delete": "Delete"
+  }
+}

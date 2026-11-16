@@ -1,0 +1,162 @@
+import { type ReactElement, memo } from "react";
+import {
+  HoverCard,
+  HoverCardContent,
+  HoverCardTrigger,
+} from "@/components/ui/hover-card";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
+import { Progress } from "@/components/ui/progress";
+import { ContextProgressIcon } from "@ai-elements";
+import { cn } from "@/lib/utils";
+import type { TokenUsage } from "@/hooks/wireTypes";
+import { useTranslation } from "react-i18next";
+
+const COMPACT_NUMBER = new Intl.NumberFormat("en-US", { notation: "compact" });
+
+type ToolbarContextIndicatorProps = {
+  usagePercent: number;
+  usedTokens: number;
+  maxTokens: number;
+  tokenUsage: TokenUsage | null;
+  className?: string;
+};
+
+export const ToolbarContextIndicator = memo(
+  function ToolbarContextIndicatorComponent({
+    usagePercent,
+    usedTokens,
+    maxTokens,
+    tokenUsage,
+    className,
+  }: ToolbarContextIndicatorProps): ReactElement {
+    const { t } = useTranslation("tokens");
+    const usedPercent = maxTokens > 0 ? usedTokens / maxTokens : 0;
+
+    const used = COMPACT_NUMBER.format(usedTokens);
+    const total = COMPACT_NUMBER.format(maxTokens);
+
+    return (
+      <HoverCard openDelay={200} closeDelay={150}>
+        <HoverCardTrigger asChild>
+          <button
+            type="button"
+            className={cn(
+              "flex items-center gap-1.5 h-7 px-2.5 rounded-full text-xs font-medium",
+              "transition-colors cursor-default border",
+              "bg-transparent text-muted-foreground border-border/60",
+              "hover:text-foreground hover:border-border",
+              className,
+            )}
+          >
+            <ContextProgressIcon usedPercent={usedPercent} size={14} />
+            <span>
+              {t("context.percentContext", {
+                percent: usagePercent.toFixed(1),
+              })}
+            </span>
+          </button>
+        </HoverCardTrigger>
+        <HoverCardContent
+          align="end"
+          side="top"
+          sideOffset={8}
+          className="w-64 p-0"
+        >
+          <div className="w-full space-y-2 p-3">
+            <div className="flex items-center justify-between gap-3 text-xs">
+              <p>{usagePercent.toFixed(1)}%</p>
+              <p className="font-mono text-muted-foreground">
+                {used} / {total}
+              </p>
+            </div>
+            <Progress className="bg-muted" value={usagePercent} />
+          </div>
+
+          {tokenUsage && (
+            <div className="border-t p-3 space-y-2.5 text-xs">
+              <div className="space-y-1">
+                <div className="text-[11px] font-medium text-muted-foreground">
+                  {t('context.inputToken')}
+                </div>
+                <RawUsageRow
+                  label={t('context.regular')}
+                  value={tokenUsage.input_other}
+                  description={t('context.regularDesc')}
+                />
+                <RawUsageRow
+                  label={t('context.cacheRead')}
+                  value={tokenUsage.input_cache_read}
+                  description={t('context.cacheReadDesc')}
+                />
+                <RawUsageRow
+                  label={t('context.cacheWrite')}
+                  value={tokenUsage.input_cache_creation}
+                  description={t('context.cacheWriteDesc')}
+                />
+                <div className="flex items-center justify-between text-xs font-medium border-t mt-1 pt-1">
+                  <span>{t("context.totalInput")}</span>
+                  <span>
+                    {COMPACT_NUMBER.format(
+                      tokenUsage.input_other +
+                      tokenUsage.input_cache_read +
+                      tokenUsage.input_cache_creation
+                    )}
+                  </span>
+                </div>
+              </div>
+
+              <div className="space-y-1 border-t pt-2.5">
+                <div className="text-[11px] font-medium text-muted-foreground">
+                  {t("context.outputTokens")}
+                </div>
+                <RawUsageRow
+                  label={t("context.generated")}
+                  value={tokenUsage.output}
+                  description={t("context.generatedDesc")}
+                />
+              </div>
+            </div>
+          )}
+        </HoverCardContent>
+      </HoverCard>
+    );
+  },
+);
+
+const RawUsageRow = ({
+  label,
+  value,
+  description,
+}: {
+  label: string;
+  value: number;
+  description?: string;
+}) => {
+  const content = (
+    <div className="flex items-center justify-between text-xs">
+      <span className="text-muted-foreground">{label}</span>
+      <span>
+        {COMPACT_NUMBER.format(value)}
+      </span>
+    </div>
+  );
+
+  if (description) {
+    return (
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <div className="cursor-help">{content}</div>
+        </TooltipTrigger>
+        <TooltipContent side="left">
+          <p className="text-xs">{description}</p>
+        </TooltipContent>
+      </Tooltip>
+    );
+  }
+
+  return content;
+};

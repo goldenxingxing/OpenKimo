@@ -1,0 +1,16 @@
+default_install_hook_types:
+  - pre-commit
+
+repos:
+  - repo: local
+    hooks:
+      - id: make-format-kimo-cli
+        name: make format-kimo-cli
+        entry: make format-kimo-cli
+        language: system
+        pass_filenames: false
+      - id: make-check-kimo-cli
+        name: make check-kimo-cli
+        entry: make check-kimo-cli
+        language: system
+        pass_filenames: false

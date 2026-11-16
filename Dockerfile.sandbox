@@ -1,0 +1,119 @@
+# ============================================================
+# kimo-agent-sandbox Dockerfile
+# ============================================================
+# Session 沙箱容器镜像，包含:
+#   - KimoCLI Worker (agent 执行)
+#   - Jupyter Kernel (Python 沙箱执行)
+#   - Chromium + Playwright (浏览器自动化)
+#   - KAOS 文件系统接口
+# ============================================================
+
+FROM python:3.12-slim-bookworm
+
+# -----------------------------------------------------------
+# 安装系统依赖
+# -----------------------------------------------------------
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends \
+        chromium \
+        chromium-driver \
+        xvfb \
+        x11-utils \
+        x11-xserver-utils \
+        fonts-liberation \
+        fonts-noto-cjk \
+        git \
+        ripgrep \
+        curl \
+        wget \
+        ca-certificates \
+        xdotool \
+        ffmpeg \
+    && rm -rf /var/lib/apt/lists/*
+
+# -----------------------------------------------------------
+# 安装 Python 依赖
+# -----------------------------------------------------------
+WORKDIR /deps
+
+# ML/AI 依赖体积大且很少变化，放在最前面以最大化层缓存命中率
+RUN pip install --no-cache-dir \
+    torch \
+    torchvision \
+    transformers \
+    accelerate
+
+# 安装 Jupyter kernel 和科学计算包（同样较少变化）
+RUN pip install --no-cache-dir \
+    ipykernel \
+    jupyter-client \
+    matplotlib \
+    numpy \
+    psutil \
+    pillow \
+    playwright \
+    brotli \
+    opencv-python-headless
+
+# Copy package files and install kimo-cli dependencies
+COPY kimo-cli/pyproject.toml kimo-cli/uv.lock ./
+COPY kimo-cli/packages/ ./packages/
+COPY kimo-cli/sdks/ ./sdks/
+
+RUN pip install --no-cache-dir uv \
+    && uv pip install --system -r pyproject.toml \
+    && uv pip install --system --no-deps \
+        ./packages/kosong \
+        ./packages/kaos
+
+# 安装 Playwright 浏览器驱动
+RUN playwright install chromium \
+    && playwright install-deps chromium
+
+# -----------------------------------------------------------
+# 复制应用代码
+# -----------------------------------------------------------
+WORKDIR /app
+
+# 复制 app/ 目录代码 (browser_guard, jupyter_kernel, kernel_server, utils)
+COPY app/ /app/
+
+# 复制 kimo-cli 源码 (作为 editable install)
+COPY kimo-cli/src/ /usr/local/lib/python3.12/site-packages/
+
+# Register kimo-cli package metadata so importlib.metadata works
+RUN mkdir -p /usr/local/lib/python3.12/site-packages/kimo_cli-0.5.0.dist-info \
+    && printf 'Name: kimo-cli\nVersion: 0.5.0\n' > /usr/local/lib/python3.12/site-packages/kimo_cli-0.5.0.dist-info/METADATA \
+    && touch /usr/local/lib/python3.12/site-packages/kimo_cli-0.5.0.dist-info/INSTALLER \
+    && touch /usr/local/lib/python3.12/site-packages/kimo_cli-0.5.0.dist-info/RECORD
+
+# 创建必要的目录
+RUN mkdir -p /app/data/chrome_data /app/logs /tmp/chromium_user_data
+
+# -----------------------------------------------------------
+# 复制启动脚本
+# -----------------------------------------------------------
+COPY scripts/start-sandbox.sh /start-sandbox.sh
+RUN chmod +x /start-sandbox.sh
+
+# -----------------------------------------------------------
+# 环境变量默认值
+# -----------------------------------------------------------
+ENV DISPLAY=:99 \
+    SCREEN_RESOLUTION=1920x1080 \
+    CHROME_LOCALE=zh-CN \
+    TZ=Asia/Shanghai \
+    CHROME_INIT_URL=chrome://newtab/ \
+    PYTHONUNBUFFERED=1 \
+    KIMO_WORK_DIR=/app \
+    JUPYTER_KERNEL_PORT=8888 \
+    WORKER_PORT=8080
+
+# 暴露端口
+EXPOSE 8080 8888
+
+# 健康检查
+HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
+    CMD python -c "import urllib.request; urllib.request.urlopen('http://localhost:8888/health')" || exit 1
+
+CMD ["/start-sandbox.sh"]

@@ -1,0 +1,329 @@
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import type { KeyboardEvent } from "react";
+import type { SlashCommandDef } from "@/hooks/useSessionStream";
+
+export type { SlashCommandDef };
+
+export type SlashCommandOption = {
+  id: string;
+  name: string;
+  description: string;
+  aliases: string[];
+  insertValue: string;
+};
+
+type SlashRange = {
+  start: number;
+  end: number;
+  query: string;
+};
+
+const WHITESPACE_REGEX = /\s/;
+
+type UseSlashCommandsArgs = {
+  text: string;
+  setText: (value: string) => void;
+  textareaRef: React.RefObject<HTMLTextAreaElement | null>;
+  commands: SlashCommandDef[];
+};
+
+type UseSlashCommandsReturn = {
+  isOpen: boolean;
+  query: string;
+  options: SlashCommandOption[];
+  activeIndex: number;
+  setActiveIndex: (value: number) => void;
+  handleTextChange: (value: string, caret: number | null) => void;
+  handleCaretChange: (caret: number | null) => void;
+  handleKeyDown: (event: KeyboardEvent<HTMLTextAreaElement>) => void;
+  selectOption: (option?: SlashCommandOption) => void;
+  closeMenu: () => void;
+};
+
+const NON_WHITESPACE_START = /^\S/;
+
+/**
+ * Detect if the cursor is inside a slash command at the beginning of input or line.
+ * Slash commands are only valid at the start of input or after a newline.
+ */
+const detectSlash = (text: string, caret: number | null): SlashRange | null => {
+  const safeCaret = Math.max(0, Math.min(text.length, caret ?? text.length));
+  const upToCaret = text.slice(0, safeCaret);
+
+  // Find the last slash in the text up to caret
+  const slashIndex = upToCaret.lastIndexOf("/");
+  if (slashIndex === -1) {
+    return null;
+  }
+
+  // Slash must be at the beginning of input or at the start of a line
+  if (slashIndex > 0) {
+    const prevChar = upToCaret[slashIndex - 1];
+    // Only allow slash after newline
+    if (prevChar !== "\n") {
+      return null;
+    }
+  }
+
+  // Get the query after the slash
+  const query = upToCaret.slice(slashIndex + 1);
+
+  // Query should not contain spaces (slash commands are single words)
+  if (WHITESPACE_REGEX.test(query)) {
+    return null;
+  }
+
+  // The replacement must cover the whole word, not just up to the caret:
+  // otherwise inserting a command leaves the tail of the word behind.
+  let end = safeCaret;
+  while (end < text.length && !WHITESPACE_REGEX.test(text[end])) {
+    end += 1;
+  }
+
+  return {
+    start: slashIndex,
+    end,
+    query,
+  };
+};
+
+const isSameRange = (a: SlashRange | null, b: SlashRange | null): boolean =>
+  a?.start === b?.start && a?.end === b?.end && a?.query === b?.query;
+
+const toSlashOptions = (commands: SlashCommandDef[]): SlashCommandOption[] =>
+  commands.map((cmd) => ({
+    id: `slash-${cmd.name}`,
+    name: cmd.name,
+    description: cmd.description,
+    aliases: cmd.aliases,
+    insertValue: `/${cmd.name}`,
+  }));
+
+const filterOptions = (
+  options: SlashCommandOption[],
+  query: string,
+): SlashCommandOption[] => {
+  if (!options.length) {
+    return [];
+  }
+
+  const normalizedQuery = query.trim().toLowerCase();
+  if (normalizedQuery.length === 0) {
+    return options;
+  }
+
+  return options.filter((option) => {
+    const matchesName = option.name.toLowerCase().includes(normalizedQuery);
+    const matchesAlias = option.aliases.some((alias) =>
+      alias.toLowerCase().includes(normalizedQuery),
+    );
+    return matchesName || matchesAlias;
+  });
+};
+
+export const useSlashCommands = ({
+  text,
+  setText,
+  textareaRef,
+  commands,
+}: UseSlashCommandsArgs): UseSlashCommandsReturn => {
+  const [range, setRange] = useState<SlashRange | null>(null);
+  const [activeIndex, setActiveIndex] = useState(0);
+  // Track when we're in the middle of selecting an option to avoid race conditions
+  const isSelectingRef = useRef(false);
+
+  const allOptions = useMemo(() => toSlashOptions(commands), [commands]);
+
+  const options = useMemo(
+    () => filterOptions(allOptions, range?.query ?? ""),
+    [allOptions, range?.query],
+  );
+
+  // Reset active index when options change
+  useEffect(() => {
+    if (activeIndex >= options.length) {
+      setActiveIndex(options.length === 0 ? 0 : options.length - 1);
+    }
+  }, [activeIndex, options.length]);
+
+  // Reset active index when menu opens (only on range start change)
+  const rangeStart = range?.start;
+  useEffect(() => {
+    if (rangeStart !== undefined) {
+      setActiveIndex(0);
+    }
+  }, [rangeStart]);
+
+  // The range the reader dismissed with Escape. Escape closes on keydown and
+  // the matching keyup runs the composer's selection handler, which recomputes
+  // the same range and re-opens the menu — isSelectingRef only guards the
+  // selection path, not this one. It stays closed until the command changes.
+  const dismissedRangeRef = useRef<SlashRange | null>(null);
+
+  const applyDetectedRange = useCallback((next: SlashRange | null) => {
+    if (next && isSameRange(next, dismissedRangeRef.current)) {
+      setRange(null);
+      return;
+    }
+    dismissedRangeRef.current = null;
+    setRange((previous) => (isSameRange(previous, next) ? previous : next));
+  }, []);
+
+  // Detect slash on initial render
+  useEffect(() => {
+    // Skip detection while selecting an option to avoid race condition
+    // where the menu reopens due to stale caret position
+    if (isSelectingRef.current) {
+      return;
+    }
+    const caret = textareaRef.current?.selectionStart ?? text.length;
+    applyDetectedRange(detectSlash(text, caret));
+  }, [text, textareaRef, applyDetectedRange]);
+
+  const handleTextChange = useCallback(
+    (value: string, caret: number | null) => {
+      // Skip detection while selecting an option to avoid race condition
+      if (isSelectingRef.current) {
+        return;
+      }
+      applyDetectedRange(detectSlash(value, caret));
+    },
+    [applyDetectedRange],
+  );
+
+  const handleCaretChange = useCallback(
+    (caret: number | null) => {
+      // Skip detection while selecting an option to avoid race condition
+      if (isSelectingRef.current) {
+        return;
+      }
+      applyDetectedRange(detectSlash(text, caret));
+    },
+    [text, applyDetectedRange],
+  );
+
+  // Also called on blur: closing must not record a dismissal, or coming back
+  // to the same command would stay closed. Escape records it explicitly.
+  const closeMenu = useCallback(() => {
+    setRange(null);
+  }, []);
+
+  const selectOption = useCallback(
+    (option?: SlashCommandOption) => {
+      if (!range) {
+        return;
+      }
+      const target = option ?? options[activeIndex];
+      if (!target) {
+        return;
+      }
+
+      const before = text.slice(0, range.start);
+      const after = text.slice(range.end);
+      // Add trailing space after command
+      const needsSpace =
+        after.length === 0 || NON_WHITESPACE_START.test(after) ? " " : "";
+      const nextValue = `${before}${target.insertValue}${needsSpace}${after}`;
+      const nextCaret =
+        before.length + target.insertValue.length + needsSpace.length;
+
+      // Mark as selecting to prevent useEffect from reopening the menu
+      // due to stale caret position before requestAnimationFrame runs
+      isSelectingRef.current = true;
+
+      const node = textareaRef.current;
+      if (node) {
+        // Blur first to force IME composition to end
+        // This triggers onBlur which resets isComposing state in prompt-input
+        node.blur();
+      }
+
+      // Clear range and reset activeIndex immediately
+      setRange(null);
+      setActiveIndex(0);
+
+      // Use requestAnimationFrame to ensure blur event processing completes
+      // before updating the text
+      requestAnimationFrame(() => {
+        setText(nextValue);
+
+        requestAnimationFrame(() => {
+          try {
+            const currentNode = textareaRef.current;
+            if (currentNode) {
+              currentNode.focus();
+              currentNode.setSelectionRange(nextCaret, nextCaret);
+            }
+          } finally {
+            // Delay resetting the flag to ensure all React renders and effects
+            // triggered by blur/focus have completed.
+            // Using finally ensures the flag is always reset even if an error occurs.
+            setTimeout(() => {
+              isSelectingRef.current = false;
+            }, 0);
+          }
+        });
+      });
+    },
+    [range, options, activeIndex, text, setText, textareaRef],
+  );
+
+  const handleKeyDown = useCallback(
+    (event: KeyboardEvent<HTMLTextAreaElement>) => {
+      if (!range) {
+        return;
+      }
+
+      if (event.key === "ArrowDown") {
+        if (options.length === 0) {
+          return;
+        }
+        event.preventDefault();
+        setActiveIndex((previous) => (previous + 1) % options.length);
+        return;
+      }
+
+      if (event.key === "ArrowUp") {
+        if (options.length === 0) {
+          return;
+        }
+        event.preventDefault();
+        setActiveIndex((previous) =>
+          previous - 1 < 0 ? options.length - 1 : (previous - 1) % options.length,
+        );
+        return;
+      }
+
+      if (event.key === "Enter" || event.key === "Tab") {
+        if (options.length === 0) {
+          return;
+        }
+        event.preventDefault();
+        selectOption();
+        return;
+      }
+
+      if (event.key === "Escape") {
+        event.preventDefault();
+        setRange((previous) => {
+          dismissedRangeRef.current = previous;
+          return null;
+        });
+      }
+    },
+    [range, options, selectOption],
+  );
+
+  return {
+    isOpen: Boolean(range),
+    query: range?.query ?? "",
+    options,
+    activeIndex,
+    setActiveIndex,
+    handleTextChange,
+    handleCaretChange,
+    handleKeyDown,
+    selectOption,
+    closeMenu,
+  };
+};

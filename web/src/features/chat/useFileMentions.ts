@@ -1,0 +1,589 @@
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import type { KeyboardEvent } from "react";
+import type { FileUIPart } from "ai";
+import type { SessionFileEntry } from "@/hooks/useSessions";
+
+const STOP_CHARS = /[\s,;:!?,()[\]{}<>"'`]/;
+const MENTION_TRIGGER_PREFIX = /\s|[([{]/;
+const LEADING_DOT_SLASH = /^\.\//;
+const NON_WHITESPACE_START = /^\S/;
+const MAX_WORKSPACE_FILES = 500;
+const MAX_DIRECTORY_SCANS = 200;
+const WORKSPACE_STALE_MS = 30_000;
+const DIRECTORY_QUERY_DEBOUNCE_MS = 300;
+
+// Directories that never surface in @-mentions: tooling/dependency/build
+// artifacts. Hidden (dot-prefixed) directories are also skipped in
+// crawlWorkspace. Kept in a set so the filter stays explicit and easy to
+// extend per deployment (e.g. output/, session-data/).
+const IGNORED_DIRS = new Set([
+  "node_modules",
+  "venv",
+  "dist",
+  "build",
+  "__pycache__",
+  // OpenKimo's own per-session records (context.jsonl, leases, offloads):
+  // runtime artifacts, not user documents, so they must not crowd the index.
+  "session-data",
+]);
+
+type MentionRange = {
+  start: number;
+  end: number;
+  query: string;
+};
+
+type WorkspaceFile = {
+  path: string;
+  size?: number;
+};
+
+export type MentionOptionBase = {
+  id: string;
+  type: "attachment" | "workspace";
+  label: string;
+  description?: string;
+  insertValue: string;
+  meta?: {
+    path?: string;
+    size?: number;
+    mediaType?: string;
+  };
+};
+
+export type MentionOption = MentionOptionBase & {
+  order: number;
+};
+
+export type MentionSections = {
+  attachments: MentionOption[];
+  workspace: MentionOption[];
+};
+
+type UseFileMentionsArgs = {
+  text: string;
+  setText: (value: string) => void;
+  textareaRef: React.RefObject<HTMLTextAreaElement | null>;
+  attachments: (FileUIPart & { id: string })[];
+  sessionId?: string;
+  listDirectory?: (
+    sessionId: string,
+    path?: string,
+  ) => Promise<SessionFileEntry[]>;
+};
+
+type UseFileMentionsReturn = {
+  isOpen: boolean;
+  query: string;
+  flatOptions: MentionOption[];
+  sections: MentionSections;
+  activeIndex: number;
+  setActiveIndex: (value: number) => void;
+  handleTextChange: (value: string, caret: number | null) => void;
+  handleCaretChange: (caret: number | null) => void;
+  handleKeyDown: (event: KeyboardEvent<HTMLTextAreaElement>) => void;
+  selectOption: (option?: MentionOption) => void;
+  closeMenu: () => void;
+  workspaceStatus: "idle" | "loading" | "ready" | "error";
+  workspaceError: string | null;
+  retryWorkspace: () => void;
+  workspaceFileCount: number;
+};
+
+const detectMention = (
+  text: string,
+  caret: number | null,
+): MentionRange | null => {
+  const safeCaret = Math.max(0, Math.min(text.length, caret ?? text.length));
+  const upToCaret = text.slice(0, safeCaret);
+  const triggerIndex = upToCaret.lastIndexOf("@");
+  if (triggerIndex === -1) {
+    return null;
+  }
+
+  if (triggerIndex > 0) {
+    const previousChar = upToCaret[triggerIndex - 1];
+    if (previousChar && !MENTION_TRIGGER_PREFIX.test(previousChar)) {
+      return null;
+    }
+  }
+
+  const query = upToCaret.slice(triggerIndex + 1);
+  if (STOP_CHARS.test(query)) {
+    return null;
+  }
+
+  return {
+    start: triggerIndex,
+    end: safeCaret,
+    query,
+  };
+};
+
+const isSameRange = (a: MentionRange | null, b: MentionRange | null): boolean =>
+  a?.start === b?.start && a?.end === b?.end && a?.query === b?.query;
+
+const normalizePath = (value: string) => {
+  if (value === "." || value === "./" || value === "") {
+    return ".";
+  }
+  return value.replace(LEADING_DOT_SLASH, "");
+};
+
+const crawlWorkspace = async ({
+  sessionId,
+  listDirectory,
+}: {
+  sessionId: string;
+  listDirectory: UseFileMentionsArgs["listDirectory"];
+}): Promise<WorkspaceFile[]> => {
+  if (!listDirectory) {
+    return [];
+  }
+
+  const files: WorkspaceFile[] = [];
+  const queue: string[] = ["."];
+  const visited = new Set<string>();
+
+  while (
+    queue.length > 0 &&
+    files.length < MAX_WORKSPACE_FILES &&
+    visited.size < MAX_DIRECTORY_SCANS
+  ) {
+    const current = queue.shift() as string;
+    if (visited.has(current)) {
+      continue;
+    }
+    visited.add(current);
+
+    // "." should be treated as undefined for API root
+    const path = current === "." ? undefined : current;
+    let entries: SessionFileEntry[] = [];
+    try {
+      entries = await listDirectory(sessionId, path);
+    } catch {
+      // One unreadable directory must not discard the files found so far.
+      continue;
+    }
+
+    for (const entry of entries) {
+      const fullPath =
+        current === "."
+          ? entry.name
+          : `${normalizePath(current)}/${entry.name}`;
+      if (entry.type === "directory") {
+        // Skip hidden (dot) directories and tooling/dependency/build dirs —
+        // they are not meant to be @-mentioned and would otherwise crowd the
+        // workspace index with irrelevant entries.
+        if (entry.name.startsWith(".") || IGNORED_DIRS.has(entry.name)) {
+          continue;
+        }
+        queue.push(fullPath);
+        continue;
+      }
+      files.push({
+        path: fullPath,
+        size: entry.size,
+      });
+      if (files.length >= MAX_WORKSPACE_FILES) {
+        break;
+      }
+    }
+  }
+
+  return files;
+};
+
+const toAttachmentOptions = (
+  attachments: (FileUIPart & { id: string })[],
+): MentionOptionBase[] =>
+  attachments.map((attachment, index) => {
+    const label =
+      attachment.filename && attachment.filename.trim().length > 0
+        ? attachment.filename
+        : `Attachment ${index + 1}`;
+    return {
+      id: `upload-${attachment.id}`,
+      type: "attachment" as const,
+      label,
+      description: attachment.mediaType ?? "Pending upload",
+      insertValue: label,
+      meta: {
+        mediaType: attachment.mediaType,
+      },
+    };
+  });
+
+const toWorkspaceOptions = (files: WorkspaceFile[]): MentionOptionBase[] =>
+  files.map((file) => {
+    const segments = file.path.split("/");
+    const label = segments.at(-1) ?? file.path;
+    return {
+      id: `workspace-${file.path}`,
+      type: "workspace" as const,
+      label,
+      description: file.path,
+      insertValue: file.path,
+      meta: {
+        path: file.path,
+        size: file.size,
+      },
+    };
+  });
+
+const filterOptions = (
+  options: MentionOptionBase[],
+  query: string,
+  offset: number,
+): MentionOption[] => {
+  if (!options.length) {
+    return [];
+  }
+  const normalizedQuery = query.trim().toLowerCase();
+  const matchesQuery = (value?: string) =>
+    normalizedQuery.length === 0
+      ? true
+      : value?.toLowerCase().includes(normalizedQuery);
+
+  return options
+    .filter(
+      (option) =>
+        matchesQuery(option.insertValue) ||
+        matchesQuery(option.label) ||
+        matchesQuery(option.description),
+    )
+    .map((option, index) => ({
+      ...option,
+      order: offset + index,
+    }));
+};
+
+export const useFileMentions = ({
+  text,
+  setText,
+  textareaRef,
+  attachments,
+  sessionId,
+  listDirectory,
+}: UseFileMentionsArgs): UseFileMentionsReturn => {
+  const [range, setRange] = useState<MentionRange | null>(null);
+  const [activeIndex, setActiveIndex] = useState(0);
+  const [workspaceFiles, setWorkspaceFiles] = useState<WorkspaceFile[]>([]);
+  const [workspaceStatus, setWorkspaceStatus] = useState<
+    "idle" | "loading" | "ready" | "error"
+  >("idle");
+  const [workspaceError, setWorkspaceError] = useState<string | null>(null);
+  const workspaceRequestRef = useRef(0);
+  const directoryRequestRef = useRef(0);
+  const lastLoadedRef = useRef(0);
+  const directoryQueryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(
+    null,
+  );
+  const [directoryFiles, setDirectoryFiles] = useState<WorkspaceFile[]>([]);
+  const sessionIdRef = useRef(sessionId);
+
+  const attachmentOptions = useMemo(
+    () => toAttachmentOptions(attachments),
+    [attachments],
+  );
+  const mergedWorkspaceFiles = useMemo(() => {
+    if (directoryFiles.length === 0) {
+      return workspaceFiles;
+    }
+    const existing = new Set(workspaceFiles.map((f) => f.path));
+    const extra = directoryFiles.filter((f) => !existing.has(f.path));
+    return extra.length === 0 ? workspaceFiles : [...workspaceFiles, ...extra];
+  }, [workspaceFiles, directoryFiles]);
+
+  const workspaceOptions = useMemo(
+    () => toWorkspaceOptions(mergedWorkspaceFiles),
+    [mergedWorkspaceFiles],
+  );
+
+  const sections = useMemo(() => {
+    const attachmentsSection = filterOptions(
+      attachmentOptions,
+      range?.query ?? "",
+      0,
+    );
+    const workspaceSection = filterOptions(
+      workspaceOptions,
+      range?.query ?? "",
+      attachmentsSection.length,
+    );
+    return {
+      attachments: attachmentsSection,
+      workspace: workspaceSection,
+    };
+  }, [attachmentOptions, workspaceOptions, range?.query]);
+
+  const flatOptions = useMemo(
+    () => [...sections.attachments, ...sections.workspace],
+    [sections.attachments, sections.workspace],
+  );
+
+  useEffect(() => {
+    if (activeIndex < flatOptions.length) {
+      return;
+    }
+    setActiveIndex(flatOptions.length === 0 ? 0 : flatOptions.length - 1);
+  }, [activeIndex, flatOptions.length]);
+
+  useEffect(() => {
+    setWorkspaceFiles([]);
+    setDirectoryFiles([]);
+    setWorkspaceStatus("idle");
+    setWorkspaceError(null);
+    workspaceRequestRef.current += 1;
+    directoryRequestRef.current += 1;
+    lastLoadedRef.current = 0;
+    sessionIdRef.current = sessionId;
+  }, [sessionId]);
+
+  const loadWorkspaceFiles = useCallback(async () => {
+    if (!(sessionId && listDirectory)) {
+      return;
+    }
+    setWorkspaceStatus("loading");
+    setWorkspaceError(null);
+    workspaceRequestRef.current += 1;
+    const requestId = workspaceRequestRef.current;
+    try {
+      const files = await crawlWorkspace({ sessionId, listDirectory });
+      if (workspaceRequestRef.current !== requestId) {
+        return;
+      }
+      setWorkspaceFiles(files);
+      setWorkspaceStatus("ready");
+      lastLoadedRef.current = Date.now();
+    } catch (error) {
+      if (workspaceRequestRef.current !== requestId) {
+        return;
+      }
+      setWorkspaceStatus("error");
+      setWorkspaceError(
+        error instanceof Error
+          ? error.message
+          : "Failed to load workspace files",
+      );
+    }
+  }, [sessionId, listDirectory]);
+
+  useEffect(() => {
+    if (!range) {
+      return;
+    }
+    if (!(sessionId && listDirectory)) {
+      return;
+    }
+    if (workspaceStatus === "loading") {
+      return;
+    }
+    const isStale =
+      workspaceStatus === "ready" &&
+      Date.now() - lastLoadedRef.current > WORKSPACE_STALE_MS;
+    if (workspaceStatus !== "idle" && !isStale) {
+      return;
+    }
+    loadWorkspaceFiles();
+  }, [range, sessionId, listDirectory, workspaceStatus, loadWorkspaceFiles]);
+
+  // Debounced directory query when query contains "/". Only the directory
+  // prefix matters: typing further within the same directory must not
+  // re-issue listDirectory.
+  const directoryQuery = range?.query ?? "";
+  const directorySlashIndex = directoryQuery.lastIndexOf("/");
+  const directoryPrefix =
+    directorySlashIndex >= 0
+      ? directoryQuery.slice(0, directorySlashIndex)
+      : null;
+
+  useEffect(() => {
+    if (directoryQueryTimerRef.current) {
+      clearTimeout(directoryQueryTimerRef.current);
+      directoryQueryTimerRef.current = null;
+    }
+    if (directoryPrefix === null || !(sessionId && listDirectory)) {
+      directoryRequestRef.current += 1;
+      setDirectoryFiles([]);
+      return;
+    }
+    const dirPath = directoryPrefix === "" ? undefined : directoryPrefix;
+    const capturedSessionId = sessionId;
+    directoryRequestRef.current += 1;
+    const requestId = directoryRequestRef.current;
+    directoryQueryTimerRef.current = setTimeout(async () => {
+      if (directoryRequestRef.current !== requestId) return;
+      if (sessionIdRef.current !== capturedSessionId) return;
+      try {
+        const entries = await listDirectory(capturedSessionId, dirPath);
+        if (directoryRequestRef.current !== requestId) return;
+        if (sessionIdRef.current !== capturedSessionId) return;
+        const files: WorkspaceFile[] = [];
+        for (const entry of entries) {
+          if (entry.type === "directory") {
+            continue;
+          }
+          const fullPath = dirPath
+            ? `${dirPath}/${entry.name}`
+            : entry.name;
+          files.push({ path: fullPath, size: entry.size });
+        }
+        setDirectoryFiles(files);
+      } catch {
+        if (directoryRequestRef.current !== requestId) return;
+        // Silently ignore — the main index is still available
+      }
+    }, DIRECTORY_QUERY_DEBOUNCE_MS);
+    return () => {
+      if (directoryQueryTimerRef.current) {
+        clearTimeout(directoryQueryTimerRef.current);
+        directoryQueryTimerRef.current = null;
+      }
+    };
+  }, [directoryPrefix, sessionId, listDirectory]);
+
+  // The range the reader dismissed with Escape. Escape closes the menu on
+  // keydown, and the matching keyup runs the composer's selection handler,
+  // which recomputes exactly the same range and re-opens it — the menu blinked
+  // and stayed, and Enter then inserted a mention instead of sending. It stays
+  // closed until the mention itself changes.
+  const dismissedRangeRef = useRef<MentionRange | null>(null);
+
+  const applyDetectedRange = useCallback((next: MentionRange | null) => {
+    if (next && isSameRange(next, dismissedRangeRef.current)) {
+      setRange(null);
+      return;
+    }
+    dismissedRangeRef.current = null;
+    setRange((previous) => (isSameRange(previous, next) ? previous : next));
+  }, []);
+
+  useEffect(() => {
+    const caret = textareaRef.current?.selectionStart ?? text.length;
+    applyDetectedRange(detectMention(text, caret));
+  }, [text, textareaRef, applyDetectedRange]);
+
+  const handleTextChange = useCallback(
+    (value: string, caret: number | null) => {
+      applyDetectedRange(detectMention(value, caret));
+    },
+    [applyDetectedRange],
+  );
+
+  const handleCaretChange = useCallback(
+    (caret: number | null) => {
+      applyDetectedRange(detectMention(text, caret));
+    },
+    [text, applyDetectedRange],
+  );
+
+  const closeMenu = useCallback(() => {
+    setRange((previous) => {
+      dismissedRangeRef.current = previous;
+      return null;
+    });
+    setActiveIndex(0);
+  }, []);
+
+  const selectOption = useCallback(
+    (option?: MentionOption) => {
+      if (!range) {
+        return;
+      }
+      const target = option ?? flatOptions[activeIndex];
+      if (!target) {
+        return;
+      }
+
+      const mentionText = `@${target.insertValue}`;
+      const before = text.slice(0, range.start);
+      const after = text.slice(range.end);
+      const needsSpace =
+        after.length === 0 || NON_WHITESPACE_START.test(after) ? " " : "";
+      const nextValue = `${before}${mentionText}${needsSpace}${after}`;
+      const nextCaret = before.length + mentionText.length + needsSpace.length;
+
+      setText(nextValue);
+      setRange(null);
+      setActiveIndex(0);
+
+      requestAnimationFrame(() => {
+        const node = textareaRef.current;
+        if (!node) {
+          return;
+        }
+        node.focus();
+        node.setSelectionRange(nextCaret, nextCaret);
+      });
+    },
+    [range, flatOptions, activeIndex, text, setText, textareaRef],
+  );
+
+  const handleKeyDown = useCallback(
+    (event: KeyboardEvent<HTMLTextAreaElement>) => {
+      if (!range) {
+        return;
+      }
+
+      if (event.key === "ArrowDown") {
+        if (flatOptions.length === 0) {
+          return;
+        }
+        event.preventDefault();
+        setActiveIndex((previous) => (previous + 1) % flatOptions.length);
+        return;
+      }
+
+      if (event.key === "ArrowUp") {
+        if (flatOptions.length === 0) {
+          return;
+        }
+        event.preventDefault();
+        setActiveIndex((previous) =>
+          previous - 1 < 0
+            ? flatOptions.length - 1
+            : (previous - 1) % flatOptions.length,
+        );
+        return;
+      }
+
+      if (event.key === "Enter" || event.key === "Tab") {
+        if (flatOptions.length === 0) {
+          return;
+        }
+        event.preventDefault();
+        selectOption();
+        return;
+      }
+
+      if (event.key === "Escape") {
+        event.preventDefault();
+        closeMenu();
+      }
+    },
+    [range, flatOptions, selectOption, closeMenu],
+  );
+
+  const retryWorkspace = useCallback(() => {
+    loadWorkspaceFiles();
+  }, [loadWorkspaceFiles]);
+
+  return {
+    isOpen: Boolean(range),
+    query: range?.query ?? "",
+    flatOptions,
+    sections,
+    activeIndex,
+    setActiveIndex,
+    handleTextChange,
+    handleCaretChange,
+    handleKeyDown,
+    selectOption,
+    closeMenu,
+    workspaceStatus,
+    workspaceError,
+    retryWorkspace,
+    workspaceFileCount: workspaceFiles.length,
+  };
+};

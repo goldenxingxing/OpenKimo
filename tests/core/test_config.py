@@ -1,0 +1,200 @@
+from __future__ import annotations
+
+import pytest
+from inline_snapshot import snapshot
+from pydantic import ValidationError
+
+from kimo_cli.config import (
+    Config,
+    get_default_config,
+    load_config,
+    load_config_from_string,
+)
+from kimo_cli.exception import ConfigError
+
+
+def test_default_config():
+    config = get_default_config()
+    assert config == snapshot(Config())
+
+
+def test_default_config_dump():
+    config = get_default_config()
+    assert config.model_dump() == snapshot(
+        {
+            "default_model": "",
+            "default_thinking": False,
+            "default_yolo": False,
+            "default_self_evolve": False,
+            "evolution_auto_min_evidence": 3,
+            "evolution_auto_cooldown_s": 1800,
+            "default_plan_mode": False,
+            "default_editor": "",
+            "theme": "dark",
+            "show_thinking_stream": True,
+            "experimental": {},
+            "models": {},
+            "providers": {},
+            "loop_control": {
+                "max_steps_per_turn": 1000,
+                "max_retries_per_step": 5,
+                "finalize_on_max_steps": True,
+                "finalization_timeout_s": 120.0,
+                "max_ralph_iterations": 0,
+                "reserved_context_size": 50000,
+                "compaction_trigger_ratio": 0.95,
+                "max_request_bytes": 1800000,
+                "prune_tool_outputs": True,
+                "prune_protect_tokens": 40000,
+                "prune_minimum_tokens": 20000,
+            },
+            "background": {
+                "max_running_tasks": 50,
+                "read_max_bytes": 30000,
+                "notification_tail_lines": 20,
+                "notification_tail_chars": 3000,
+                "wait_poll_interval_ms": 500,
+                "worker_heartbeat_interval_ms": 5000,
+                "worker_stale_after_ms": 15000,
+                "kill_grace_period_ms": 2000,
+                "auto_followup": True,
+                "auto_followup_coalesce_ms": 1500,
+                "keep_alive_on_exit": False,
+                "agent_task_timeout_s": 900,
+                "print_wait_ceiling_s": 3600,
+            },
+            "notifications": {
+                "claim_stale_after_ms": 15000,
+            },
+            "mcp": {"client": {"tool_call_timeout_ms": 60000}},
+            "hooks": [],
+            "merge_all_available_skills": True,
+            "skill_brands": ["kimo"],
+            "extra_skill_dirs": [],
+            "telemetry": False,
+            "memory": {"propose_candidates": True},
+            "skip_skill_dirs": [],
+            "skip_afk_prompt_injection": False,
+        }
+    )
+
+
+def test_load_config_text_toml():
+    config = load_config_from_string('default_model = ""\n')
+    assert config == get_default_config()
+
+
+def test_load_config_text_json():
+    config = load_config_from_string('{"default_model": ""}')
+    assert config == get_default_config()
+
+
+def test_load_config_sets_source_file(tmp_path):
+    config_file = tmp_path / "custom.toml"
+
+    config = load_config(config_file)
+
+    assert config.source_file == config_file.resolve()
+    assert not config.is_from_default_location
+
+
+def test_load_config_text_has_no_source_file():
+    config = load_config_from_string('{"default_model": ""}')
+
+    assert config.source_file is None
+
+
+def test_load_config_text_invalid():
+    with pytest.raises(ConfigError, match="Invalid configuration text"):
+        load_config_from_string("not valid {")
+
+
+def test_load_config_invalid_ralph_iterations():
+    with pytest.raises(ConfigError, match="max_ralph_iterations"):
+        load_config_from_string('{"loop_control": {"max_ralph_iterations": -2}}')
+
+
+def test_load_config_reserved_context_size():
+    config = load_config_from_string('{"loop_control": {"reserved_context_size": 30000}}')
+    assert config.loop_control.reserved_context_size == 30000
+
+
+def test_load_config_max_steps_per_turn():
+    config = load_config_from_string("[loop_control]\nmax_steps_per_turn = 42\n")
+    assert config.loop_control.max_steps_per_turn == 42
+
+
+def test_load_config_legacy_skip_yolo_prompt_injection_ignored():
+    config = load_config_from_string("skip_yolo_prompt_injection = true\n")
+    assert config.skip_afk_prompt_injection is False
+
+
+def test_load_config_max_steps_per_run():
+    config = load_config_from_string('{"loop_control": {"max_steps_per_run": 7}}')
+    assert config.loop_control.max_steps_per_turn == 7
+
+
+def test_load_config_reserved_context_size_too_low():
+    with pytest.raises(ConfigError, match="reserved_context_size"):
+        load_config_from_string('{"loop_control": {"reserved_context_size": 500}}')
+
+
+def test_load_config_compaction_trigger_ratio():
+    config = load_config_from_string('{"loop_control": {"compaction_trigger_ratio": 0.8}}')
+    assert config.loop_control.compaction_trigger_ratio == 0.8
+
+
+def test_load_config_compaction_trigger_ratio_default():
+    config = load_config_from_string("{}")
+    assert config.loop_control.compaction_trigger_ratio == 0.95
+
+
+def test_load_config_compaction_trigger_ratio_too_low():
+    with pytest.raises(ConfigError, match="compaction_trigger_ratio"):
+        load_config_from_string('{"loop_control": {"compaction_trigger_ratio": 0.3}}')
+
+
+def test_load_config_compaction_trigger_ratio_too_high():
+    with pytest.raises(ConfigError, match="compaction_trigger_ratio"):
+        load_config_from_string('{"loop_control": {"compaction_trigger_ratio": 1.0}}')
+
+
+def test_load_config_max_request_bytes():
+    config = load_config_from_string('{"loop_control": {"max_request_bytes": 1500000}}')
+    assert config.loop_control.max_request_bytes == 1500000
+
+
+def test_load_config_max_request_bytes_default():
+    config = load_config_from_string("{}")
+    assert config.loop_control.max_request_bytes == 1800000
+
+
+def test_load_config_max_request_bytes_too_low():
+    with pytest.raises(ConfigError, match="max_request_bytes"):
+        load_config_from_string('{"loop_control": {"max_request_bytes": 1000}}')
+
+
+def test_skill_brands_rejects_unsafe_path_segments():
+    """A brand name becomes a ``.<brand>/skills`` directory.
+
+    An entry carrying a separator or a ``..`` segment would let config escape
+    the home or project root the lookup is scoped to, so it is rejected at
+    load time rather than silently resolving somewhere unexpected.
+    """
+    for bad in ["..", ".", "../../etc", "a/b", "a\\b", "", "   ", "~", ".claude"]:
+        with pytest.raises(ValidationError):
+            Config(skill_brands=[bad])
+
+
+def test_skill_brands_dedupes_preserving_priority_order():
+    """The list is a priority order; a repeated brand is noise, not a second
+    lookup."""
+    assert Config(skill_brands=["kimo", "claude", "kimo"]).skill_brands == [
+        "kimo",
+        "claude",
+    ]
+
+
+def test_skill_brands_defaults_to_kimo_only():
+    """The default is the whole point of the option: no foreign catalogue."""
+    assert Config().skill_brands == ["kimo"]

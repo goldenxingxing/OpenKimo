@@ -1,0 +1,389 @@
+"""Admin API endpoints for user management."""
+
+from __future__ import annotations
+
+import asyncio
+from typing import Any, Literal
+
+from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
+from pydantic import BaseModel
+
+from kimo_cli.analytics.skill_usage import build_skill_usage
+from kimo_cli.skill.manager import ManagedSkill, SkillDependencyError, SkillManager
+from kimo_cli.web.db.crud import (
+    create_user,
+    delete_user,
+    list_users,
+    update_user,
+)
+from kimo_cli.web.db.database import db_session
+from kimo_cli.web.user_auth import require_admin
+
+router = APIRouter(prefix="/api/admin", tags=["admin"])
+
+#: Ceiling for an uploaded skill (archive or single .md).
+_MAX_SKILL_UPLOAD_BYTES = 20 * 1024 * 1024
+
+
+def _skill_manager() -> SkillManager:
+    return SkillManager()
+
+
+# ---------------------------------------------------------------------------
+# Response / request models
+# ---------------------------------------------------------------------------
+
+
+class UserDetail(BaseModel):
+    id: str
+    username: str
+    role: str
+    is_active: bool
+    created_at: float
+    session_count: int
+
+
+class CreateUserRequest(BaseModel):
+    username: str
+    password: str
+    role: str = "user"
+
+
+class UpdateUserRequest(BaseModel):
+    password: str | None = None
+    role: str | None = None
+    is_active: bool | None = None
+
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+
+def _count_sessions(db: Any, user_id: str) -> int:
+    """Return the number of active (non-expired) sessions for a user."""
+    import time
+
+    row = db.execute(
+        "SELECT COUNT(*) FROM user_sessions WHERE user_id = ? AND expires_at > ?",
+        (user_id, time.time()),
+    ).fetchone()
+    return int(row[0]) if row else 0
+
+
+def _count_sessions_for_all(db: Any) -> dict[str, int]:
+    """Active session counts for every user in one query (avoids N+1)."""
+    import time
+
+    rows = db.execute(
+        "SELECT user_id, COUNT(*) FROM user_sessions WHERE expires_at > ? GROUP BY user_id",
+        (time.time(),),
+    ).fetchall()
+    return {row[0]: int(row[1]) for row in rows}
+
+
+def _user_to_detail(
+    db: Any, user: dict[str, Any], session_counts: dict[str, int] | None = None
+) -> UserDetail:
+    return UserDetail(
+        id=user["id"],
+        username=user["username"],
+        role=user["role"],
+        is_active=bool(user["is_active"]),
+        created_at=user["created_at"],
+        session_count=(
+            session_counts.get(user["id"], 0)
+            if session_counts is not None
+            else _count_sessions(db, user["id"])
+        ),
+    )
+
+
+# ---------------------------------------------------------------------------
+# Endpoints
+# ---------------------------------------------------------------------------
+
+
+@router.get("/users", summary="List all users (admin only)")
+async def get_users(
+    admin: dict[str, Any] = Depends(require_admin),
+) -> list[UserDetail]:
+    """Return all users with their active session counts."""
+    with db_session() as db:
+        users = list_users(db)
+        counts = _count_sessions_for_all(db)
+        return [_user_to_detail(db, u, counts) for u in users]
+
+
+@router.post("/users", summary="Create a new user (admin only)", status_code=201)
+async def create_user_endpoint(
+    body: CreateUserRequest,
+    admin: dict[str, Any] = Depends(require_admin),
+) -> UserDetail:
+    """Create a new user account."""
+    import sqlite3
+
+    if body.role not in {"user", "admin"}:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="role must be 'user' or 'admin'",
+        )
+    try:
+        with db_session() as db:
+            user = create_user(db, body.username, body.password, body.role)
+            return _user_to_detail(db, user)
+    except sqlite3.IntegrityError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"Username '{body.username}' already exists",
+        ) from exc
+
+
+@router.patch("/users/{user_id}", summary="Update a user (admin only)")
+async def update_user_endpoint(
+    user_id: str,
+    body: UpdateUserRequest,
+    admin: dict[str, Any] = Depends(require_admin),
+) -> UserDetail:
+    """Update role, password, or active status of a user."""
+    if body.role is not None and body.role not in {"user", "admin"}:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="role must be 'user' or 'admin'",
+        )
+
+    # Prevent self-demotion: admin cannot demote themselves to user or
+    # deactivate their own account. They can still change their password.
+    if user_id == admin["id"] and (body.role == "user" or body.is_active is False):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Cannot demote or deactivate your own account",
+        )
+
+    kwargs: dict[str, Any] = {}
+    if body.password is not None:
+        kwargs["password"] = body.password
+    if body.role is not None:
+        kwargs["role"] = body.role
+    if body.is_active is not None:
+        kwargs["is_active"] = body.is_active
+
+    with db_session() as db:
+        user = update_user(db, user_id, **kwargs)
+        if user is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="User not found",
+            )
+        return _user_to_detail(db, user)
+
+
+@router.delete("/users/{user_id}", summary="Delete a user (admin only)", status_code=204)
+async def delete_user_endpoint(
+    user_id: str,
+    admin: dict[str, Any] = Depends(require_admin),
+) -> None:
+    """Delete a user.  An admin cannot delete their own account."""
+    if user_id == admin["id"]:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Cannot delete your own account",
+        )
+    with db_session() as db:
+        deleted = delete_user(db, user_id)
+    if not deleted:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="User not found",
+        )
+
+
+# ---------------------------------------------------------------------------
+# Managed skills
+# ---------------------------------------------------------------------------
+
+
+class SkillContentUpdate(BaseModel):
+    content: str
+
+
+class SkillBulkAction(BaseModel):
+    names: list[str]
+    action: Literal["enable", "disable", "delete"]
+
+
+class SkillBulkResult(BaseModel):
+    applied: list[str]
+    missing: list[str]
+    skills: list[ManagedSkill]
+
+
+@router.get("/skills", summary="List managed skills (admin only)")
+async def list_managed_skills(
+    admin: dict[str, Any] = Depends(require_admin),
+) -> list[ManagedSkill]:
+    # Scanning both skill directories and parsing frontmatter is blocking I/O;
+    # keep it off the event loop.
+    return await asyncio.to_thread(lambda: _skill_manager().list_skills())
+
+
+# NOTE: keep this registered ahead of the "/skills/{name}/..." routes below.
+# It does not collide today (different segment count), but a future refactor to
+# a bare "/skills/{name}" would shadow it, and the failure would be silent.
+@router.get("/skills/usage", summary="Skill usage statistics (admin only)")
+def get_skill_usage(
+    days: int = 30,
+    refresh: bool = False,
+    admin: dict[str, Any] = Depends(require_admin),
+) -> dict[str, Any]:
+    """Usage counts reconstructed from session wire logs.
+
+    Defined with ``def`` rather than ``async def`` on purpose: the scan is
+    blocking I/O, so FastAPI runs it in the threadpool instead of stalling the
+    event loop.
+    """
+    return build_skill_usage(days=days, refresh=refresh, manager=_skill_manager())
+
+
+@router.get("/skills/{name}/files/{relative_path:path}", summary="Read a skill file")
+def read_managed_skill_file(
+    name: str,
+    relative_path: str,
+    admin: dict[str, Any] = Depends(require_admin),
+) -> dict[str, str]:
+    try:
+        return {
+            "name": name,
+            "file": relative_path,
+            "content": _skill_manager().read_file(name, relative_path),
+        }
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="Skill not found") from exc
+    except (OSError, UnicodeDecodeError, ValueError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.put("/skills/{name}/skill-md", summary="Edit a skill with copy-on-write")
+async def update_managed_skill(
+    name: str,
+    body: SkillContentUpdate,
+    admin: dict[str, Any] = Depends(require_admin),
+) -> ManagedSkill:
+    try:
+        return _skill_manager().write_skill_md(name, body.content)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="Skill not found") from exc
+    except (OSError, ValueError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.post("/skills/upload", status_code=201, summary="Upload a managed skill")
+async def upload_managed_skill(
+    file: UploadFile = File(...),
+    replace: bool = False,
+    admin: dict[str, Any] = Depends(require_admin),
+) -> ManagedSkill:
+    # The `+ 1` was already here to detect an oversized upload, but nothing
+    # looked at the length: read(n) does not raise, it just stops at n. A
+    # multi-gigabyte upload was silently truncated to 20 MiB and then
+    # installed — a corrupt archive, or half a skill file.
+    data = await file.read(_MAX_SKILL_UPLOAD_BYTES + 1)
+    if len(data) > _MAX_SKILL_UPLOAD_BYTES:
+        raise HTTPException(
+            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+            detail=f"Skill upload exceeds {_MAX_SKILL_UPLOAD_BYTES // (1024 * 1024)} MB",
+        )
+    try:
+        manager = _skill_manager()
+        if (file.filename or "").lower().endswith(".md"):
+            return await asyncio.to_thread(
+                manager.install_skill_md, data.decode("utf-8"), replace=replace
+            )
+        return await asyncio.to_thread(manager.install_archive, data, replace=replace)
+    except FileExistsError as exc:
+        raise HTTPException(status_code=409, detail=f"Skill already exists: {exc}") from exc
+    except (OSError, ValueError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+# Registered ahead of "/skills/{name}/..." for the same reason as
+# "/skills/usage": a single fixed segment must never be reachable as a name.
+@router.post("/skills/bulk", summary="Apply one action to many skills at once")
+async def bulk_managed_skills(
+    body: SkillBulkAction,
+    admin: dict[str, Any] = Depends(require_admin),
+) -> SkillBulkResult:
+    """Enable, disable, or delete a whole set of skills in one state write."""
+    manager = _skill_manager()
+    try:
+        result = manager.bulk_action(body.names, body.action)
+    except (OSError, ValueError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return SkillBulkResult(
+        applied=list(result.applied),
+        missing=list(result.missing),
+        skills=manager.list_skills(),
+    )
+
+
+def _managed_skill_action(name: str, action: str) -> ManagedSkill:
+    manager = _skill_manager()
+    try:
+        getattr(manager, action)(name)
+        return manager.get(name)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="Skill not found") from exc
+    except (OSError, ValueError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.post("/skills/{name}/enable")
+async def enable_managed_skill(
+    name: str, admin: dict[str, Any] = Depends(require_admin)
+) -> ManagedSkill:
+    return _managed_skill_action(name, "enable")
+
+
+@router.post("/skills/{name}/disable")
+async def disable_managed_skill(
+    name: str, admin: dict[str, Any] = Depends(require_admin)
+) -> ManagedSkill:
+    return _managed_skill_action(name, "disable")
+
+
+@router.post("/skills/{name}/restore")
+async def restore_managed_skill(
+    name: str, admin: dict[str, Any] = Depends(require_admin)
+) -> ManagedSkill:
+    return _managed_skill_action(name, "restore")
+
+
+@router.post("/skills/{name}/install-dependencies")
+async def install_managed_skill_dependencies(
+    name: str,
+    admin: dict[str, Any] = Depends(require_admin),
+) -> ManagedSkill:
+    """Install the packages an uploaded skill's scripts need.
+
+    An upload cannot carry them, so this is the step that makes such a skill
+    runnable — explicit, rather than something an upload does on its own.
+    """
+    try:
+        return await asyncio.to_thread(_skill_manager().install_dependencies, name)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="Skill not found") from exc
+    except SkillDependencyError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.delete("/skills/{name}", status_code=204)
+async def delete_managed_skill(name: str, admin: dict[str, Any] = Depends(require_admin)) -> None:
+    try:
+        _skill_manager().delete(name)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="Skill not found") from exc
+    except (OSError, ValueError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+__all__ = ["router"]

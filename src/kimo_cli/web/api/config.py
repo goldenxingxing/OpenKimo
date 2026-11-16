@@ -1,0 +1,509 @@
+"""Config API routes."""
+
+from __future__ import annotations
+
+import os
+from typing import Any, cast
+
+from fastapi import APIRouter, Depends, HTTPException, Request, status
+from pydantic import BaseModel, Field
+
+from kimo_cli import logger
+from kimo_cli.config import LLMModel, _write_text_atomic, get_config_file, load_config, save_config
+from kimo_cli.llm import (
+    ALL_MODEL_CAPABILITIES,
+    ModelCapability,
+    ProviderType,
+    derive_model_capabilities,
+    parse_llm_providers_env,
+)
+from kimo_cli.web.runner.process import KimoCLIRunner
+
+router = APIRouter(prefix="/api/config", tags=["config"])
+
+
+class ConfigModel(LLMModel):
+    """Model configuration for frontend."""
+
+    name: str = Field(description="Model key in kimo-cli config (Config.models)")
+    provider_type: ProviderType = Field(description="Provider type (LLMProvider.type)")
+
+
+class GlobalConfig(BaseModel):
+    """Global configuration snapshot for frontend."""
+
+    default_model: str = Field(description="Current default model key")
+    default_thinking: bool = Field(description="Current default thinking mode")
+    compaction_trigger_ratio: float = Field(
+        description=(
+            "Share of the context window that may fill before auto-compaction runs. "
+            "Applies to live sessions immediately, without a restart."
+        )
+    )
+    models: list[ConfigModel] = Field(description="All configured models")
+
+
+class UpdateGlobalConfigRequest(BaseModel):
+    """Request to update global config."""
+
+    default_model: str | None = Field(default=None, description="New default model key")
+    default_thinking: bool | None = Field(default=None, description="New default thinking mode")
+    compaction_trigger_ratio: float | None = Field(
+        default=None,
+        ge=0.5,
+        le=0.99,
+        description="New auto-compaction trigger ratio, applied to live sessions in place",
+    )
+    restart_running_sessions: bool | None = Field(
+        default=None, description="Whether to restart running sessions"
+    )
+    force_restart_busy_sessions: bool | None = Field(
+        default=None, description="Whether to force restart busy sessions"
+    )
+
+
+class UpdateGlobalConfigResponse(BaseModel):
+    """Response after updating global config."""
+
+    config: GlobalConfig = Field(description="Updated config snapshot")
+    restarted_session_ids: list[str] | None = Field(
+        default=None, description="IDs of restarted sessions"
+    )
+    skipped_busy_session_ids: list[str] | None = Field(
+        default=None, description="IDs of busy sessions that were skipped"
+    )
+    retuned_session_ids: list[str] | None = Field(
+        default=None,
+        description="IDs of live sessions that picked up the new compaction ratio in place",
+    )
+
+
+class ConfigToml(BaseModel):
+    """Raw config.toml content."""
+
+    content: str = Field(description="Raw TOML content")
+    path: str = Field(description="Path to config file")
+
+
+class UpdateConfigTomlRequest(BaseModel):
+    """Request to update config.toml."""
+
+    content: str = Field(description="New TOML content")
+
+
+class UpdateConfigTomlResponse(BaseModel):
+    """Response after updating config.toml."""
+
+    success: bool = Field(description="Whether the update was successful")
+    error: str | None = Field(default=None, description="Error message if failed")
+
+
+def _build_global_config() -> GlobalConfig:
+    """Build GlobalConfig from kimo-cli config.
+
+    Environment variables (``LLM_PROVIDERS`` and legacy vendor-prefixed keys)
+    are **merged** into ``config.toml``: any provider/model defined in the
+    environment but absent from the config file is appended automatically so
+    that the frontend can see and switch between them.
+    """
+    from pydantic import SecretStr
+
+    from kimo_cli.config import LLMProvider
+
+    config = load_config()
+    env_models_added = False
+
+    # ------------------------------------------------------------------
+    # 1. Merge LLM_PROVIDERS (YAML) into config.toml
+    # ------------------------------------------------------------------
+    providers_list = parse_llm_providers_env()
+    # .env LLM_PROVIDERS is the single source of truth for which providers/
+    # models exist (Settings adds/removes there). Names absent from it are
+    # stale leftovers in config.toml (from a config migration, a non-Settings
+    # writer, or a failed prune) and must not be served to the admin panel nor
+    # written back. Empty set (no LLM_PROVIDERS) keeps legacy/plain-config mode.
+    env_provider_names: set[str] = (
+        {p.get("name") for p in providers_list if p.get("name")} if providers_list else set()
+    )
+    if providers_list:
+        for p in providers_list:
+            name = p.get("name")
+            provider_type = p.get("type")
+            api_key = p.get("api_key", "")
+            base_url = p.get("base_url", "")
+            model_name = p.get("model")
+            max_ctx = p.get("max_context_size", 1000000)
+            caps_raw: Any = p.get("capabilities", [])
+
+            if not name or not provider_type or not model_name:
+                logger.warning(
+                    "Skipping LLM_PROVIDERS entry missing required fields: {entry}",
+                    entry=p,
+                )
+                continue
+
+            try:
+                max_ctx_int = int(max_ctx)
+            except (TypeError, ValueError):
+                max_ctx_int = 1000000
+
+            caps_set: set[str] = set()
+            if isinstance(caps_raw, list):
+                caps_list = cast(list[Any], caps_raw)
+                caps_set = {str(c).strip().lower() for c in caps_list if c}
+            elif isinstance(caps_raw, str):
+                caps_set = {c.strip().lower() for c in caps_raw.split(",") if c.strip()}
+
+            model_caps: set[ModelCapability] = {
+                cap for cap in ALL_MODEL_CAPABILITIES if cap in caps_set
+            }
+
+            # Add provider if not already present
+            if name not in config.providers:
+                config.providers[name] = LLMProvider(
+                    type=provider_type,
+                    base_url=base_url,
+                    api_key=SecretStr(api_key),
+                )
+                env_models_added = True
+
+            # Add model if not already present
+            if name not in config.models:
+                config.models[name] = LLMModel(
+                    provider=name,
+                    model=model_name,
+                    max_context_size=max_ctx_int,
+                    capabilities=model_caps or None,
+                )
+                env_models_added = True
+
+        if not config.default_model:
+            default_provider = os.environ.get("LLM_DEFAULT_PROVIDER", "").lower()
+            if default_provider:
+                for model_name in config.models:
+                    if model_name.lower() == default_provider:
+                        config.default_model = model_name
+                        break
+            if not config.default_model and config.models:
+                config.default_model = next(iter(config.models.keys()))
+
+    # ------------------------------------------------------------------
+    # 2. Legacy vendor-prefixed env vars (only if no LLM_PROVIDERS)
+    # ------------------------------------------------------------------
+    if not providers_list:
+        # OpenAI
+        openai_key = os.environ.get("OPENAI_API_KEY")
+        if openai_key:
+            model_name = os.environ.get("OPENAI_MODEL_NAME", "gpt-4o")
+            try:
+                max_ctx = int(os.environ.get("OPENAI_MODEL_MAX_CONTEXT_SIZE", "128000"))
+            except (TypeError, ValueError):
+                max_ctx = 128000
+            if model_name not in config.models:
+                config.models[model_name] = LLMModel(
+                    provider="openai",
+                    model=model_name,
+                    max_context_size=max_ctx,
+                )
+                env_models_added = True
+            if "openai" not in config.providers:
+                config.providers["openai"] = LLMProvider(
+                    type="openai_legacy",
+                    base_url=os.environ.get("OPENAI_BASE_URL", ""),
+                    api_key=SecretStr(openai_key),
+                )
+                env_models_added = True
+
+        # Anthropic
+        anthropic_key = os.environ.get("ANTHROPIC_API_KEY")
+        if anthropic_key:
+            model_name = os.environ.get("ANTHROPIC_MODEL_NAME", "claude-3-5-sonnet-20241022")
+            try:
+                max_ctx = int(os.environ.get("ANTHROPIC_MODEL_MAX_CONTEXT_SIZE", "200000"))
+            except (TypeError, ValueError):
+                max_ctx = 200000
+            if model_name not in config.models:
+                config.models[model_name] = LLMModel(
+                    provider="anthropic",
+                    model=model_name,
+                    max_context_size=max_ctx,
+                )
+                env_models_added = True
+            if "anthropic" not in config.providers:
+                config.providers["anthropic"] = LLMProvider(
+                    type="anthropic",
+                    base_url=os.environ.get("ANTHROPIC_BASE_URL", ""),
+                    api_key=SecretStr(anthropic_key),
+                )
+                env_models_added = True
+
+        if not config.default_model and config.models:
+            llm_provider = os.environ.get("LLM_PROVIDER", "").lower()
+            for m_name, m in config.models.items():
+                if not llm_provider or m.provider == llm_provider:
+                    config.default_model = m_name
+                    break
+            if not config.default_model:
+                config.default_model = next(iter(config.models.keys()))
+
+    # Persist merged providers/models back to config.toml. Prune first so a
+    # provider/model removed from .env is not resurrected on every request
+    # (the admin panel reads config.toml, so an unpruned write self-perpetuates
+    # the stale entry).
+    if env_models_added:
+        if env_provider_names:
+            for stale_name in list(config.models):
+                if stale_name not in env_provider_names:
+                    config.models.pop(stale_name, None)
+                    config.providers.pop(stale_name, None)
+        save_config(config)
+        logger.info("Merged environment LLM providers into config.toml")
+
+    # ------------------------------------------------------------------
+    # 3. Build frontend-facing GlobalConfig
+    # ------------------------------------------------------------------
+    models: list[ConfigModel] = []
+    for model_name, model in config.models.items():
+        # .env LLM_PROVIDERS is authoritative for the model list: skip models
+        # that are no longer in the environment (deleted in Settings).
+        if env_provider_names and model_name not in env_provider_names:
+            continue
+        provider = config.providers.get(model.provider)
+        if provider is None:
+            continue
+
+        derived_caps = derive_model_capabilities(model)
+        capabilities = derived_caps or None
+
+        models.append(
+            ConfigModel(
+                name=model_name,
+                model=model.model,
+                provider=model.provider,
+                provider_type=provider.type,
+                max_context_size=model.max_context_size,
+                capabilities=capabilities,
+            )
+        )
+
+    default_thinking = config.default_thinking
+
+    return GlobalConfig(
+        default_model=config.default_model,
+        default_thinking=default_thinking,
+        compaction_trigger_ratio=config.loop_control.compaction_trigger_ratio,
+        models=models,
+    )
+
+
+def get_effective_model_names() -> set[str]:
+    """Names of all selectable models (config.toml merged with env-provided models)."""
+    return {m.name for m in _build_global_config().models}
+
+
+def _get_runner(req: Request) -> KimoCLIRunner:
+    """Get KimoCLIRunner from FastAPI app state."""
+    return req.app.state.runner
+
+
+def _ensure_config_access(request: Request) -> None:
+    """An ordinary user must not read or rewrite the global config.
+
+    config.toml holds every provider's API key in plaintext, and a PATCH here
+    restarts every other user's workers. The auth middleware only establishes
+    that *somebody* is logged in, and none of these routes carried a role
+    check, so in a multi-user deployment any account could read the keys.
+
+    Deployments with no user accounts at all — the desktop app, a static-token
+    gateway — have no role to check and are unchanged: the middleware is the
+    gate there. This only narrows the case where a request does arrive as a
+    logged-in user.
+    """
+    from kimo_cli.web.user_auth import get_current_user
+
+    user = get_current_user(request)
+    if user is not None and user.get("role") != "admin":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Admin access required",
+        )
+
+
+def _ensure_sensitive_apis_allowed(request: Request) -> None:
+    """Block sensitive config writes when restricted."""
+    if getattr(request.app.state, "restrict_sensitive_apis", False):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Sensitive config APIs are disabled in this mode.",
+        )
+
+
+@router.get("/", summary="Get global (kimo-cli) config snapshot")
+async def get_global_config(http_request: Request) -> GlobalConfig:
+    """Get global (kimo-cli) config snapshot."""
+    _ensure_config_access(http_request)
+    return _build_global_config()
+
+
+@router.patch("/", summary="Update global (kimo-cli) default model/thinking")
+async def update_global_config(
+    request: UpdateGlobalConfigRequest,
+    http_request: Request,
+    runner: KimoCLIRunner = Depends(_get_runner),
+) -> UpdateGlobalConfigResponse:
+    """Update global (kimo-cli) default model/thinking."""
+    _ensure_config_access(http_request)
+    _ensure_sensitive_apis_allowed(http_request)
+
+    # Effective names first, then load. _build_global_config() merges
+    # env-provided providers and models into config.toml and saves them, so a
+    # config read before it is already stale — and the save at the end of this
+    # handler wrote that stale snapshot back over the merge, dropping the
+    # models it had just added.
+    effective_model_names = get_effective_model_names()
+    config = load_config()
+
+    # Validate and update default_model
+    if request.default_model is not None:
+        if request.default_model not in effective_model_names:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Model '{request.default_model}' not found in config",
+            )
+        # Selectable is not the same as writable, and the test is `models`
+        # itself — not "does config.toml have any models at all". With none,
+        # every name is unwritable, and the guard that read `config.models and
+        # ...` skipped itself in exactly that case: the assignment below then
+        # reached save_config() through the default_thinking branch and left a
+        # config.toml whose default_model is not in `models`. Config's own
+        # validator raises on that, on every load — every worker restart and
+        # every start of the server after this one.
+        if request.default_model not in config.models:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=(
+                    f"Model '{request.default_model}' comes from the environment and is "
+                    "not in config.toml; add it there before making it the default."
+                ),
+            )
+        config.default_model = request.default_model
+
+    # Update default_thinking
+    if request.default_thinking is not None:
+        config.default_thinking = request.default_thinking
+
+    # Update the auto-compaction trigger ratio
+    ratio_changed = (
+        request.compaction_trigger_ratio is not None
+        and request.compaction_trigger_ratio != config.loop_control.compaction_trigger_ratio
+    )
+    if request.compaction_trigger_ratio is not None:
+        config.loop_control.compaction_trigger_ratio = request.compaction_trigger_ratio
+
+    # Save config.  If models are currently sourced from environment
+    # variables (config.toml has no model entries) we only persist
+    # default_thinking so that we don't write a default_model that
+    # references a model absent from config.toml, which would break
+    # Pydantic validation on the next load.
+    had_models_before = bool(config.models)
+    if had_models_before:
+        save_config(config)
+    elif request.default_thinking is not None or request.compaction_trigger_ratio is not None:
+        # Preserve original default_model (likely empty) and only update thinking
+        save_config(config)
+
+    # The compaction ratio is read fresh on every step, so live workers can be
+    # retuned in place. Do it before any restart decision: a session that picks
+    # up the new value this way never needs to be interrupted for it.
+    retuned: list[str] = []
+    if ratio_changed:
+        assert request.compaction_trigger_ratio is not None
+        retuned = [
+            str(sid)
+            for sid in await runner.apply_compaction_ratio(request.compaction_trigger_ratio)
+        ]
+
+    # Restart running workers to apply config changes
+    restarted: list[str] = []
+    skipped_busy: list[str] = []
+
+    restart_running = request.restart_running_sessions
+    if restart_running is None:
+        # A ratio-only change needs no restart; anything else still does.
+        restart_running = request.default_model is not None or request.default_thinking is not None
+
+    if restart_running:
+        summary = await runner.restart_running_workers(
+            reason="config_update",
+            force=request.force_restart_busy_sessions or False,
+            # Sessions with a per-session model override do not depend on the
+            # global default model; skip them when only the default changed.
+            # Only safe to skip when the *sole* change is the default model.
+            # A thinking change affects every session, including those with a
+            # per-session model override.
+            skip_model_override=(
+                request.default_model is not None and request.default_thinking is None
+            ),
+        )
+        restarted = [str(sid) for sid in summary.restarted_session_ids]
+        skipped_busy = [str(sid) for sid in summary.skipped_busy_session_ids]
+
+    return UpdateGlobalConfigResponse(
+        config=_build_global_config(),
+        restarted_session_ids=restarted if restarted else None,
+        skipped_busy_session_ids=skipped_busy if skipped_busy else None,
+        retuned_session_ids=retuned if retuned else None,
+    )
+
+
+@router.get("/toml", summary="Get kimo-cli config.toml")
+async def get_config_toml(http_request: Request) -> ConfigToml:
+    """Get kimo-cli config.toml."""
+    _ensure_config_access(http_request)
+    _ensure_sensitive_apis_allowed(http_request)
+    config_file = get_config_file()
+    if not config_file.exists():
+        return ConfigToml(content="", path=str(config_file))
+    return ConfigToml(content=config_file.read_text(encoding="utf-8"), path=str(config_file))
+
+
+@router.put("/toml", summary="Update kimo-cli config.toml")
+async def update_config_toml(
+    request: UpdateConfigTomlRequest,
+    http_request: Request,
+    runner: KimoCLIRunner = Depends(_get_runner),
+) -> UpdateConfigTomlResponse:
+    """Update kimo-cli config.toml."""
+    from kimo_cli.config import load_config_from_string
+
+    _ensure_config_access(http_request)
+    _ensure_sensitive_apis_allowed(http_request)
+    try:
+        # Validate the config first
+        load_config_from_string(request.content)
+
+        # Write to file. Reuse save_config's atomic writer: a plain write_text
+        # truncates the file first, so a disk-full error would leave a
+        # half-written config.toml behind.
+        config_file = get_config_file()
+        config_file.parent.mkdir(parents=True, exist_ok=True)
+        _write_text_atomic(config_file, request.content)
+
+        # Config only reaches a session worker when it (re)starts; restart
+        # idle workers so provider edits apply to live sessions instead of
+        # silently staying stale until the next server restart.
+        try:
+            summary = await runner.restart_running_workers(reason="config_update", force=False)
+            if summary.skipped_busy_session_ids:
+                logger.info(
+                    "config.toml updated; {n} busy session(s) keep the old "
+                    "config until their next restart",
+                    n=len(summary.skipped_busy_session_ids),
+                )
+        except Exception as e:
+            logger.warning(f"Failed to restart workers after config.toml update: {e}")
+
+        return UpdateConfigTomlResponse(success=True)
+    except Exception as e:
+        logger.warning(f"Failed to update config.toml: {e}")
+        return UpdateConfigTomlResponse(success=False, error=str(e))

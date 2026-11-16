@@ -1,0 +1,60 @@
+{
+  "globalModel": {
+    "successTitle": "Global model updated",
+    "successDesc": "Restarted {{count}} running session(s).",
+    "busyTitle": "Some sessions were skipped (busy)",
+    "busyDesc": "Skipped {{count}} busy session(s). You can retry when they are idle, or force restart.",
+    "errorTitle": "Failed to update global model",
+    "fallbackError": "Failed to update global model"
+  },
+  "sessionModel": {
+    "successTitle": "Model switched for this session",
+    "busyTitle": "Session is generating a response",
+    "busyDesc": "You can switch models once the current response completes.",
+    "errorTitle": "Failed to switch model",
+    "fallbackError": "Failed to switch model"
+  },
+  "restartBusy": {
+    "successTitle": "Restarted running sessions",
+    "successDesc": "Restarted {{count}} session(s).",
+    "successDescNone": "No running sessions to restart.",
+    "errorTitle": "Failed to restart busy sessions",
+    "fallbackError": "Failed to restart busy sessions"
+  },
+  "session": {
+    "errorTitle": "Session Error",
+    "networkError": "Unable to connect to the local service. It may be restarting; please try again shortly."
+  },
+  "chatUpload": {
+    "successTitle": "Files uploaded",
+    "successDesc_one": "1 file uploaded successfully.",
+    "successDesc_other": "{{count}} files uploaded successfully.",
+    "errorTitle": "Failed to Upload Files",
+    "fallbackError": "File upload failed",
+    "emptyTitle": "Empty Message",
+    "emptyDesc": "Please enter a message or attach a file.",
+    "stillUploadingTitle": "Still uploading",
+    "stillUploadingDesc": "Please wait until file uploads finish."
+  },
+  "memory": {
+    "savedTitle": "Memory saved",
+    "fallbackError": "Failed to record memory",
+    "startFallbackError": "Failed to start memory recording",
+    "recordingInBackground": "Recording memory in background…",
+    "timedOut": "Timed out waiting for memory recording to complete"
+  },
+  "connectionError": {
+    "title": "Connection Error"
+  },
+  "queue": {
+    "stillProcessingTitle": "Still processing",
+    "stillProcessingDesc": "File attachments cannot be queued. Please wait.",
+    "queuedTitle": "Message queued",
+    "queuedDesc": "It will be sent when the current response finishes."
+  },
+  "fork": {
+    "successTitle": "Session forked successfully",
+    "errorTitle": "Fork failed",
+    "fallbackError": "Failed to fork session"
+  }
+}

@@ -1,0 +1,416 @@
+import {
+  PromptInput,
+  PromptInputAttachment,
+  PromptInputAttachments,
+  PromptInputBody,
+  PromptInputButton,
+  PromptInputFooter,
+  PromptInputSubmit,
+  PromptInputTextarea,
+  PromptInputTools,
+  usePromptInputAttachments,
+  usePromptInputController,
+} from "@ai-elements";
+import type { ChatStatus } from "ai";
+import type { PromptInputMessage } from "@ai-elements";
+import type { Session } from "@/lib/api/models";
+import type { TokenUsage } from "@/hooks/wireTypes";
+import type { ActivityDetail } from "./activity-status-indicator";
+import { Badge } from "@/components/ui/badge";
+import { cn } from "@/lib/utils";
+import { MEDIA_CONFIG } from "@/config/media";
+
+import { FileMentionMenu } from "../file-mention-menu";
+import { useFileMentions } from "../useFileMentions";
+import { SlashCommandMenu } from "../slash-command-menu";
+import { useSlashCommands, type SlashCommandDef } from "../useSlashCommands";
+import { PromptToolbar } from "./prompt-toolbar";
+import { ArrowUpIcon, Loader2Icon, SquareIcon, Maximize2Icon, Minimize2Icon } from "lucide-react";
+import { useTranslation } from "react-i18next";
+import { toast } from "sonner";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
+import { GlobalConfigControls } from "@/features/chat/global-config-controls";
+import {
+  type ChangeEvent,
+  type KeyboardEvent,
+  type ReactElement,
+  type SyntheticEvent,
+  memo,
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+} from "react";
+import type { SessionFileEntry } from "@/hooks/useSessions";
+
+type ChatPromptComposerProps = {
+  status: ChatStatus;
+  onSubmit: (message: PromptInputMessage) => Promise<void>;
+  canSendMessage: boolean;
+  currentSession?: Session;
+  isUploading: boolean;
+  isStreaming: boolean;
+  isAwaitingIdle: boolean;
+  isReplayingHistory: boolean;
+  onCancel?: () => void;
+  onListSessionDirectory?: (
+    sessionId: string,
+    path?: string,
+  ) => Promise<SessionFileEntry[]>;
+  slashCommands?: SlashCommandDef[];
+  planMode?: boolean;
+  onPlanModeChange?: (enabled: boolean) => void;
+  yolo?: boolean;
+  onYoloChange?: (enabled: boolean) => void;
+  /** Persist a per-session model selection; resolves true on success */
+  onSelectSessionModel?: (sessionId: string, model: string) => Promise<boolean>;
+  /** Staged draft model shown when no session exists yet */
+  draftModel?: string | null;
+  /** Called when the draft (pre-session) model selection changes */
+  onDraftModelChange?: (model: string) => void;
+  activityStatus?: ActivityDetail;
+  usagePercent?: number;
+  usedTokens?: number;
+  maxTokens?: number;
+  tokenUsage?: TokenUsage | null;
+};
+
+export const ChatPromptComposer = memo(function ChatPromptComposerComponent({
+  status,
+  onSubmit,
+  canSendMessage,
+  currentSession,
+  isUploading,
+  isStreaming,
+  isAwaitingIdle,
+  isReplayingHistory,
+  onCancel,
+  onListSessionDirectory,
+  slashCommands = [],
+  planMode = false,
+  onPlanModeChange,
+  yolo = false,
+  onYoloChange,
+  onSelectSessionModel,
+  draftModel,
+  onDraftModelChange,
+  activityStatus,
+  usagePercent,
+  usedTokens,
+  maxTokens,
+  tokenUsage,
+}: ChatPromptComposerProps): ReactElement {
+  const { t } = useTranslation("chat");
+  const promptController = usePromptInputController();
+  const attachmentContext = usePromptInputAttachments();
+  const textareaRef = useRef<HTMLTextAreaElement | null>(null);
+  const [isExpanded, setIsExpanded] = useState(false);
+
+  // Switching sessions lands on the composer: put the caret there so the
+  // user can type without first clicking into the box. One focus per
+  // session switch — this ref is what stops every re-render from yanking
+  // focus back while the user works elsewhere in the page.
+  const lastFocusedSessionRef = useRef<string | undefined>(undefined);
+  const sessionId = currentSession?.sessionId;
+  const inputReady = Boolean(
+    sessionId && canSendMessage && !isUploading && !isAwaitingIdle,
+  );
+  useEffect(() => {
+    if (!inputReady) return;
+    if (lastFocusedSessionRef.current === sessionId) return;
+    // Defer past this render: right after a switch the textarea can still
+    // be disabled, and focusing a disabled control does nothing.
+    const raf = requestAnimationFrame(() => {
+      textareaRef.current?.focus();
+      lastFocusedSessionRef.current = sessionId;
+    });
+    return () => cancelAnimationFrame(raf);
+  }, [inputReady, sessionId]);
+
+  const {
+    isOpen: isMentionOpen,
+    query: mentionQuery,
+    sections: mentionSections,
+    flatOptions: mentionOptions,
+    activeIndex: mentionActiveIndex,
+    setActiveIndex: setMentionActiveIndex,
+    handleTextChange: handleMentionTextChange,
+    handleCaretChange: handleMentionCaretChange,
+    handleKeyDown: handleMentionKeyDown,
+    selectOption: selectMentionOption,
+    closeMenu: closeMentionMenu,
+    workspaceStatus: mentionWorkspaceStatus,
+    workspaceError: mentionWorkspaceError,
+    retryWorkspace: retryMentionWorkspace,
+    workspaceFileCount: mentionWorkspaceFileCount,
+  } = useFileMentions({
+    text: promptController.textInput.value,
+    setText: promptController.textInput.setInput,
+    textareaRef,
+    attachments: attachmentContext.files,
+    sessionId: currentSession?.sessionId,
+    listDirectory: onListSessionDirectory,
+  });
+
+  const {
+    isOpen: isSlashOpen,
+    query: slashQuery,
+    options: slashOptions,
+    activeIndex: slashActiveIndex,
+    setActiveIndex: setSlashActiveIndex,
+    handleTextChange: handleSlashTextChange,
+    handleCaretChange: handleSlashCaretChange,
+    handleKeyDown: handleSlashKeyDown,
+    selectOption: selectSlashOption,
+    closeMenu: closeSlashMenu,
+  } = useSlashCommands({
+    text: promptController.textInput.value,
+    setText: promptController.textInput.setInput,
+    textareaRef,
+    commands: slashCommands,
+  });
+
+  const handleTextareaChange = useCallback(
+    (event: ChangeEvent<HTMLTextAreaElement>) => {
+      const value = event.currentTarget.value;
+      const caret = event.currentTarget.selectionStart;
+      handleMentionTextChange(value, caret);
+      handleSlashTextChange(value, caret);
+    },
+    [handleMentionTextChange, handleSlashTextChange],
+  );
+
+  const handleTextareaSelection = useCallback(
+    (event: SyntheticEvent<HTMLTextAreaElement>) => {
+      const caret = event.currentTarget.selectionStart;
+      handleMentionCaretChange(caret);
+      handleSlashCaretChange(caret);
+    },
+    [handleMentionCaretChange, handleSlashCaretChange],
+  );
+
+  const handleTextareaBlur = useCallback(() => {
+    closeMentionMenu();
+    closeSlashMenu();
+  }, [closeMentionMenu, closeSlashMenu]);
+
+  const handleTextareaKeyDown = useCallback(
+    (event: KeyboardEvent<HTMLTextAreaElement>) => {
+      // Priority: slash menu first, then mention menu
+      if (isSlashOpen) {
+        handleSlashKeyDown(event);
+        return;
+      }
+      if (isMentionOpen) {
+        handleMentionKeyDown(event);
+        return;
+      }
+    },
+    [isSlashOpen, isMentionOpen, handleSlashKeyDown, handleMentionKeyDown],
+  );
+
+  const handleFileError = useCallback(
+    (err: { code: string; message: string }) => {
+      toast.error(t("upload.fileError"), { description: err.message });
+    },
+    [t],
+  );
+
+  const handleToggleExpand = useCallback(() => {
+    setIsExpanded((prev) => !prev);
+  }, []);
+
+  return (
+    <div className="w-full">
+      <PromptToolbar
+        planMode={planMode}
+        activityStatus={activityStatus}
+        usagePercent={usagePercent}
+        usedTokens={usedTokens}
+        maxTokens={maxTokens}
+        tokenUsage={tokenUsage}
+      />
+
+      <PromptInput
+        accept="*"
+        className={cn(
+          "w-full [&_[data-slot=input-group]]:border [&_[data-slot=input-group]]:border-border",
+          planMode && "[&_[data-slot=input-group]]:border-dashed [&_[data-slot=input-group]]:!border-blue-200 dark:[&_[data-slot=input-group]]:!border-blue-600"
+        )}
+        multiple
+        maxFiles={MEDIA_CONFIG.maxCount}
+        onSubmit={onSubmit}
+        onError={handleFileError}
+      >
+        <PromptInputBody className="w-full relative">
+          {/* Expand/Collapse button - positioned relative to entire input body */}
+          <button
+            type="button"
+            onClick={handleToggleExpand}
+            disabled={!(canSendMessage && currentSession)}
+            className="absolute top-2 right-2 z-10 p-1 cursor-pointer rounded-md text-muted-foreground hover:text-foreground hover:bg-secondary/50 transition-colors disabled:opacity-50 disabled:pointer-events-none"
+            aria-label={isExpanded ? t("composer.collapseInput") : t("composer.expandInput")}
+          >
+            {isExpanded ? (
+              <Minimize2Icon className="size-4" />
+            ) : (
+              <Maximize2Icon className="size-4" />
+            )}
+          </button>
+          <PromptInputAttachments>
+            {(file) => <PromptInputAttachment data={file} />}
+          </PromptInputAttachments>
+          {isUploading ? (
+            <Badge
+              className="mb-2 bg-secondary/70 text-muted-foreground"
+              variant="secondary"
+            >
+              <Loader2Icon className="size-4 animate-spin text-primary" />
+              <span>{t("composer.uploadingBadge")}</span>
+            </Badge>
+          ) : null}
+          <div className="relative w-full flex items-start">
+            <div className="flex-1 relative">
+              <PromptInputTextarea
+                ref={textareaRef}
+                className={cn(
+                  "transition-all duration-200 pr-8",
+                  isExpanded
+                    ? "min-h-[220px] max-h-[60vh] sm:min-h-[300px]"
+                    : "min-h-10 max-h-36 sm:min-h-16 sm:max-h-48",
+                )}
+                placeholder={
+                  !currentSession
+                    ? t("composer.placeholderNoSession")
+                    : isAwaitingIdle
+                      ? isReplayingHistory
+                        ? t("composer.placeholderConnecting")
+                        : t("composer.placeholderStarting")
+                      : isStreaming
+                        ? t("composer.placeholderFollowUp")
+                        : t("composer.placeholderDefault")
+                }
+                aria-busy={isUploading}
+                disabled={!canSendMessage || isUploading || !currentSession || isAwaitingIdle}
+                onChange={handleTextareaChange}
+                onSelect={handleTextareaSelection}
+                onKeyUp={handleTextareaSelection}
+                onClick={handleTextareaSelection}
+                onBlur={handleTextareaBlur}
+                onKeyDown={handleTextareaKeyDown}
+              />
+              {/* Slash command menu - mutually exclusive with file mention menu */}
+              <SlashCommandMenu
+                open={isSlashOpen && canSendMessage && !isMentionOpen}
+                query={slashQuery}
+                options={slashOptions}
+                activeIndex={slashActiveIndex}
+                onSelect={selectSlashOption}
+                onHover={setSlashActiveIndex}
+              />
+              {/* File mention menu - only show when slash menu is not open */}
+              <FileMentionMenu
+                open={isMentionOpen && canSendMessage && !isSlashOpen}
+                query={mentionQuery}
+                sections={mentionSections}
+                flatOptions={mentionOptions}
+                activeIndex={mentionActiveIndex}
+                onSelect={selectMentionOption}
+                onHover={setMentionActiveIndex}
+                workspaceStatus={mentionWorkspaceStatus}
+                workspaceError={mentionWorkspaceError}
+                onRetryWorkspace={retryMentionWorkspace}
+                isWorkspaceAvailable={Boolean(
+                  currentSession && onListSessionDirectory,
+                )}
+                workspaceFileCount={mentionWorkspaceFileCount}
+              />
+            </div>
+          </div>
+        </PromptInputBody>
+        <PromptInputFooter className="w-full gap-2 py-1 border-none bg-transparent shadow-none">
+          <PromptInputTools className="flex-1 min-w-0 flex-wrap">
+            <GlobalConfigControls
+              planMode={planMode}
+              onPlanModeChange={onPlanModeChange}
+              yolo={yolo}
+              onYoloChange={onYoloChange}
+              sessionId={currentSession?.sessionId}
+              sessionModel={currentSession?.model}
+              sessionBusy={isStreaming || isAwaitingIdle}
+              onSelectSessionModel={onSelectSessionModel}
+              draftModel={draftModel}
+              onDraftModelChange={onDraftModelChange}
+            />
+          </PromptInputTools>
+          {isStreaming ? (
+            <div className="flex items-center gap-1.5 shrink-0">
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <PromptInputButton
+                    aria-label={t("composer.stopGeneration")}
+                    disabled={!onCancel}
+                    onClick={(event) => {
+                      event.preventDefault();
+                      event.stopPropagation();
+                      onCancel?.();
+                    }}
+                    size="icon-sm"
+                    variant="default"
+                    className="shrink-0"
+                  >
+                    <SquareIcon className="size-4" />
+                  </PromptInputButton>
+                </TooltipTrigger>
+                <TooltipContent>{t("composer.stopGeneration")}</TooltipContent>
+              </Tooltip>
+              <Tooltip>
+                {/* A disabled button gets no pointer events, so the tooltip
+                    hangs off a wrapper that does. */}
+                <TooltipTrigger asChild>
+                  <span className="inline-flex shrink-0">
+                    <PromptInputSubmit
+                      aria-label={t("composer.queueMessage")}
+                      size="icon-sm"
+                      variant="outline"
+                      className="shrink-0"
+                      disabled={!(canSendMessage && currentSession)}
+                    >
+                      <ArrowUpIcon className="size-4" />
+                    </PromptInputSubmit>
+                  </span>
+                </TooltipTrigger>
+                <TooltipContent>{t("composer.queueMessage")}</TooltipContent>
+              </Tooltip>
+            </div>
+          ) : (
+            <Tooltip>
+              {/* Disabled while the input is empty, which is exactly when
+                  someone hovers to find out what it does. */}
+              <TooltipTrigger asChild>
+                <span className="inline-flex shrink-0">
+                  <PromptInputSubmit
+                    aria-label={t("composer.send")}
+                    status={isUploading ? "submitted" : status}
+                    disabled={
+                      !canSendMessage ||
+                      isAwaitingIdle ||
+                      isUploading ||
+                      !currentSession
+                    }
+                    className="shrink-0"
+                  />
+                </span>
+              </TooltipTrigger>
+              <TooltipContent>{t("composer.sendHint")}</TooltipContent>
+            </Tooltip>
+          )}
+        </PromptInputFooter>
+      </PromptInput>
+    </div>
+  );
+});

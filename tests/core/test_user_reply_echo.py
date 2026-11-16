@@ -1,0 +1,163 @@
+"""What the user answers the agent with belongs in the transcript.
+
+Approval feedback and question answers reach the model inside a tool result, so
+the conversation used to show the agent asking and then carrying on, with the
+user's own side of the exchange nowhere in it.
+"""
+
+from __future__ import annotations
+
+import pytest
+
+from kimo_cli.wire.types import QuestionItem, QuestionOption, UserReply
+
+
+def _echoed(monkeypatch: pytest.MonkeyPatch, module: str) -> list[UserReply]:
+    sent: list[UserReply] = []
+    monkeypatch.setattr(
+        f"{module}.wire_send",
+        lambda msg: sent.append(msg) if isinstance(msg, UserReply) else None,
+    )
+    return sent
+
+
+def test_approval_feedback_is_echoed_as_the_user_speaking(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from kimo_cli.soul import approval as approval_module
+
+    sent: list[UserReply] = []
+    monkeypatch.setattr(
+        "kimo_cli.soul.wire_send",
+        lambda msg: sent.append(msg) if isinstance(msg, UserReply) else None,
+    )
+
+    approval_module._echo_user_reply("  use a migration instead  ", "approval_feedback")
+
+    assert [(m.text, m.source) for m in sent] == [("use a migration instead", "approval_feedback")]
+
+
+def test_an_empty_or_absent_reply_is_not_echoed(monkeypatch: pytest.MonkeyPatch) -> None:
+    from kimo_cli.soul import approval as approval_module
+
+    sent: list[UserReply] = []
+    monkeypatch.setattr(
+        "kimo_cli.soul.wire_send",
+        lambda msg: sent.append(msg) if isinstance(msg, UserReply) else None,
+    )
+
+    approval_module._echo_user_reply("   ", "approval_feedback")
+    approval_module._echo_user_reply("", "approval_feedback")
+
+    assert sent == []
+
+
+def test_echoing_without_a_wire_does_not_break_the_approval(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Embedded use and tests have no wire; the reply still reaches the model."""
+    from kimo_cli.soul import approval as approval_module
+
+    def no_wire(_msg):
+        raise AssertionError("Wire is expected to be set when soul is running")
+
+    monkeypatch.setattr("kimo_cli.soul.wire_send", no_wire)
+
+    approval_module._echo_user_reply("something", "approval_feedback")
+
+
+def test_question_answers_are_echoed_with_the_question_they_answer(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Picked options and typed text alike, as one reply, each under its question.
+
+    The header is a category tag and repeats across related questions, so the
+    question itself is what makes the line readable back.
+    """
+    from kimo_cli.tools import ask_user as ask_user_module
+
+    sent = _echoed(monkeypatch, "kimo_cli.tools.ask_user")
+    questions = [
+        QuestionItem(
+            question="Which database?",
+            header="Database",
+            options=[QuestionOption(label="Postgres"), QuestionOption(label="SQLite")],
+        ),
+        QuestionItem(
+            question="Anything else?",
+            options=[QuestionOption(label="No")],
+        ),
+    ]
+
+    ask_user_module._echo_answers(
+        questions,
+        {
+            "Which database?": "Postgres",  # a listed option
+            "Anything else?": "use DuckDB, and keep the schema flat",  # typed
+        },
+    )
+
+    assert [(m.text, m.source) for m in sent] == [
+        (
+            "Which database?\n→ Postgres\n\nAnything else?\n→ use DuckDB, and keep the schema flat",
+            "question_answer",
+        )
+    ]
+
+
+def test_unanswered_questions_are_left_out(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A dismissed panel says nothing on the user's behalf."""
+    from kimo_cli.tools import ask_user as ask_user_module
+
+    sent = _echoed(monkeypatch, "kimo_cli.tools.ask_user")
+    questions = [
+        QuestionItem(
+            question="Which database?",
+            header="Database",
+            options=[QuestionOption(label="Postgres"), QuestionOption(label="SQLite")],
+        )
+    ]
+
+    ask_user_module._echo_answers(questions, {})
+    ask_user_module._echo_answers(questions, {"Which database?": "   "})
+
+    assert sent == []
+
+
+def test_plan_revise_feedback_is_echoed_as_the_user_speaking(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from kimo_cli.tools import plan as plan_module
+
+    sent = _echoed(monkeypatch, "kimo_cli.tools.plan")
+
+    plan_module._echo_revise_feedback("  split the migration into two steps  ")
+    plan_module._echo_revise_feedback("   ")
+
+    assert [(m.text, m.source) for m in sent] == [
+        ("split the migration into two steps", "approval_feedback")
+    ]
+
+
+def test_plan_revise_echo_without_a_wire_does_not_break_the_tool(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from kimo_cli.tools import plan as plan_module
+
+    def no_wire(_msg):
+        raise AssertionError("Wire is expected to be set when soul is running")
+
+    monkeypatch.setattr("kimo_cli.tools.plan.wire_send", no_wire)
+
+    plan_module._echo_revise_feedback("something")
+
+
+def test_a_user_reply_survives_the_wire_round_trip() -> None:
+    """It is recorded and replayed like any other event — that is the point."""
+    from kimo_cli.wire.serde import deserialize_wire_message, serialize_wire_message
+
+    original = UserReply(text="do it differently", source="approval_feedback")
+    restored = deserialize_wire_message(serialize_wire_message(original))
+
+    assert isinstance(restored, UserReply)
+    assert (restored.text, restored.source) == ("do it differently", "approval_feedback")

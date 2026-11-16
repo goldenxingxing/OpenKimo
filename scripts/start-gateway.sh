@@ -1,0 +1,68 @@
+#!/bin/bash
+set -e
+
+echo "========================================"
+echo "  kimo-agent-gateway starting up..."
+echo "========================================"
+
+# Validate required environment
+if [ -z "$KIMO_WEB_SESSION_TOKEN" ]; then
+    echo "WARNING: KIMO_WEB_SESSION_TOKEN is not set."
+    echo "         Running without authentication - suitable for local development only."
+fi
+
+# Validate LLM configuration
+if [ -z "$OPENAI_API_KEY" ] && [ -z "$ANTHROPIC_API_KEY" ]; then
+    echo "WARNING: No LLM API key configured."
+    echo "Set at least one of: OPENAI_API_KEY, ANTHROPIC_API_KEY"
+fi
+
+# Configure session storage
+export KIMO_SESSIONS_DIR="/data/sessions"
+mkdir -p "$KIMO_SESSIONS_DIR"
+# 会话目录里放的是 users.db 和会话记录（含 web token 之类的凭据）。mkdir 只
+# 服从 umask，镜像里通常是 022，也就是全局可读的 755。
+chmod 700 "$KIMO_SESSIONS_DIR"
+
+# Web UI static files directory
+export KIMO_WEB_STATIC_DIR="/app/src/kimo_cli/web/static"
+
+# Set Python path to include source
+# ${PYTHONPATH:+:...} so an unset PYTHONPATH does not leave a trailing
+# colon: an empty path entry means the cwd, putting /app on sys.path,
+# where a stray top-level module would shadow an installed one.
+export PYTHONPATH="/app/src${PYTHONPATH:+:$PYTHONPATH}"
+
+# Determine listen host/port
+HOST="${KIMO_WEB_HOST:-0.0.0.0}"
+PORT="${KIMO_WEB_PORT:-5494}"
+
+# Validate before handing PORT to uvicorn, which otherwise fails late with an
+# opaque error after the startup banner has already announced the address.
+if ! [[ "$PORT" =~ ^[0-9]+$ ]] || [ "${#PORT}" -gt 5 ] || [ "$PORT" -lt 1 ] || [ "$PORT" -gt 65535 ]; then
+    echo "ERROR: KIMO_WEB_PORT must be a number between 1 and 65535 (got '$PORT')." >&2
+    exit 1
+fi
+
+# 0.0.0.0 is required inside the container (the port is published by Docker),
+# but binding it without a session token exposes the whole UI to the network.
+if [ -z "${KIMO_WEB_SESSION_TOKEN:-}" ] && [ "$HOST" != "127.0.0.1" ] && [ "$HOST" != "localhost" ]; then
+  echo "WARNING: KIMO_WEB_SESSION_TOKEN is unset and the gateway listens on ${HOST}." >&2
+  echo "         Anyone who can reach this port can use the UI. Set a token." >&2
+fi
+
+echo ""
+echo "Configuration:"
+echo "  Listen:       ${HOST}:${PORT}"
+echo "  LLM Provider: ${LLM_PROVIDER:-not set}"
+echo "  Sessions Dir: ${KIMO_SESSIONS_DIR}"
+echo "  Sandbox Image: ${SANDBOX_IMAGE:-kimo-agent-sandbox:latest}"
+echo ""
+
+# Start the web server via uvicorn (factory mode reads env vars directly)
+exec uvicorn "kimo_cli.web.app:create_app" \
+    --factory \
+    --host "$HOST" \
+    --port "$PORT" \
+    --log-level info \
+    --timeout-graceful-shutdown 3

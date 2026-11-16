@@ -1,0 +1,33 @@
+# venvstacks layer definitions for OpenKimo macOS .app
+#
+# Layers stack bottom-up: app sees framework sees runtime.
+# build.py writes a resolved copy where local path requirements are
+# substituted in (see _create_resolved_toml).
+
+[[runtimes]]
+name = "cpython-3.12"
+python_implementation = "cpython@3.12.13"
+requirements = []
+
+[[frameworks]]
+name = "framework-kimo"
+runtime = "cpython-3.12"
+dynlib_exclude = ["**/skills/docx/**"]
+requirements = [
+    "file:///Users/qunwei/Documents/local_agent_work/OpenKimo-kimo/packaging/wheels/carryover-0.1.0-py3-none-any.whl",
+    "file:///Users/qunwei/Documents/local_agent_work/OpenKimo-kimo/packaging/wheels/kosong-0.55.0-py3-none-any.whl",
+    "file:///Users/qunwei/Documents/local_agent_work/OpenKimo-kimo/packaging/wheels/pykaos-0.9.0-py3-none-any.whl",
+    "file:///Users/qunwei/Documents/local_agent_work/OpenKimo-kimo/packaging/wheels/kimo_cli-0.5.0-py3-none-any.whl",
+    "file:///Users/qunwei/Documents/local_agent_work/OpenKimo-kimo/packaging/wheels/ripgrepy-2.2.0-py3-none-any.whl",
+    "file:///Users/qunwei/Documents/local_agent_work/OpenKimo-kimo/packaging/wheels/rumps-0.4.0-py3-none-any.whl",
+]
+
+[[applications]]
+name = "app-openkimo"
+launch_module = "app_main"
+frameworks = ["framework-kimo"]
+requirements = [
+    "rumps>=0.4.0",
+    "pyobjc-core>=10.0",
+    "pyobjc-framework-Cocoa>=10.0",
+]

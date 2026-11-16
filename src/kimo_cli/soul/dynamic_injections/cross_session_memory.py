@@ -1,0 +1,114 @@
+from __future__ import annotations
+
+import asyncio
+from collections.abc import Sequence
+from typing import TYPE_CHECKING, override
+
+from carryover import Actions, render
+from kosong.message import Message
+
+from kimo_cli.memory.candidates import CANDIDATES_FILENAME, CandidateFile
+from kimo_cli.memory.recent import RECENT_FILENAME, read_recent_summaries
+from kimo_cli.memory.storage import PERSISTENT_FILENAME, read_entries
+from kimo_cli.soul.dynamic_injection import DynamicInjection, DynamicInjectionProvider
+from kimo_cli.utils.logging import logger
+
+if TYPE_CHECKING:
+    from kimo_cli.soul.kimosoul import KimoSoul
+
+_INJECTION_TYPE = "cross_session_memory"
+
+#: How this application spells the operations the preamble refers to.
+#:
+#: Carryover describes what to do and leaves the calling convention to the host,
+#: because it used to carry this application's and was wrong in every other.
+#: These must stay in step with the Memory tool's `op` values — the preamble is
+#: read as authoritative, so a stale name here is an agent confidently calling
+#: something that no longer exists.
+_ACTIONS = Actions(
+    search='`Memory(operation={"op": "search", "query": "<query>"})`',
+    get='`Memory(operation={"op": "get", "handle": "<handle>"})`',
+    promote='`Memory(operation={"op": "promote", "id": "<id>"})`',
+    dismiss='`Memory(operation={"op": "dismiss", "id": "<id>"})`',
+    retire='`Memory(operation={"op": "retire", "handle": "<handle>"})`',
+    affirm='`Memory(operation={"op": "affirm", "handle": "<handle>"})`',
+)
+
+# How many recent summaries to surface to the LLM at startup.
+_RECENT_INJECTION_LIMIT = 5
+
+# The per-section ceilings, the ordering, and the wording of every section live
+# in :func:`carryover.render`. They were a second copy here — identical line for
+# line apart from the function's name — which is the same duplication that had
+# already let a shared helper drift, in a file that happens not to sit under
+# kimo_cli/memory and so survived the first pass.
+
+
+class CrossSessionMemoryInjectionProvider(DynamicInjectionProvider):
+    """One-shot startup injection of the user's cross-session memory.
+
+    Reads ``persistent.jsonl`` (Memory tool entries) and ``recent.jsonl``
+    (archived past-session summaries) once on the first LLM step and caches
+    the rendered injection. Subsequent steps return ``[]`` so we don't pay
+    file I/O on every step or invalidate prompt cache mid-session.
+    """
+
+    def __init__(self) -> None:
+        self._injected: bool = False
+
+    def invalidate(self) -> None:
+        """Force a re-read on the next ``get_injections`` call."""
+        self._injected = False
+
+    @override
+    async def on_context_compacted(self) -> None:
+        """Re-inject after compaction.
+
+        The snapshot is an ordinary history message, so compaction collapses it
+        into the compaction summary. Without this the one-shot guard keeps
+        returning the cached list against a history that no longer literally
+        contains it, and the agent spends the rest of a long session with no
+        cross-session memory at all — which is also why it re-records facts it
+        has already stored.
+
+        Costs nothing in prompt cache: compaction has already invalidated the
+        whole prefix by definition.
+        """
+        self.invalidate()
+
+    async def get_injections(
+        self,
+        history: Sequence[Message],
+        soul: KimoSoul,
+    ) -> list[DynamicInjection]:
+        # Nothing to return once it is in history. The caller appends whatever
+        # comes back as a *new* user message on every step, so handing back a
+        # cached copy re-injected the whole snapshot each time — tens of
+        # thousands of tokens per step, duplicated verbatim.
+        if self._injected:
+            return []
+
+        try:
+            user_memory_dir = soul.runtime.user_memory_dir
+            persistent = await asyncio.to_thread(
+                read_entries, user_memory_dir / PERSISTENT_FILENAME
+            )
+            pending = await asyncio.to_thread(
+                CandidateFile(user_memory_dir / CANDIDATES_FILENAME).read
+            )
+            recent = await asyncio.to_thread(
+                read_recent_summaries,
+                user_memory_dir / RECENT_FILENAME,
+                limit=_RECENT_INJECTION_LIMIT,
+            )
+        except Exception:
+            logger.warning("cross-session memory read failed", exc_info=True)
+            # I/O failed — do NOT mark _injected, so the next call retries.
+            # Marking here would permanently silence the injection channel.
+            return []
+        rendered = render(persistent, recent, pending, actions=_ACTIONS)
+        self._injected = True
+        if not rendered:
+            return []
+
+        return [DynamicInjection(type=_INJECTION_TYPE, content=rendered)]

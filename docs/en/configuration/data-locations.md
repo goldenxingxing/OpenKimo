@@ -1,0 +1,160 @@
+# Data Locations
+
+Kimo Code CLI stores all data in the `~/.kimo/` directory under the user's home directory. This page describes the locations and purposes of various data files.
+
+::: tip
+You can customize the share directory path by setting the `KIMO_SHARE_DIR` environment variable. See [Environment Variables](./env-vars.md#kimo-share-dir) for details.
+
+Note: `KIMO_SHARE_DIR` only affects the storage location of the runtime data listed above, not the [Agent Skills](../customization/skills.md) search paths. Skills, as cross-tool shared capability extensions, are a different type of data from application runtime data.
+:::
+
+## Directory structure
+
+```
+~/.kimo/
+├── config.toml           # Main configuration file
+├── kimo.json             # Metadata
+├── mcp.json              # MCP server configuration
+├── credentials/          # OAuth credentials
+│   └── <provider>.json
+├── mcp-oauth/            # MCP OAuth tokens
+├── sessions/             # Session data
+│   └── <work-dir-hash>/
+│       └── <session-id>/
+│           ├── context.jsonl
+│           ├── wire.jsonl
+│           └── state.json
+├── imported_sessions/    # Imported session data (via kimo vis)
+│   └── <session-id>/
+│       ├── context.jsonl
+│       ├── wire.jsonl
+│       └── state.json
+├── plans/                # Plan mode plan files
+│   └── <slug>.md
+├── user-history/         # Input history
+│   └── <work-dir-hash>.jsonl
+└── logs/                 # Logs
+    └── kimo.log
+```
+
+## Configuration and metadata
+
+### `config.toml`
+
+Main configuration file, stores providers, models, services, and runtime parameters. See [Config Files](./config-files.md) for details.
+
+You can specify a configuration file at a different location with the `--config-file` flag.
+
+### `kimo.json`
+
+Metadata file, stores Kimo Code CLI's runtime state, including:
+
+- `work_dirs`: List of working directories and their last used session IDs
+- `thinking`: Whether thinking mode was enabled in the last session
+
+This file is automatically managed by Kimo Code CLI and typically doesn't need manual editing.
+
+### `mcp.json`
+
+MCP server configuration file, stores MCP servers added via the `kimo mcp add` command. See [MCP](../customization/mcp.md) for details.
+
+Example structure:
+
+```json
+{
+  "mcpServers": {
+    "context7": {
+      "url": "https://mcp.context7.com/mcp",
+      "transport": "http",
+      "headers": {
+        "CONTEXT7_API_KEY": "ctx7sk-xxx"
+      }
+    }
+  }
+}
+```
+
+## Credentials
+
+OAuth credentials are stored in the `~/.kimo/credentials/` directory. After logging in to your Kimo account via `/login`, OAuth tokens are saved in this directory.
+
+OAuth tokens for MCP servers are stored separately in `~/.kimo/mcp-oauth/`. After authorizing an MCP server added with `--auth oauth` via `kimo mcp auth <name>`, later sessions reuse the tokens from this directory. Use `kimo mcp reset-auth <name>` to clear the MCP OAuth token for one server.
+
+Files in the `credentials/` directory have permissions set to read/write for the current user only (600) to protect sensitive information.
+
+## Session data
+
+Session data is grouped by working directory and stored under `~/.kimo/sessions/`. Each working directory corresponds to a subdirectory named with the path's MD5 hash, and each session corresponds to a subdirectory named with the session ID.
+
+### `context.jsonl`
+
+Context history file, stores the session's full context in JSON Lines (JSONL) format. The first line is a system prompt record (`_system_prompt`), followed by messages (user input, model response, tool calls, etc.) and internal records (checkpoints, token usage, etc.).
+
+The system prompt is generated and frozen at session creation time, and reused on session restore instead of being regenerated.
+
+Kimo Code CLI uses this file to restore session context when using `--continue` or `--session`.
+
+### `wire.jsonl`
+
+Wire message log file, stores Wire events during the session in JSON Lines (JSONL) format. Used for session replay and extracting session titles.
+
+### `state.json`
+
+Session state file, stores the session's runtime state, including:
+
+- `title`: User-set session title
+- `approval`: Approval decision state (YOLO and AFK mode on/off, auto-approved operation types)
+- `plan_mode`: Plan mode on/off status
+- `plan_session_id`: Unique identifier for the current plan session, used to associate the plan file
+- `plan_slug`: The file path identifier for the plan (the slug in `~/.kimo/plans/<slug>.md`), preserved so restarts resume the same file
+- `subagent_instances`: Subagent instance state and metadata
+- `additional_dirs`: Additional workspace directories added via `--add-dir` or `/add-dir`
+
+When resuming a session, Kimo Code CLI reads this file to restore the session state. This file uses atomic writes to prevent data corruption on crash.
+
+### `subagents/<agent_id>/`
+
+Each subagent instance created via the `Agent` tool has its own storage directory under the session directory, containing:
+
+- `context.jsonl`: Subagent conversation history
+- `wire.jsonl`: Subagent Wire event log
+- `meta.json`: Instance metadata (status, type, creation time, etc.)
+- `prompt.txt`: Last executed prompt
+- `output`: Execution output
+
+When resuming a session, subagent instance context and state are automatically restored, allowing continuation via the `resume` parameter.
+
+## Plan files
+
+Plan mode plan files are stored in the `~/.kimo/plans/` directory. Each plan session corresponds to a randomly named Markdown file (e.g. `<slug>.md`).
+
+The `plan_slug` is saved in `state.json`, so the same plan file is resumed after a process restart. Use `/plan clear` to delete the current plan session's file.
+
+## Input history
+
+User input history is stored in the `~/.kimo/user-history/` directory. Each working directory corresponds to a `.jsonl` file named with the path's MD5 hash.
+
+Input history is used for history browsing (up/down arrow keys) and search (Ctrl-R) in shell mode.
+
+## Logs
+
+Runtime logs are stored in `~/.kimo/logs/kimo.log`. Default log level is INFO, use the `--debug` flag to enable TRACE level.
+
+Log files are used for troubleshooting. When reporting bugs, please include relevant log content.
+
+## Cleaning data
+
+Deleting the share directory (default `~/.kimo/`, or the path specified by `KIMO_SHARE_DIR`) completely clears all Kimo Code CLI data, including configuration, sessions, and history.
+
+To clean only specific data:
+
+| Need | Action |
+| --- | --- |
+| Reset configuration | Delete `~/.kimo/config.toml` |
+| Clear all sessions | Delete `~/.kimo/sessions/` directory |
+| Clear sessions for specific working directory | Use `/sessions` in shell mode to view and delete |
+| Clear plan files | Delete `~/.kimo/plans/` directory, or use `/plan clear` in plan mode |
+| Clear input history | Delete `~/.kimo/user-history/` directory |
+| Clear logs | Delete `~/.kimo/logs/` directory |
+| Clear MCP configuration | Delete `~/.kimo/mcp.json` or use `kimo mcp remove` |
+| Clear login credentials | Delete `~/.kimo/credentials/` directory or use `/logout` |

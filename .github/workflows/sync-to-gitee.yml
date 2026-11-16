@@ -1,0 +1,95 @@
+name: Sync to Gitee
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing v* release tag to synchronize
+        required: true
+        type: string
+  push:
+    branches: [main]
+    tags:
+      - 'v*'
+  delete:
+  workflow_run:
+    workflows: [Release]
+    types: [completed]
+
+permissions:
+  contents: read
+
+jobs:
+  mirror:
+    timeout-minutes: 30
+    if: github.event_name == 'push' || github.event_name == 'delete'
+    concurrency:
+      group: gitee-git-mirror
+      cancel-in-progress: false
+    runs-on: ubuntu-latest
+    steps:
+      - name: Mirror Git repository
+        env:
+          GITEE_ACCESS_TOKEN: ${{ secrets.GITEE_ACCESS_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GIT_TERMINAL_PROMPT: '0'
+        run: |
+          # The code repo is private; clone with the workflow token.
+          git clone --mirror \
+            "https://x-access-token:${GITHUB_TOKEN}@github.com/goldenxingxing/OpenKimo.git" \
+            mirror.git
+          cd mirror.git
+          git remote set-url --push origin https://gitee.com/qunwei/OpenKimo.git
+          git config credential.helper \
+            '!f() { test "$1" = get && echo username=qunwei && echo "password=$GITEE_ACCESS_TOKEN"; }; f'
+          git for-each-ref --format='delete %(refname)' refs/pull |
+            git update-ref --stdin
+          git push --mirror
+
+  sync-release:
+    if: >-
+      (github.event_name == 'workflow_dispatch' &&
+      startsWith(inputs.tag, 'v')) ||
+      (github.event_name == 'workflow_run' &&
+      github.event.workflow_run.conclusion == 'success' &&
+      startsWith(github.event.workflow_run.head_branch, 'v'))
+    concurrency:
+      group: gitee-release-${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.event.workflow_run.head_branch }}
+      cancel-in-progress: false
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ github.event_name == 'workflow_dispatch' && github.sha || github.event.workflow_run.head_sha }}
+      - name: Ensure Gitee release repo has an initial commit
+        env:
+          GITEE_ACCESS_TOKEN: ${{ secrets.GITEE_ACCESS_TOKEN }}
+        # Gitee refuses to create a release in an empty repository (no
+        # default branch to anchor target_commitish), so seed a README once.
+        run: |
+          repo="qunwei/OpenKimo-releases"
+          branches=$(curl -sf "https://gitee.com/api/v5/repos/$repo/branches?access_token=$GITEE_ACCESS_TOKEN")
+          if [ "$branches" = "[]" ]; then
+            echo "Empty repo detected; creating README.md"
+            readme=$(printf '# OpenKimo Releases\n\nOpenKimo 安装包发布仓库，请在发行版页面下载。\n' | base64 -w0)
+            curl -sf -X POST "https://gitee.com/api/v5/repos/$repo/contents/README.md" \
+              --data-urlencode "access_token=$GITEE_ACCESS_TOKEN" \
+              --data-urlencode "content=$readme" \
+              --data-urlencode "message=docs: initialize releases repo" > /dev/null
+          fi
+
+      - name: Synchronize Gitee Release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITEE_ACCESS_TOKEN: ${{ secrets.GITEE_ACCESS_TOKEN }}
+          # Releases live in the public downloads repo; the code repos
+          # (goldenxingxing/OpenKimo, gitee qunwei/OpenKimo) are private.
+          # NOTE: not GITHUB_REPOSITORY — the Actions runner force-injects
+          # that default variable with the current repo, silently overriding
+          # any workflow-defined value.
+          RELEASE_SOURCE_REPOSITORY: goldenxingxing/OpenKimo-releases
+          GITEE_REPOSITORY: qunwei/OpenKimo-releases
+          RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.event.workflow_run.head_branch }}
+        run: python3 .github/scripts/sync_gitee_release.py --tag "$RELEASE_TAG"

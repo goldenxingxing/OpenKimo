@@ -1,0 +1,44 @@
+# Default branding configuration.
+#
+# Override any of these via CLI flags to packaging/build.py:
+#   python build.py --app-name="ACME Agent" --bundle-id=com.acme.agent \
+#                   --icon=./acme.png --logo=./acme-logo.png \
+#                   --favicon=./acme-fav.png
+#
+# CLI flags take precedence over values here.
+
+[app]
+name = "OpenKimo"
+bundle_id = "ai.openkimo.app"
+copyright = "© 2026 {APP_NAME} Contributors. Apache License 2.0."
+# 11.0 (Big Sur) is the real floor: it is the first arm64 macOS, and the
+# bundled CPython plus every native wheel declare 11.0. Raising this locks out
+# Intel Macs that cannot run a newer macOS; setting it below what the shipped
+# binaries support is caught by verify_min_macos() at build time.
+min_macos_version = "11.0"
+
+# Asset paths are resolved relative to this file (packaging/). All of them are
+# written by derive_brand_icons.py from LogoSource.png: rounded corners throughout.
+icon = "../web/public/logo.png"
+# The macOS .icns: the same icon inset on Apple's app-icon grid, so it is the
+# size of the other icons in the Dock.
+macos_icon = "AppIcon.png"
+logo = "../web/public/logo.png"
+favicon = "../web/public/favicon.png"
+# Monochrome template for the macOS menu bar (derive_brand_icons.py). Without
+# it the build shrinks `icon` into a coloured menu-bar icon.
+menubar_icon = "MenuBarIconTemplate.png"
+
+[branding]
+# Web UI branding seeded into the SQLite branding table on first run.
+# brand_name / page_title default to app.name when omitted.
+# brand_name = "OpenKimo"
+# page_title = "OpenKimo"
+
+[python]
+# venvstacks runtime version. Must satisfy kimo-cli's requires-python (>=3.12).
+version = "3.12"
+
+[build]
+# Where the .app and .dmg are written.
+output_dir = "../dist"

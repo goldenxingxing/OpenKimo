@@ -1,0 +1,270 @@
+import type { ChatStatus } from "ai";
+import type { LiveMessage } from "@/hooks/types";
+import { ConversationEmptyState } from "@ai-elements";
+import { Button } from "@/components/ui/button";
+import { Kbd, KbdGroup } from "@/components/ui/kbd";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
+import type { Session } from "@/lib/api/models";
+import type { AssistantApprovalHandler } from "./assistant-message";
+import {
+  ArrowDownIcon,
+  Loader2Icon,
+  PlusIcon,
+  SparklesIcon,
+} from "lucide-react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
+import { hasPlatformModifier, isMacOS } from "@/hooks/utils";
+import {
+  VirtualizedMessageList,
+  type VirtualizedMessageListHandle,
+} from "./virtualized-message-list";
+import { MessageSearchDialog } from "../message-search-dialog";
+
+type ChatConversationProps = {
+  messages: LiveMessage[];
+  status: ChatStatus;
+  selectedSessionId?: string;
+  currentSession?: Session;
+  isReplayingHistory: boolean;
+  /** This connection's history has fully arrived. */
+  isHistoryLoaded: boolean;
+  pendingApprovalMap: Record<string, boolean>;
+  onApprovalAction?: AssistantApprovalHandler;
+  canRespondToApproval: boolean;
+  blocksExpanded: boolean;
+  onCreateSession?: () => void;
+  isSearchOpen: boolean;
+  onSearchOpenChange: (open: boolean) => void;
+  onForkSession?: (turnIndex: number) => void;
+};
+
+const EMPTY_MESSAGES: LiveMessage[] = [];
+
+export function ChatConversation({
+  messages,
+  status,
+  selectedSessionId,
+  currentSession,
+  isReplayingHistory,
+  isHistoryLoaded,
+  pendingApprovalMap,
+  onApprovalAction,
+  canRespondToApproval,
+  blocksExpanded,
+  onCreateSession,
+  isSearchOpen,
+  onSearchOpenChange,
+  onForkSession,
+}: ChatConversationProps) {
+  const { t } = useTranslation("chat");
+  const listRef = useRef<VirtualizedMessageListHandle>(null);
+  const [isAtBottom, setIsAtBottom] = useState(true);
+  const [highlightedIndex, setHighlightedIndex] = useState(-1);
+  const highlightTimerRef = useRef<number | null>(null);
+
+  // One array for the list and the search, so "message 12" means the same
+  // thing to both. The list drops `message-id` messages, search indexed into
+  // the unfiltered array, and a StatusUpdate carrying a message_id appends one
+  // of those on every turn — so the gap grew, and jumping to a search hit
+  // scrolled to some earlier message and ringed the wrong row.
+  const liveMessages = useMemo(
+    () => messages.filter((message) => message.variant !== "message-id"),
+    [messages],
+  );
+
+  const conversationKey = selectedSessionId ? `session:${selectedSessionId}` : "empty";
+
+  // Every connect replays the whole history into an emptied list, over many
+  // frames. Painted as it arrived, the conversation collapsed to its first
+  // message, showed its top, and snapped to the bottom — on every session
+  // switch, and on every reconnect after sleep or a backgrounded tab, which
+  // is what "coming back to the page" mostly is. So a rebuild is not shown
+  // until it is whole: a reconnect keeps showing the conversation as it was,
+  // a switch shows the loading state, and the finished list appears at once.
+  const committed = useRef({ key: conversationKey, messages: liveMessages });
+  if (isHistoryLoaded) {
+    committed.current = { key: conversationKey, messages: liveMessages };
+  }
+  const visibleMessages = isHistoryLoaded
+    ? liveMessages
+    : committed.current.key === conversationKey
+      ? committed.current.messages
+      : EMPTY_MESSAGES;
+
+  // Handle Cmd+F / Ctrl+F
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (hasPlatformModifier(e) && e.key === "f") {
+        e.preventDefault();
+        onSearchOpenChange(true);
+      }
+    };
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [onSearchOpenChange]);
+
+  const handleJumpToMessage = useCallback((messageIndex: number) => {
+    setHighlightedIndex(messageIndex);
+    listRef.current?.scrollToIndex(messageIndex);
+    // Clear highlight after a delay. The timer is held so a second jump
+    // within the window does not have its highlight wiped by the first one's
+    // timeout — and so nothing fires into an unmounted component.
+    if (highlightTimerRef.current !== null) {
+      window.clearTimeout(highlightTimerRef.current);
+    }
+    highlightTimerRef.current = window.setTimeout(() => {
+      highlightTimerRef.current = null;
+      setHighlightedIndex(-1);
+    }, 2000);
+  }, []);
+
+  useEffect(
+    () => () => {
+      if (highlightTimerRef.current !== null) {
+        window.clearTimeout(highlightTimerRef.current);
+      }
+    },
+    [],
+  );
+
+  const handleScrollToBottom = useCallback(() => {
+    listRef.current?.scrollToBottom();
+  }, []);
+
+  const isLoadingResponse =
+    visibleMessages.length === 0 &&
+    (status === "streaming" || status === "submitted");
+  const isStartingEnvironment =
+    isLoadingResponse && status === "submitted" && !isReplayingHistory;
+
+  const hasSelectedSession = Boolean(selectedSessionId);
+  const emptyNoSessionState =
+    visibleMessages.length === 0 && !hasSelectedSession;
+  const emptySessionState =
+    visibleMessages.length === 0 &&
+    hasSelectedSession &&
+    !isLoadingResponse;
+
+  const hasMessages = visibleMessages.length > 0;
+  const shouldShowScrollButton = hasMessages && !isAtBottom;
+  const shouldShowEmptyState =
+    isLoadingResponse || emptyNoSessionState || emptySessionState;
+
+  const newSessionShortcutModifier = isMacOS() ? "Cmd" : "Ctrl";
+
+  return (
+    <div
+      className="relative flex h-full flex-col overflow-x-hidden px-2"
+      role="log"
+    >
+      {shouldShowEmptyState ? (
+        isLoadingResponse ? (
+          <ConversationEmptyState
+            description=""
+            icon={<Loader2Icon className="size-6 animate-spin text-primary" />}
+            title={isStartingEnvironment ? t("conversation.startingEnv") : t("conversation.connectingSession")}
+          />
+        ) : emptyNoSessionState ? (
+          <ConversationEmptyState>
+            <div className="flex size-16 items-center justify-center rounded-2xl bg-secondary">
+              <SparklesIcon className="size-8 text-muted-foreground" />
+            </div>
+            <div className="text-center">
+              <p className="text-lg font-medium text-foreground">
+                {t("conversation.createSessionTitle")}
+              </p>
+              <p className="mt-1 text-sm text-muted-foreground">
+                {t("conversation.createSessionHint")}
+              </p>
+            </div>
+            {onCreateSession ? (
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button
+                    className="mt-1"
+                    type="button"
+                    onClick={(e) => {
+                      if (hasPlatformModifier(e)) {
+                        const url = new URL(window.location.origin + window.location.pathname);
+                        url.searchParams.set("action", "create");
+                        window.open(url.toString(), "_blank");
+                      } else {
+                        onCreateSession();
+                      }
+                    }}
+                  >
+                    <PlusIcon className="size-4" />
+                    <span>{t("conversation.createNewSession")}</span>
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent className="flex flex-col items-center gap-1" side="top">
+                  <div className="flex items-center gap-2">
+                    <span>{t("conversation.createNewSession")}</span>
+                    <KbdGroup>
+                      <Kbd>Shift</Kbd>
+                      <span className="text-muted-foreground">+</span>
+                      <Kbd>{newSessionShortcutModifier}</Kbd>
+                      <span className="text-muted-foreground">+</span>
+                      <Kbd>O</Kbd>
+                    </KbdGroup>
+                  </div>
+                  <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                    <span>{t("conversation.newTabHint", { modifier: newSessionShortcutModifier })}</span>
+                  </div>
+                </TooltipContent>
+              </Tooltip>
+            ) : null}
+          </ConversationEmptyState>
+        ) : emptySessionState ? (
+          <div className="flex h-full items-center justify-center">
+            <p className="text-sm text-muted-foreground">
+              {t("conversation.startConversation")}
+            </p>
+          </div>
+        ) : null
+      ) : (
+        <div className="flex-1">
+          <VirtualizedMessageList
+            ref={listRef}
+            messages={visibleMessages}
+            conversationKey={conversationKey}
+            pendingApprovalMap={pendingApprovalMap}
+            onApprovalAction={onApprovalAction}
+            canRespondToApproval={canRespondToApproval}
+            blocksExpanded={blocksExpanded}
+            highlightedMessageIndex={highlightedIndex}
+            onAtBottomChange={setIsAtBottom}
+            onForkSession={onForkSession}
+            isReplayingHistory={isReplayingHistory}
+            workDir={currentSession?.workDir}
+          />
+        </div>
+      )}
+
+      {shouldShowScrollButton ? (
+        <Button
+          className="absolute bottom-[calc(1rem+var(--safe-bottom))] left-[50%] -translate-x-1/2 rounded-full"
+          onClick={handleScrollToBottom}
+          size="icon"
+          type="button"
+          variant="outline"
+        >
+          <ArrowDownIcon className="size-4" />
+        </Button>
+      ) : null}
+
+      <MessageSearchDialog
+        messages={visibleMessages}
+        open={isSearchOpen}
+        onOpenChange={onSearchOpenChange}
+        onJumpToMessage={handleJumpToMessage}
+      />
+    </div>
+  );
+}

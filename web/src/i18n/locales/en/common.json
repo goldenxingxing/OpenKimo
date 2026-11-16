@@ -1,0 +1,40 @@
+{
+  "actions": {
+    "cancel": "Cancel",
+    "save": "Save",
+    "confirm": "Confirm",
+    "close": "Close",
+    "retry": "Retry",
+    "create": "Create",
+    "remove": "Remove"
+  },
+  "states": {
+    "loading": "Loading…",
+    "loaderTitle": "Loader"
+  },
+  "lang": {
+    "switchToEn": "Switch to English",
+    "switchToZh": "Switch to Chinese"
+  },
+  "sidebar": {
+    "expand": "Expand sidebar",
+    "collapse": "Collapse sidebar",
+    "close": "Close sessions sidebar"
+  },
+  "user": {
+    "signOut": "Sign out",
+    "adminPanel": "Admin Panel"
+  },
+  "logo": "Logo",
+  "carousel": {
+    "slide": "slide",
+    "previous": "Previous slide",
+    "next": "Next slide"
+  },
+  "relativeTime": {
+    "justNow": "Just now",
+    "minutes": "{{count}}m ago",
+    "hours": "{{count}}h ago",
+    "days": "{{count}}d ago"
+  }
+}

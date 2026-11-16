@@ -1,0 +1,531 @@
+/**
+ * Wire protocol types for OpenKimo communication
+ * Based on the JSON-RPC 2.0 event stream format from stdio.jsonl
+ */
+
+// Base JSON-RPC 2.0 message types
+export type JsonRpcRequest = {
+  jsonrpc: "2.0";
+  method: string;
+  id?: string | number;
+  params?: unknown;
+  /** Server event time in Unix seconds (Wire 1.8+). */
+  timestamp?: number;
+};
+
+export type JsonRpcResponse = {
+  jsonrpc: "2.0";
+  id: string | number;
+  result?: unknown;
+  error?: {
+    code: number;
+    message: string;
+    data?: unknown;
+  };
+};
+
+export type SessionState = "stopped" | "idle" | "busy" | "restarting" | "error";
+
+export type SessionStatusPayload = {
+  session_id: string;
+  state: SessionState;
+  seq: number;
+  worker_id?: string | null;
+  reason?: string | null;
+  detail?: string | null;
+  updated_at: string;
+};
+
+// Event types from the wire protocol
+export type TurnBeginEvent = {
+  type: "TurnBegin";
+  payload: {
+    user_input: string | ContentPart[];
+    /** The persisted todo list at turn start; null/absent = no snapshot. */
+    todos?: { title: string; status: "pending" | "in_progress" | "done" }[] | null;
+  };
+};
+
+/** Free text the user typed in answer to an approval or a question. */
+export type UserReplyEvent = {
+  type: "UserReply";
+  payload: {
+    text: string;
+    source: "approval_feedback" | "question_answer";
+  };
+};
+
+export type StepBeginEvent = {
+  type: "StepBegin";
+  payload: {
+    n: number;
+  };
+};
+
+export type StepInterruptedEvent = {
+  type: "StepInterrupted";
+  payload?: Record<string, never>;
+};
+
+/** The turn is over, however it ended — finished, failed, or stopped. */
+export type TurnEndEvent = {
+  type: "TurnEnd";
+  payload?: {
+    /** Why the turn ended early; null/absent = ran to completion. */
+    interrupt_reason?: "user_cancelled" | "error" | "max_steps" | null;
+  };
+};
+
+export type StepRetryEvent = {
+  type: "StepRetry";
+  payload: {
+    n: number;
+    next_attempt: number;
+    max_attempts: number;
+    wait_s: number;
+    error_type: string;
+    status_code?: number | null;
+  };
+};
+
+export type ContentPartEvent = {
+  type: "ContentPart";
+  payload: {
+    type: "think" | "text" | "image_url" | "audio_url" | "video_url";
+    think?: string;
+    text?: string;
+    image_url?: { url: string; id?: string | null };
+    audio_url?: { url: string; id?: string | null };
+    video_url?: { url: string; id?: string | null };
+    encrypted?: string | null;
+  };
+};
+
+export type ToolCallEvent = {
+  type: "ToolCall";
+  payload: {
+    type: "function";
+    id: string;
+    function: {
+      name: string;
+      arguments: string;
+    };
+    extras?: unknown;
+  };
+};
+
+export type ToolCallPartEvent = {
+  type: "ToolCallPart";
+  payload: {
+    arguments_part: string;
+  };
+};
+
+/**
+ * Tool result event from backend
+ * @see kosong.tooling.ToolReturnValue for the source type
+ */
+/** Content part in tool output (for model consumption) */
+export type ToolOutputPart = {
+  type: string;
+  text?: string;
+  [key: string]: unknown;
+};
+
+export type ToolResultEvent = {
+  type: "ToolResult";
+  payload: {
+    tool_call_id: string;
+    return_value: {
+      /** Whether the tool call resulted in an error */
+      is_error: boolean;
+      /** The output content returned by the tool (for model) */
+      output: ToolOutputPart[] | string;
+      /** An explanatory message to be given to the model (system reminder) */
+      message: string;
+      /** Content blocks to be displayed to the user */
+      display: Array<{ type: string; data: unknown }>;
+      /** Extra debugging/testing data */
+      extras?: Record<string, unknown>;
+    };
+  };
+};
+
+export type TokenUsage = {
+  input_other: number;
+  output: number;
+  input_cache_read: number;
+  input_cache_creation: number;
+};
+
+export type MCPServerSnapshot = {
+  name: string;
+  status: "pending" | "connecting" | "connected" | "failed" | "unauthorized";
+  tools: string[];
+};
+
+/** MCP startup state, as of the moment the status was sent. */
+export type MCPStatusSnapshot = {
+  loading: boolean;
+  connected: number;
+  total: number;
+  /** Tools summed across connected servers. */
+  tools: number;
+  servers: MCPServerSnapshot[];
+};
+
+export type StatusUpdateEvent = {
+  type: "StatusUpdate";
+  payload: {
+    context_usage: number | null;
+    token_usage?: TokenUsage | null;
+    message_id?: string;
+    plan_mode?: boolean | null;
+    /** Explicit YOLO opt-in. Absent means unchanged, as with plan_mode. */
+    yolo?: boolean | null;
+    /** MCP startup state. Absent or null means unchanged. */
+    mcp_status?: MCPStatusSnapshot | null;
+    /** True while the current turn is parked in a blocking wait on background task(s). */
+    waiting_on_background?: boolean | null;
+    /** True when the last LLM step's reasoning was suppressed server-side. */
+    thinking_suppressed?: boolean | null;
+  };
+};
+
+export type SessionNoticeEvent = {
+  type: "SessionNotice";
+  payload: {
+    text: string;
+    kind: "restart";
+    reason?: string | null;
+    restart_ms?: number | null;
+  };
+};
+
+export type CompactionBeginEvent = {
+  type: "CompactionBegin";
+  payload?: Record<string, never>;
+};
+
+export type CompactionRetryEvent = {
+  type: "CompactionRetry";
+  payload: {
+    next_attempt: number;
+    max_attempts: number;
+    wait_s: number;
+    error_type: string;
+    status_code?: number | null;
+  };
+};
+
+export type CompactionEndEvent = {
+  type: "CompactionEnd";
+  payload?: {
+    /** When false the compaction exhausted its retries; the session
+     *  continues with the un-compacted history. Absent means true,
+     *  matching older backends. */
+    success?: boolean;
+  };
+};
+
+export type MCPLoadingBeginEvent = {
+  type: "MCPLoadingBegin";
+  payload?: Record<string, never>;
+};
+
+export type MCPLoadingEndEvent = {
+  type: "MCPLoadingEnd";
+  payload?: Record<string, never>;
+};
+
+export type ApprovalRequestEvent = {
+  type: "ApprovalRequest";
+  payload: {
+    id: string;
+    action: string;
+    description: string;
+    sender: string;
+    tool_call_id: string;
+    /** Display blocks with preview content (diffs, shell commands) */
+    display?: Array<{ type: string; data: unknown }>;
+    source_kind?: "foreground_turn" | "background_agent" | null;
+    source_id?: string | null;
+    agent_id?: string | null;
+    subagent_type?: string | null;
+    source_description?: string | null;
+  };
+};
+
+export type ApprovalRequestResolvedEvent = {
+  type: "ApprovalRequestResolved";
+  payload: {
+    request_id: string;
+    response: unknown;
+    /** Feedback text provided with a rejection (Wire 1.6+) */
+    feedback?: string;
+  };
+};
+
+export type ApprovalResponseDecision =
+  | "approve"
+  | "approve_for_session"
+  | "reject";
+
+export type QuestionOption = {
+  label: string;
+  description: string;
+};
+
+export type QuestionItem = {
+  question: string;
+  header: string;
+  options: QuestionOption[];
+  multi_select: boolean;
+  body?: string;
+  other_label?: string;
+  other_description?: string;
+};
+
+export type QuestionRequestEvent = {
+  type: "QuestionRequest";
+  payload: {
+    id: string;
+    tool_call_id: string;
+    questions: QuestionItem[];
+  };
+};
+
+/**
+ * A SubagentEvent wraps an inner event produced by a subagent (Agent tool).
+ * The inner `event` field is a {type, payload} envelope that may itself be
+ * a SubagentEvent (for nested subagents).
+ */
+export type SubagentEventWire = {
+  type: "SubagentEvent";
+  payload: {
+    parent_tool_call_id?: string | null;
+    agent_id?: string | null;
+    subagent_type?: string | null;
+    event: { type: string; payload: unknown };
+  };
+};
+
+export type SteerInputEvent = {
+  type: "SteerInput";
+  payload: {
+    user_input: string | ContentPart[];
+  };
+};
+
+export type PlanDisplayEvent = {
+  type: "PlanDisplay";
+  payload: {
+    content: string;
+    file_path: string;
+  };
+};
+
+// Union of all event types
+export type WireEvent =
+  | TurnBeginEvent
+  | UserReplyEvent
+  | StepBeginEvent
+  | StepInterruptedEvent
+  | TurnEndEvent
+  | StepRetryEvent
+  | ContentPartEvent
+  | ToolCallEvent
+  | ToolCallPartEvent
+  | ToolResultEvent
+  | StatusUpdateEvent
+  | SessionNoticeEvent
+  | CompactionBeginEvent
+  | CompactionRetryEvent
+  | CompactionEndEvent
+  | MCPLoadingBeginEvent
+  | MCPLoadingEndEvent
+  | ApprovalRequestEvent
+  | ApprovalRequestResolvedEvent
+  | QuestionRequestEvent
+  | SubagentEventWire
+  | SteerInputEvent
+  | PlanDisplayEvent;
+
+// Parsed wire message
+export type WireMessage = {
+  jsonrpc: "2.0";
+  /** Server event time in Unix seconds (Wire 1.8+). */
+  timestamp?: number;
+  method?:
+    | "event"
+    | "prompt"
+    | "history_complete"
+    | "request"
+    | "response"
+    | "session_status";
+  id?: string | number;
+  params?:
+    | {
+        type?: string;
+        payload?: unknown;
+        user_input?: string;
+      }
+    | SessionStatusPayload;
+  result?: {
+    status?: string;
+    slash_commands?: Array<{
+      name: string;
+      description: string;
+      aliases: string[];
+    }>;
+    [key: string]: unknown;
+  };
+  error?: {
+    code: number;
+    message: string;
+    data?: unknown;
+  };
+};
+
+// Parsed tool call state for tracking
+export type ToolCallState = {
+  id: string;
+  name: string;
+  arguments: string;
+  argumentsComplete: boolean;
+  messageId?: string;
+  approval?: ToolApprovalState;
+  result?: {
+    isError: boolean;
+    output?: string;
+    message?: string;
+  };
+};
+
+export type ToolApprovalState = {
+  id: string;
+  action: string;
+  description: string;
+  sender: string;
+  toolCallId: string;
+  rpcMessageId?: string | number;
+  submitted?: boolean;
+  resolved?: boolean;
+  approved?: boolean;
+  reason?: string;
+  response?: unknown;
+  feedback?: string;
+  sourceKind?: "foreground_turn" | "background_agent" | null;
+  sourceDescription?: string | null;
+};
+
+// Content part for accumulated content
+export type ContentPart =
+  | {
+      type: "text" | "input_text";
+      text: string;
+      content?: string;
+    }
+  | {
+      type: "think";
+      think: string;
+      content?: string;
+    }
+  | {
+      type: "image_url";
+      image_url: { url: string; id?: string | null };
+    }
+  | {
+      type: "audio_url";
+      audio_url: { url: string; id?: string | null };
+    }
+  | {
+      type: "video_url";
+      video_url: { url: string; id?: string | null };
+    }
+  | {
+      type: "image" | "input_image";
+      image_url?: string;
+      url?: string;
+      mime_type?: string;
+      alt?: string;
+      data?: unknown;
+    }
+  | {
+      type: "audio" | "input_audio";
+      audio_url?: string;
+      transcript?: string;
+      data?: unknown;
+    }
+  | {
+      type: "video" | "input_video";
+      video_url?: string;
+      data?: unknown;
+    };
+
+// Parsed turn state for tracking conversation
+export type TurnState = {
+  userInput: string;
+  steps: StepState[];
+  currentStep: number;
+  contextUsage: number;
+  isComplete: boolean;
+};
+
+export type StepState = {
+  n: number;
+  thinkingContent: string;
+  textContent: string;
+  toolCalls: ToolCallState[];
+  isStreaming: boolean;
+};
+
+/**
+ * Parse a JSONL file content into wire messages
+ */
+export function parseWireMessages(jsonlContent: string): WireMessage[] {
+  const lines = jsonlContent.trim().split("\n");
+  const messages: WireMessage[] = [];
+
+  for (const line of lines) {
+    if (!line.trim()) continue;
+    try {
+      const parsed = JSON.parse(line) as WireMessage;
+      if (parsed.jsonrpc === "2.0") {
+        messages.push(parsed);
+      }
+    } catch {
+      console.warn("Failed to parse wire message:", line);
+    }
+  }
+
+  return messages;
+}
+
+/**
+ * Normalize wire event type names that differ between server and client.
+ * The Python backend uses class names (e.g. "ApprovalResponse") while
+ * the client expects legacy names (e.g. "ApprovalRequestResolved").
+ */
+const EVENT_TYPE_ALIASES: Record<string, string> = {
+  ApprovalResponse: "ApprovalRequestResolved",
+};
+
+/**
+ * Extract event from wire message
+ */
+export function extractEvent(message: WireMessage): WireEvent | null {
+  if (message.method !== "event" || !message.params) {
+    return null;
+  }
+
+  const params = message.params as { type?: string; payload?: unknown };
+  if (typeof params.type !== "string" || params.type.length === 0) {
+    return null;
+  }
+  const type = EVENT_TYPE_ALIASES[params.type] ?? params.type;
+  return {
+    type,
+    payload: params.payload,
+  } as WireEvent;
+}

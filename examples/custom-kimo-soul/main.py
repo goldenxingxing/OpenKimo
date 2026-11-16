@@ -1,0 +1,128 @@
+import asyncio
+import os
+from pathlib import Path
+from typing import override
+
+from kaos.path import KaosPath
+from kosong.tooling import CallableTool2, ToolError, ToolOk, Toolset
+from kosong.tooling.simple import SimpleToolset
+from pydantic import BaseModel, Field, SecretStr
+
+from kimo_cli.auth.oauth import OAuthManager
+from kimo_cli.config import LLMModel, LLMProvider, get_default_config
+from kimo_cli.llm import LLM, create_llm
+from kimo_cli.session import Session
+from kimo_cli.soul.agent import Agent, Runtime
+from kimo_cli.soul.context import Context
+from kimo_cli.soul.kimosoul import KimoSoul
+from kimo_cli.ui.shell import Shell
+from kimo_cli.wire.types import ContentPart, ToolReturnValue
+
+
+class HakimoSoul(KimoSoul):
+    @staticmethod
+    async def create(
+        llm: LLM | None,
+        system_prompt: str,
+        toolset: Toolset,
+        session: Session | None = None,
+        work_dir: Path | None = None,
+    ) -> "HakimoSoul":
+        config = get_default_config()
+        kaos_work_dir = KaosPath.unsafe_from_local_path(work_dir) if work_dir else KaosPath.cwd()
+        session = session or await Session.create(kaos_work_dir)
+        runtime = await Runtime.create(
+            config=config,
+            oauth=OAuthManager(config),
+            llm=llm,
+            session=session,
+            yolo=True,
+        )
+        agent = Agent(
+            name="HakimoAgent",
+            system_prompt=system_prompt,
+            toolset=toolset,
+            runtime=runtime,
+        )
+        context = Context(session.context_file)
+        return HakimoSoul(agent, context=context)
+
+    @property
+    @override
+    def name(self) -> str:
+        return "Hakimo"
+
+    @override
+    async def run(
+        self,
+        user_input: str | list[ContentPart],
+        *,
+        skip_user_prompt_hook: bool = False,
+    ) -> None:
+        if not self._context.history:
+            await self._context.restore()
+        await super().run(user_input, skip_user_prompt_hook=skip_user_prompt_hook)
+
+
+class MyBashParams(BaseModel):
+    command: str = Field(description="The bash command to execute.")
+
+
+class MyBashTool(CallableTool2):
+    name: str = "MyBashTool"
+    description: str = "A tool to execute bash commands."
+    params: type[MyBashParams] = MyBashParams
+
+    async def __call__(self, params: MyBashParams) -> ToolReturnValue:
+        import subprocess
+
+        try:
+            result = await asyncio.to_thread(
+                subprocess.run,
+                params.command,
+                shell=True,
+                capture_output=True,
+                text=True,
+                timeout=120,
+            )
+        except subprocess.TimeoutExpired:
+            return ToolError(
+                output="",
+                message="Command timed out after 120s",
+                brief="Bash command timed out",
+            )
+        if result.returncode != 0:
+            return ToolError(
+                output=result.stdout,
+                message=f"Command failed with error: {result.stderr}",
+                brief="Bash command failed",
+            )
+        return ToolOk(output=result.stdout)
+
+
+async def main():
+    toolset = SimpleToolset()
+    toolset += MyBashTool()
+
+    soul = await HakimoSoul.create(
+        llm=create_llm(
+            LLMProvider(
+                type="openai_legacy",
+                base_url=os.getenv("OPENAI_BASE_URL") or "https://api.openai.com/v1",
+                api_key=SecretStr(os.getenv("OPENAI_API_KEY") or ""),
+            ),
+            LLMModel(
+                provider="openai_legacy",
+                model="gpt-4o",
+                max_context_size=128_000,
+            ),
+        ),
+        system_prompt="You are Hakimo, an AI assistant that helps users with various tasks.",
+        toolset=toolset,
+    )
+    ui = Shell(soul)
+    await ui.run()
+
+
+if __name__ == "__main__":
+    asyncio.run(main())

@@ -1,0 +1,21 @@
+version: 1
+agent:
+  extend: default
+  tools:
+    - "kimo_cli.tools.agent:Agent"
+    - "kimo_cli.tools.dmail:SendDMail"
+    - "kimo_cli.tools.ask_user:AskUserQuestion"
+    - "kimo_cli.tools.todo:SetTodoList"
+    - "kimo_cli.tools.shell:Shell"
+    - "kimo_cli.tools.background:TaskList"
+    - "kimo_cli.tools.background:TaskOutput"
+    - "kimo_cli.tools.background:TaskStop"
+    - "kimo_cli.tools.file:ReadFile"
+    - "kimo_cli.tools.file:ReadMediaFile"
+    - "kimo_cli.tools.file:Glob"
+    - "kimo_cli.tools.file:Grep"
+    - "kimo_cli.tools.file:WriteFile"
+    - "kimo_cli.tools.file:StrReplaceFile"
+    - "kimo_cli.tools.web:FetchURL"
+    - "kimo_cli.tools.plan:ExitPlanMode"
+    - "kimo_cli.tools.plan.enter:EnterPlanMode"

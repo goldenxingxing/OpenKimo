@@ -1,0 +1,618 @@
+import asyncio
+import inspect
+import json
+from typing import Literal, override
+
+from inline_snapshot import snapshot
+from pydantic import BaseModel, Field
+
+from kosong.message import ToolCall
+from kosong.tooling import (
+    BriefDisplayBlock,
+    CallableTool,
+    CallableTool2,
+    ParametersType,
+    ToolError,
+    ToolOk,
+    ToolResult,
+    ToolResultFuture,
+    ToolReturnValue,
+)
+from kosong.tooling.error import (
+    ToolNotFoundError,
+    ToolParseError,
+    ToolRuntimeError,
+    ToolValidateError,
+)
+from kosong.tooling.simple import SimpleToolset
+
+
+def test_callable_tool_int_argument():
+    class TestTool(CallableTool):
+        name: str = "test"
+        description: str = "This is a test tool"
+        parameters: ParametersType = {
+            "type": "integer",
+        }
+
+        @override
+        async def __call__(self, test: int) -> ToolReturnValue:
+            return ToolOk(output=f"Test tool called with {test}")
+
+    tool = TestTool()
+    assert asyncio.run(tool.call(1)) == ToolOk(output="Test tool called with 1")
+
+
+def test_callable_tool_list_argument():
+    class TestTool(CallableTool):
+        name: str = "test"
+        description: str = "This is a test tool"
+        parameters: ParametersType = {
+            "type": "array",
+            "items": {
+                "type": "string",
+            },
+        }
+
+        @override
+        async def __call__(self, a: str, b: str) -> ToolReturnValue:
+            return ToolOk(output="Test tool called with a and b")
+
+    tool = TestTool()
+    assert asyncio.run(tool.call(["a", "b"])) == ToolOk(output="Test tool called with a and b")
+
+
+def test_callable_tool_dict_argument():
+    class TestTool(CallableTool):
+        name: str = "test"
+        description: str = "This is a test tool"
+        parameters: ParametersType = {
+            "type": "object",
+            "properties": {
+                "a": {"type": "string"},
+                "b": {"type": "integer"},
+            },
+        }
+
+        @override
+        async def __call__(self, a: str, b: int) -> ToolReturnValue:
+            return ToolOk(output=f"Test tool called with {a} and {b}")
+
+    tool = TestTool()
+    assert asyncio.run(tool.call({"a": "a", "b": 1})) == ToolOk(
+        output="Test tool called with a and 1"
+    )
+
+
+# Weak models sometimes double-encode array/object arguments into JSON strings
+# (e.g. {"todos": "[{\\"title\\": ...}]"}). The tool layer must repair these
+# instead of failing validation, without touching legitimate string fields.
+
+
+def test_callable_tool_repairs_stringified_object_argument():
+    class TestTool(CallableTool):
+        name: str = "test"
+        description: str = "This is a test tool"
+        parameters: ParametersType = {
+            "type": "object",
+            "properties": {
+                "a": {"type": "string"},
+                "b": {"type": "integer"},
+            },
+        }
+
+        @override
+        async def __call__(self, a: str, b: int) -> ToolReturnValue:
+            return ToolOk(output=f"Test tool called with {a} and {b}")
+
+    tool = TestTool()
+    assert asyncio.run(tool.call({"a": '{"nested": true}', "b": 1})) == ToolOk(
+        output='Test tool called with {"nested": true} and 1'
+    )
+
+
+def test_callable_tool_repairs_stringified_list_argument():
+    class TestTool(CallableTool):
+        name: str = "test"
+        description: str = "This is a test tool"
+        parameters: ParametersType = {
+            "type": "object",
+            "properties": {
+                "items": {"type": "array", "items": {"type": "string"}},
+            },
+        }
+
+        @override
+        async def __call__(self, items: list[str]) -> ToolReturnValue:
+            return ToolOk(output=f"Test tool called with {items}")
+
+    tool = TestTool()
+    assert asyncio.run(tool.call({"items": '["a", "b"]'})) == ToolOk(
+        output="Test tool called with ['a', 'b']"
+    )
+
+
+def test_simple_toolset():
+    class PlusTool(CallableTool):
+        name: str = "plus"
+        description: str = "This is a plus tool"
+        parameters: ParametersType = {
+            "type": "object",
+            "properties": {
+                "a": {"type": "integer"},
+                "b": {"type": "integer"},
+            },
+            "required": ["a", "b"],
+        }
+
+        @override
+        async def __call__(self, a: int, b: int) -> ToolReturnValue:
+            return ToolOk(output=str(a + b))
+
+    class CompareTool(CallableTool):
+        name: str = "compare"
+        description: str = "This is a compare tool"
+        parameters: ParametersType = {
+            "type": "object",
+            "properties": {
+                "a": {"type": "integer"},
+                "b": {"type": "integer"},
+            },
+            "required": ["a", "b"],
+        }
+
+        @override
+        async def __call__(self, a: int, b: int) -> ToolReturnValue:
+            return ToolOk(output="greater" if a > b else "less" if a < b else "equal")
+
+    class RaiseTool(CallableTool):
+        name: str = "raise"
+        description: str = "This is a raise tool"
+        parameters: ParametersType = {
+            "type": "object",
+            "properties": {},
+        }
+
+        @override
+        async def __call__(self) -> ToolReturnValue:
+            raise Exception("test exception")
+
+    class ErrorTool(CallableTool):
+        name: str = "error"
+        description: str = "This is a error tool"
+        parameters: ParametersType = {
+            "type": "object",
+            "properties": {},
+        }
+
+        @override
+        async def __call__(self) -> ToolReturnValue:
+            return ToolError(message="test error", brief="Error")
+
+    class InvalidReturnTypeTool(CallableTool):
+        name: str = "invalid_return_type"
+        description: str = "This is a invalid return type tool"
+        parameters: ParametersType = {
+            "type": "object",
+            "properties": {},
+        }
+
+        @override
+        async def __call__(self) -> str:  # type: ignore[reportIncompatibleMethodOverride]
+            return "invalid return type"
+
+    toolset = SimpleToolset([PlusTool()])
+    toolset += CompareTool()
+    toolset += RaiseTool()
+    toolset.add(ErrorTool())
+    assert toolset.tools[0].name == "plus"
+    assert toolset.tools[1].name == "compare"
+    assert toolset.tools[2].name == "raise"
+    assert toolset.tools[3].name == "error"
+
+    try:
+        toolset += InvalidReturnTypeTool()
+    except TypeError as e:
+        assert str(e) == (
+            "Expected tool `invalid_return_type` to return `ToolReturnValue`, "
+            "but got `<class 'str'>`"
+        )
+    else:
+        raise AssertionError("Expected TypeError")
+
+    tool_calls = [
+        ToolCall(
+            id="1",
+            function=ToolCall.FunctionBody(
+                name="plus",
+                arguments=json.dumps({"a": 1, "b": 2}),
+            ),
+        ),
+        ToolCall(
+            id="2",
+            function=ToolCall.FunctionBody(
+                name="compare",
+                arguments='{"a": 1, b: 2}',
+            ),
+        ),
+        ToolCall(
+            id="3",
+            function=ToolCall.FunctionBody(
+                name="plus",
+                arguments='{"a": 1}',
+            ),
+        ),
+        ToolCall(
+            id="4",
+            function=ToolCall.FunctionBody(
+                name="raise",
+                arguments=None,
+            ),
+        ),
+        ToolCall(
+            id="5",
+            function=ToolCall.FunctionBody(
+                name="not_found",
+                arguments=None,
+            ),
+        ),
+        ToolCall(
+            id="6",
+            function=ToolCall.FunctionBody(
+                name="error",
+                arguments=None,
+            ),
+        ),
+    ]
+
+    async def run() -> list[ToolResult]:
+        futures: list[ToolResultFuture] = []
+        for tool_call in tool_calls:
+            result = toolset.handle(tool_call)
+            if isinstance(result, ToolResult):
+                future = ToolResultFuture()
+                future.set_result(result)
+                futures.append(future)
+            else:
+                futures.append(result)
+        return await asyncio.gather(*futures)
+
+    results = asyncio.run(run())
+    assert results[0].tool_call_id == "1"
+    assert results[0].return_value == ToolOk(output="3")
+    assert isinstance(results[1].return_value, ToolParseError)
+    assert isinstance(results[2].return_value, ToolValidateError)
+    assert isinstance(results[3].return_value, ToolRuntimeError)
+    assert isinstance(results[4].return_value, ToolNotFoundError)
+    assert isinstance(results[5].return_value, ToolError)
+    assert results[5].return_value.message == "test error"
+    assert results[5].return_value.display == snapshot([BriefDisplayBlock(text="Error")])
+
+
+def test_callable_tool_2():
+    class TestParams(BaseModel):
+        a: int = Field(description="The first argument")
+        b: int = Field(default=0, description="The second argument")
+        c: str = Field(default="", alias="-c", description="The third argument")
+
+    class TestTool(CallableTool2[TestParams]):
+        name: str = "test"
+        description: str = "This is a test tool"
+        params: type[TestParams] = TestParams
+
+        @override
+        async def __call__(self, params: TestParams) -> ToolReturnValue:
+            return ToolOk(output=f"Test tool called with {params.a} and {params.b}")
+
+    tool = TestTool()
+    assert tool.base.name == "test"
+    assert tool.base.description == "This is a test tool"
+    assert tool.base.parameters == {
+        "type": "object",
+        "properties": {
+            "a": {"type": "integer", "description": "The first argument"},
+            "b": {"type": "integer", "description": "The second argument", "default": 0},
+            "-c": {"type": "string", "description": "The third argument", "default": ""},
+        },
+        "required": ["a"],
+    }
+
+    assert asyncio.run(tool.call({"a": 1, "b": 2})) == ToolOk(
+        output="Test tool called with 1 and 2"
+    )
+    assert asyncio.run(tool.call({"a": 1})) == ToolOk(output="Test tool called with 1 and 0")
+    assert isinstance(asyncio.run(tool.call({"b": 2})), ToolValidateError)
+
+
+# Weak models sometimes double-encode array/object arguments into JSON strings
+# (e.g. {"todos": "[{\\"title\\": ...}]"}). CallableTool2 must repair these
+# instead of failing validation, without touching legitimate string fields.
+
+
+def test_callable_tool_2_repairs_stringified_todo_list():
+    """SetTodoList-style: ``list[Model] | None`` passed as a JSON string."""
+
+    class Todo(BaseModel):
+        title: str = Field(description="The title of the todo")
+        status: Literal["pending", "in_progress", "done"] = Field(description="The status")
+
+    class TestParams(BaseModel):
+        todos: list[Todo] | None = Field(default=None)
+
+    class TestTool(CallableTool2[TestParams]):
+        name: str = "test"
+        description: str = "This is a test tool"
+        params: type[TestParams] = TestParams
+
+        @override
+        async def __call__(self, params: TestParams) -> ToolReturnValue:
+            titles = [todo.title for todo in params.todos or []]
+            return ToolOk(output=f"Test tool called with {titles}")
+
+    tool = TestTool()
+    arguments = {"todos": json.dumps([{"title": "a", "status": "done"}])}
+    assert asyncio.run(tool.call(arguments)) == ToolOk(output="Test tool called with ['a']")
+
+
+def test_callable_tool_2_repairs_stringified_nested_object():
+    """StrReplaceFile-style: an object parameter passed as a JSON string,
+    with plain-string fields inside it left untouched."""
+
+    class Edit(BaseModel):
+        old: str = Field(description="The text to replace")
+        new: str = Field(description="The replacement text")
+
+    class TestParams(BaseModel):
+        path: str = Field(description="The file path")
+        edit: Edit = Field(description="The edit to apply")
+
+    class TestTool(CallableTool2[TestParams]):
+        name: str = "test"
+        description: str = "This is a test tool"
+        params: type[TestParams] = TestParams
+
+        @override
+        async def __call__(self, params: TestParams) -> ToolReturnValue:
+            return ToolOk(output=f"Test tool called with {params.edit.old!r}")
+
+    tool = TestTool()
+    edit = json.dumps({"old": '{"json": "text"}', "new": "replacement"})
+    arguments = {"path": "some/file.py", "edit": edit}
+    assert asyncio.run(tool.call(arguments)) == ToolOk(
+        output='Test tool called with \'{"json": "text"}\''
+    )
+
+
+def test_callable_tool_2_repair_keeps_json_text_string_fields():
+    """A JSON-looking *string* field is never parsed, even when repair runs
+    because another field was stringified."""
+
+    class TestParams(BaseModel):
+        items: list[str] = Field(description="The items")
+        content: str = Field(description="The file content")
+
+    class TestTool(CallableTool2[TestParams]):
+        name: str = "test"
+        description: str = "This is a test tool"
+        params: type[TestParams] = TestParams
+
+        @override
+        async def __call__(self, params: TestParams) -> ToolReturnValue:
+            assert isinstance(params.content, str)
+            return ToolOk(output=f"Test tool called with {params.items}")
+
+    tool = TestTool()
+    arguments = {"items": '["a", "b"]', "content": '{"json": "text"}'}
+    assert asyncio.run(tool.call(arguments)) == ToolOk(output="Test tool called with ['a', 'b']")
+
+
+def test_callable_tool_2_unrepairable_arguments_still_error():
+    class TestParams(BaseModel):
+        todos: list[str] = Field(description="The todos")
+
+    class TestTool(CallableTool2[TestParams]):
+        name: str = "test"
+        description: str = "This is a test tool"
+        params: type[TestParams] = TestParams
+
+        @override
+        async def __call__(self, params: TestParams) -> ToolReturnValue:
+            return ToolOk(output="Test tool called")
+
+    tool = TestTool()
+    # Not a string at all — nothing to repair.
+    assert isinstance(asyncio.run(tool.call({"todos": 42})), ToolValidateError)
+    # A string, but it parses to the wrong type — repair must not mask the error.
+    assert isinstance(asyncio.run(tool.call({"todos": '"just a string"'})), ToolValidateError)
+
+
+def test_simple_toolset_sub():
+    class TestParams(BaseModel):
+        pass
+
+    class TestTool(CallableTool2[TestParams]):
+        name: str = "test"
+        description: str = "This is a test tool"
+        params: type[TestParams] = TestParams
+
+        @override
+        async def __call__(self, params: TestParams) -> ToolReturnValue:
+            return ToolOk(output="Test tool called")
+
+    toolset = SimpleToolset([TestTool()])
+    assert len(toolset.tools) == 1
+    toolset.remove(TestTool.name)
+    assert len(toolset.tools) == 0
+
+
+# Tests for both real type and string annotations support
+# These tests verify that SimpleToolset works correctly in both scenarios:
+# 1. When type annotations are actual type objects (normal case)
+# 2. When type annotations are strings (with `from __future__ import annotations`)
+
+
+def test_simple_toolset_with_real_type_annotation_callable_tool():
+    """Test that SimpleToolset works with CallableTool when using real type annotation."""
+
+    class TestTool(CallableTool):
+        name: str = "test_real"
+        description: str = "This is a test tool"
+        parameters: ParametersType = {
+            "type": "object",
+            "properties": {},
+        }
+
+        @override
+        async def __call__(self) -> ToolReturnValue:
+            return ToolOk(output="test")
+
+    # Verify the annotation is actually a type (not string)
+    assert inspect.signature(TestTool().__call__).return_annotation is ToolReturnValue
+
+    toolset = SimpleToolset()
+    toolset += TestTool()
+    assert len(toolset.tools) == 1
+    assert toolset.tools[0].name == "test_real"
+
+
+def test_simple_toolset_with_string_annotation_callable_tool():
+    """Test that SimpleToolset works with CallableTool when using string annotation."""
+
+    class TestTool(CallableTool):
+        name: str = "test_str"
+        description: str = "This is a test tool"
+        parameters: ParametersType = {
+            "type": "object",
+            "properties": {},
+        }
+
+        @override
+        async def __call__(self) -> "ToolReturnValue":  # type: ignore[reportIncompatibleMethodOverride]
+            return ToolOk(output="test")
+
+    # Verify the annotation is actually a string
+    assert isinstance(inspect.signature(TestTool().__call__).return_annotation, str)
+
+    toolset = SimpleToolset()
+    toolset += TestTool()
+    assert len(toolset.tools) == 1
+    assert toolset.tools[0].name == "test_str"
+
+
+def test_simple_toolset_with_invalid_string_annotation_rejected():
+    """Test that SimpleToolset rejects invalid string annotations."""
+
+    class TestTool(CallableTool):
+        name: str = "test_invalid"
+        description: str = "This is a test tool"
+        parameters: ParametersType = {
+            "type": "object",
+            "properties": {},
+        }
+
+        @override
+        async def __call__(self) -> "InvalidType":  # noqa: F821  # type: ignore[reportUnknownParameterType]
+            return ToolOk(output="test")  # type: ignore[return-value]
+
+    tool_instance = TestTool()
+    sig = inspect.signature(tool_instance.__call__)  # type: ignore[reportUnknownMemberType, reportUnknownArgumentType]
+    # Verify the annotation is actually a string
+    assert isinstance(sig.return_annotation, str)
+
+    toolset = SimpleToolset()
+    try:
+        toolset += TestTool()
+        raise AssertionError("Expected TypeError for invalid string annotation")
+    except TypeError as e:
+        assert "InvalidType" in str(e)
+
+
+def test_simple_toolset_with_real_type_annotation_callable_tool2():
+    """Test that SimpleToolset works with CallableTool2 when using real type annotation."""
+
+    class TestParams(BaseModel):
+        value: int = Field(description="A test value")
+
+    class TestTool(CallableTool2[TestParams]):
+        name: str = "test2_real"
+        description: str = "This is a test tool 2"
+        params: type[TestParams] = TestParams
+
+        @override
+        async def __call__(self, params: TestParams) -> ToolReturnValue:
+            return ToolOk(output=f"value: {params.value}")
+
+    # Verify the annotation is actually a type (not string)
+    assert inspect.signature(TestTool().__call__).return_annotation is ToolReturnValue
+
+    toolset = SimpleToolset()
+    toolset += TestTool()
+    assert len(toolset.tools) == 1
+    assert toolset.tools[0].name == "test2_real"
+
+
+def test_simple_toolset_with_string_annotation_callable_tool2():
+    """Test that SimpleToolset works with CallableTool2 when using string annotation."""
+
+    class TestParams(BaseModel):
+        value: int = Field(description="A test value")
+
+    class TestTool(CallableTool2[TestParams]):
+        name: str = "test2_str"
+        description: str = "This is a test tool 2"
+        params: type[TestParams] = TestParams
+
+        @override
+        async def __call__(self, params: TestParams) -> "ToolReturnValue":
+            return ToolOk(output=f"value: {params.value}")
+
+    # Verify the annotation is actually a string
+    assert isinstance(inspect.signature(TestTool().__call__).return_annotation, str)
+
+    toolset = SimpleToolset()
+    toolset += TestTool()
+    assert len(toolset.tools) == 1
+    assert toolset.tools[0].name == "test2_str"
+
+
+async def _test_handle_async_with_string_annotation():
+    """Helper async function to test tool handling with string annotation."""
+
+    class TestTool(CallableTool):
+        name: str = "add_str"
+        description: str = "Add two numbers"
+        parameters: ParametersType = {
+            "type": "object",
+            "properties": {
+                "a": {"type": "integer"},
+                "b": {"type": "integer"},
+            },
+            "required": ["a", "b"],
+        }
+
+        @override
+        async def __call__(self, a: int, b: int) -> "ToolReturnValue":
+            return ToolOk(output=str(a + b))
+
+    # Verify the annotation is actually a string
+    assert isinstance(inspect.signature(TestTool().__call__).return_annotation, str)
+
+    toolset = SimpleToolset([TestTool()])
+    tool_call = ToolCall(
+        id="1",
+        function=ToolCall.FunctionBody(
+            name="add_str",
+            arguments='{"a": 2, "b": 3}',
+        ),
+    )
+
+    result = toolset.handle(tool_call)
+    if asyncio.isfuture(result):
+        result = await result
+    return result
+
+
+def test_simple_toolset_with_string_annotation_handle():
+    """Test that tools with string annotations can be called correctly."""
+    result = asyncio.run(_test_handle_async_with_string_annotation())
+    assert result.return_value == ToolOk(output="5")
