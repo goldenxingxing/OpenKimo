@@ -56,9 +56,8 @@ RUN pip install --no-cache-dir \
     opencv-python-headless
 
 # Copy package files and install kimo-cli dependencies
-COPY kimo-cli/pyproject.toml kimo-cli/uv.lock ./
-COPY kimo-cli/packages/ ./packages/
-COPY kimo-cli/sdks/ ./sdks/
+COPY pyproject.toml uv.lock ./
+COPY packages/ ./packages/
 
 RUN pip install --no-cache-dir uv \
     && uv pip install --system -r pyproject.toml \
@@ -79,7 +78,7 @@ WORKDIR /app
 COPY app/ /app/
 
 # 复制 kimo-cli 源码 (作为 editable install)
-COPY kimo-cli/src/ /usr/local/lib/python3.12/site-packages/
+COPY src/ /usr/local/lib/python3.12/site-packages/
 
 # Register kimo-cli package metadata so importlib.metadata works
 RUN mkdir -p /usr/local/lib/python3.12/site-packages/kimo_cli-0.5.0.dist-info \

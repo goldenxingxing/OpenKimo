@@ -152,7 +152,7 @@ start_local() {
 
     # Validate kimo_cli is importable; add repo src to PYTHONPATH if needed
     if ! "$PYTHON" -c "import kimo_cli" &>/dev/null 2>&1; then
-        KIMO_SRC="$PROJECT_DIR/kimo-cli/src"
+        KIMO_SRC="$PROJECT_DIR/src"
         # ${PYTHONPATH:+:...}: with PYTHONPATH unset, "$KIMO_SRC:" ends in a
         # colon, and an empty path entry means the current directory — here
         # whatever directory the user ran this script from, so a stray
@@ -162,7 +162,7 @@ start_local() {
             echo "Using kimo_cli from $KIMO_SRC"
         else
             echo "ERROR: kimo_cli package not found."
-            echo "       Run: pip install -e $PROJECT_DIR/kimo-cli"
+            echo "       Run: pip install -e $PROJECT_DIR"
             exit 1
         fi
     fi
@@ -189,7 +189,7 @@ start_local() {
 
     # Static files (from repo if not overridden)
     if [ -z "$KIMO_WEB_STATIC_DIR" ]; then
-        STATIC_DIR="$PROJECT_DIR/kimo-cli/src/kimo_cli/web/static"
+        STATIC_DIR="$PROJECT_DIR/src/kimo_cli/web/static"
         if [ -d "$STATIC_DIR" ]; then
             export KIMO_WEB_STATIC_DIR="$STATIC_DIR"
         fi
