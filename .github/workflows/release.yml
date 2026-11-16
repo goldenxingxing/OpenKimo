@@ -1,10 +1,9 @@
 name: Release
 
-# Releases are built by goldenxingxing/OpenKimo-releases/.github/workflows/
-# release.yml, where standard runners cost no Actions minutes (this private
-# repo bills macOS at 10x and ran out of quota). Kept as a manual fallback
-# only — a tag push would otherwise build and push every image twice:
-#   gh workflow run release.yml -R goldenxingxing/OpenKimo --ref v0.2.2
+# This repo is public: releases are published here and downloadable by
+# anyone. Triggered manually on a tag ref — a tag push alone does not fire
+# this workflow (it is manual-only, so a tag push cannot build twice):
+#   gh workflow run release.yml --ref v0.5.0
 on:
   workflow_dispatch:
 
@@ -18,7 +17,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
-      contents: read
+      contents: write   # creates the release
     steps:
       # The single creator of the release. The image job and the three
       # installer jobs all upload into it, so none of them races to create it:
@@ -26,13 +25,11 @@ jobs:
       # already_exists, or a body-less create from a build job could win and
       # leave the release with no notes.
       #
-      # Published to the public downloads repo; this code repo is private, so
-      # its own releases would not be downloadable.
+      # Published to this repo (public), so the assets are downloadable by
+      # anyone.
       - name: Create GitHub Release
         uses: softprops/action-gh-release@8a0cd651e5b2365bd640854a3fa5dfc70e4875f3 # v3.0.4
         with:
-          repository: goldenxingxing/OpenKimo-releases
-          token: ${{ secrets.RELEASES_TOKEN }}
           tag_name: ${{ github.ref_name }}
           body: |
             ## Docker Images
@@ -48,8 +45,8 @@ jobs:
 
             ```bash
             # 1. Download config files
-            curl -O https://raw.githubusercontent.com/goldenxingxing/OpenKimo-releases/main/docker-compose.yml
-            curl -O https://raw.githubusercontent.com/goldenxingxing/OpenKimo-releases/main/.env.example
+            curl -O https://raw.githubusercontent.com/goldenxingxing/OpenKimo/main/docker-compose.yml
+            curl -O https://raw.githubusercontent.com/goldenxingxing/OpenKimo/main/.env.example
             cp .env.example .env
 
             # 2. Set your API key in .env
@@ -73,7 +70,7 @@ jobs:
       # (~30GB); keeps Docker itself intact.
       - name: Free disk space
         # Pinned to a commit, not @main: this is the first step of the one job
-        # holding packages: write and RELEASES_TOKEN, so a force-push or an
+        # holding packages: write, so a force-push or an
         # account compromise upstream would run attacker code with both. The
         # SHA below is tag v1.3.1.
         uses: jlumbroso/free-disk-space@54081f138730dfa15788a46383842cd2f914a1be
@@ -131,7 +128,7 @@ jobs:
     needs: create-release
     runs-on: macos-latest   # ARM64 (M-series) runner
     permissions:
-      contents: read        # assets go to the releases repo via RELEASES_TOKEN
+      contents: write       # upload release assets
 
     steps:
       - uses: actions/checkout@v5
@@ -189,8 +186,6 @@ jobs:
       - name: Upload DMG to Release
         uses: softprops/action-gh-release@8a0cd651e5b2365bd640854a3fa5dfc70e4875f3 # v3.0.4
         with:
-          repository: goldenxingxing/OpenKimo-releases
-          token: ${{ secrets.RELEASES_TOKEN }}
           tag_name: ${{ github.ref_name }}
           files: dist/*.dmg
           fail_on_unmatched_files: true
@@ -259,8 +254,6 @@ jobs:
       - name: Upload DMG to Release
         uses: softprops/action-gh-release@8a0cd651e5b2365bd640854a3fa5dfc70e4875f3 # v3.0.4
         with:
-          repository: goldenxingxing/OpenKimo-releases
-          token: ${{ secrets.RELEASES_TOKEN }}
           tag_name: ${{ github.ref_name }}
           files: dist/*.dmg
           fail_on_unmatched_files: true
@@ -349,8 +342,6 @@ jobs:
       - name: Upload installer to Release
         uses: softprops/action-gh-release@8a0cd651e5b2365bd640854a3fa5dfc70e4875f3 # v3.0.4
         with:
-          repository: goldenxingxing/OpenKimo-releases
-          token: ${{ secrets.RELEASES_TOKEN }}
           tag_name: ${{ github.ref_name }}
           files: dist-win/*.exe
           fail_on_unmatched_files: true
