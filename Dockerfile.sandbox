@@ -29,6 +29,7 @@ RUN apt-get update \
         ca-certificates \
         xdotool \
         ffmpeg \
+        libatomic1 \
     && rm -rf /var/lib/apt/lists/*
 
 # -----------------------------------------------------------
