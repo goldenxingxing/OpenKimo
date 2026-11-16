@@ -1,9 +1,9 @@
 <p align="center">
   <h1 align="center">OpenKimo</h1>
-  <p align="center"><strong>One Docker. Zero Worries.</strong></p>
-  <p align="center">A containerized server-side agent platform that runs in one command.<br>Fully isolated sessions. Multi-LLM ready.</p>
+  <p align="center"><strong>One command. Zero worries. On a server or on your own Mac.</strong></p>
+  <p align="center">A containerized server-side agent platform — and a native desktop app for personal use.<br>Fully isolated sessions. Multi-LLM ready. No server required for personal use.</p>
   <p align="center">
-    🚀 One-Command Deploy &nbsp;|&nbsp; 🛡️ Secure by Default &nbsp;|&nbsp; 🔌 Multi-LLM
+    🚀 One-Command Deploy &nbsp;|&nbsp; 🖥️ Native Desktop App &nbsp;|&nbsp; 🛡️ Secure by Default &nbsp;|&nbsp; 🔌 Multi-LLM
   </p>
 </p>
 
@@ -32,11 +32,12 @@
 
 ## What is OpenKimo?
 
-OpenKimo is a **containerized server-side agent platform**. You operate the agent through a web browser, while all code execution tasks run inside sandboxed Docker containers — nothing executes on the host machine.
+OpenKimo is a **containerized server-side agent platform** — and a **native desktop app for personal use**. You operate the agent through a web browser or the menu-bar desktop app, while code execution runs inside sandboxed Docker containers on a server — or in isolated child processes on your own machine when you run it locally. Nothing executes directly on the host filesystem.
 
-- **One command** to deploy the entire stack (`docker-compose up -d`).
-- **One browser tab** to create sessions, chat with the agent, and review outputs.
-- **Zero host dependencies** — the machine only needs Docker Engine installed.
+- **One command** to deploy the entire stack on a server (`docker-compose up -d`).
+- **One browser tab** (or the macOS menu-bar app) to create sessions, chat with the agent, and review outputs.
+- **Zero host dependencies** on a server — the machine only needs Docker Engine installed.
+- **Personal use** — run the macOS app or the local mode on your own machine, no Docker or server required.
 
 ```mermaid
 flowchart LR
@@ -55,8 +56,10 @@ flowchart LR
 
 ## Quick Start
 
-> **Only Docker Engine is required.** No Python, Node.js, or other build tools on the host.
+> **Only Docker Engine is required** for the server deployment. No Python, Node.js, or other build tools on the host.
 > Pre-built images are hosted on GitHub Container Registry — no local build needed.
+
+> **Personal use on your own Mac?** Skip the server entirely — use **Option D (local mode)** or **Option E (macOS App)** below. No Docker required.
 
 ### Prerequisites
 
@@ -113,7 +116,7 @@ cp .env.example .env
 ./scripts/start.sh --mode=local --port=8080 --host=127.0.0.1
 ```
 
-Local mode requires Python 3.10+ with `kimo-cli` installed (`pip install -e ./kimo-cli`); it disables the per-session sandbox, browser, and Jupyter, so use it only for development. See [`docs/LOCAL-MODE.md`](docs/LOCAL-MODE.md) for prerequisites and limitations.
+Local mode requires Python 3.10+ with `kimo-cli` installed (`pip install -e .`); it disables the per-session sandbox, browser, and Jupyter, so use it only for development. See [`docs/LOCAL-MODE.md`](docs/LOCAL-MODE.md) for prerequisites and limitations.
 
 ### Option E — macOS App (.dmg)
 
@@ -158,6 +161,7 @@ http://localhost:5494/?token=<your-token>
 
 ## Who is this for?
 
+- **Individuals** who want a personal AI agent on their own machine — the macOS desktop app or local mode, no server to deploy or maintain.
 - **Solo developers** who want to deploy an AI Agent backend in minutes, not hours.
 - **Small teams** that need a shared agent infrastructure without managing Python/Node.js runtimes on every machine.
 - **Security-sensitive environments** where code must never run on the host filesystem.
@@ -253,10 +257,11 @@ See [`.env.example`](.env.example) for the full list.
 
 ## OpenKimo vs Others
 
-**OpenKimo is NOT trying to be your personal chat companion.** If you want an AI that lives in WhatsApp or Telegram, check out other projects in that space.
+**OpenKimo is a task-oriented agent, not a chat companion.** It is for getting work done — running code, browsing, reviewing files, building things — whether on a shared server or on your own Mac. If you want an AI that lives in WhatsApp or Telegram and just chats, check out other projects in that space.
 
 **OpenKimo IS for you if:**
 
+- You want a **personal agent on your own machine** — run the macOS desktop app or local mode, no server to deploy.
 - You need a **server-side agent** that runs 24/7 and is accessed via a browser.
 - You want **zero host contamination** — every code execution happens inside a throwaway container.
 - You prefer **infrastructure as code** — deploy, scale, and upgrade with Docker Compose.

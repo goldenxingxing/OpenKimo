@@ -1,9 +1,9 @@
 <p align="center">
   <h1 align="center">OpenKimo</h1>
-  <p align="center"><strong>一条命令，开箱即用</strong></p>
-  <p align="center">一键部署的容器化 AI Agent 平台。<br>会话完全隔离，多模型支持，零宿主机依赖。</p>
+  <p align="center"><strong>一条命令，开箱即用 —— 服务器或你自己的 Mac 上都可以。</strong></p>
+  <p align="center">一个容器化服务端 Agent 平台，也是一个可个人使用的原生桌面 App。<br>会话完全隔离，多模型支持，零宿主机依赖；个人使用无需服务器。</p>
   <p align="center">
-    🚀 一键部署 &nbsp;|&nbsp; 🛡️ 默认安全 &nbsp;|&nbsp; 🔌 多模型支持
+    🚀 一键部署 &nbsp;|&nbsp; 🖥️ 原生桌面 App &nbsp;|&nbsp; 🛡️ 默认安全 &nbsp;|&nbsp; 🔌 多模型支持
   </p>
 </p>
 
@@ -32,11 +32,12 @@
 
 ## OpenKimo 是什么？
 
-OpenKimo 是一个**容器化服务端 Agent 平台**。用户通过浏览器操作 Agent，所有代码执行任务均在沙箱化的 Docker 容器内运行，**禁止直接在宿主机执行**。
+OpenKimo 是一个**容器化服务端 Agent 平台**，也是一个**可个人使用的原生桌面 App**。你可以通过浏览器或菜单栏桌面 App 操作 Agent；代码执行在服务器上跑在沙箱化 Docker 容器内，本地运行时则跑在隔离的子进程中——**都不会直接在宿主机文件系统上执行**。
 
-- **一条命令**部署完整平台（`docker-compose up -d`）。
-- **一个浏览器标签页**完成会话创建、Agent 对话与结果查看。
-- **零宿主机依赖** —— 宿主机仅需安装 Docker Engine。
+- **一条命令**在服务器上部署完整平台（`docker-compose up -d`）。
+- **一个浏览器标签页**（或 macOS 菜单栏 App）完成会话创建、Agent 对话与结果查看。
+- **零宿主机依赖** —— 服务器仅需安装 Docker Engine。
+- **个人使用** —— 在自己机器上运行 macOS App 或本地模式，无需 Docker，也无需服务器。
 
 ```mermaid
 flowchart LR
@@ -55,8 +56,10 @@ flowchart LR
 
 ## 快速开始
 
-> **宿主机仅需 Docker Engine。** 无需安装 Python、Node.js 或其他构建工具。
+> **服务器部署仅需 Docker Engine。** 无需安装 Python、Node.js 或其他构建工具。
 > 预构建镜像已托管在 GitHub Container Registry，无需本地编译。
+
+> **在自己 Mac 上个人使用？** 完全无需服务器——直接用下面的**方式 D（本地模式）**或**方式 E（macOS App）**，无需 Docker。
 
 ### 前置要求
 
@@ -113,7 +116,7 @@ cp .env.example .env
 ./scripts/start.sh --mode=local --port=8080 --host=127.0.0.1
 ```
 
-本地模式需要 Python 3.10+ 并安装 `kimo-cli`（`pip install -e ./kimo-cli`）；为了无 Docker 也能跑通，会禁用每会话 sandbox、浏览器、Jupyter，因此仅推荐用于开发。详见 [`docs/LOCAL-MODE.md`](docs/LOCAL-MODE.md)。
+本地模式需要 Python 3.10+ 并安装 `kimo-cli`（`pip install -e .`）；为了无 Docker 也能跑通，会禁用每会话 sandbox、浏览器、Jupyter，因此仅推荐用于开发。详见 [`docs/LOCAL-MODE.md`](docs/LOCAL-MODE.md)。
 
 ### 方式 E — macOS 应用程序（.dmg）
 
@@ -158,6 +161,7 @@ http://localhost:5494/?token=<你的token>
 
 ## 适用人群
 
+- **个人用户** —— 想在自己机器上拥有一个个人 AI Agent（macOS 桌面 App 或本地模式），无需部署或维护服务器。
 - **独立开发者** —— 希望在几分钟内（而非几小时）部署 AI Agent 后端。
 - **小团队** —— 需要共享的 Agent 基础设施，但不想在每台机器上管理 Python/Node.js 运行时。
 - **安全敏感场景** —— 代码绝不允许在宿主机文件系统上运行。
@@ -253,10 +257,11 @@ flowchart TB
 
 ## OpenKimo 的定位
 
-**OpenKimo 不是个人聊天伴侣。** 如果你需要活在 WhatsApp 或 Telegram 里的 AI，请了解该领域的其他项目。
+**OpenKimo 是任务型 Agent，不是聊天伴侣。** 它用于把事做成——运行代码、浏览、审阅文件、构建产品——无论是在共享服务器上，还是在你自己的 Mac 上。如果你想要活在 WhatsApp 或 Telegram 里、只是聊天的 AI，请了解该领域的其他项目。
 
 **OpenKimo 适合你，如果：**
 
+- 你想在**自己机器上拥有一个个人 Agent**——运行 macOS 桌面 App 或本地模式，无需部署服务器。
 - 你需要一个 **服务端 Agent**，7×24 小时运行，通过浏览器访问。
 - 你追求 **零宿主机污染** —— 每一次代码执行都在一次性容器内完成。
 - 你偏好 **基础设施即代码** —— 用 Docker Compose 完成部署、扩容与升级。
