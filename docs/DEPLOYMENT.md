@@ -29,7 +29,7 @@ The fastest way to get OpenKimo running locally for development or testing.
 
 ```bash
 # 1. Clone the repository
-git clone --recurse-submodules git@github.com:j0x7c4/OpenKimo.git
+git clone --recurse-submodules git@github.com:goldenxingxing/OpenKimo.git
 cd OpenKimo
 
 # 2. Configure environment

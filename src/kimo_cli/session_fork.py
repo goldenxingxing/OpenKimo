@@ -18,6 +18,73 @@ from kimo_cli.session_state import load_session_state, save_session_state
 
 CHECKPOINT_USER_PATTERN = re.compile(r"^<system>CHECKPOINT \d+</system>$")
 
+# The first TextPart of a context-compaction summary message. Kept in sync with
+# kimo_cli.soul.compaction.COMPACTION_OUTPUT_PREFIX (deliberately not imported:
+# compaction pulls in the LLM stack, and session_fork is a lightweight module
+# used by web/CLI paths that must not pay that).
+_COMPACTION_SUMMARY_MARKER = (
+    "<system>Previous context has been compacted. Here is the compaction output:</system>"
+)
+
+# Blocks that record the *source session's in-flight state*, not conversation
+# history: a forked session must not inherit these as fresh todo items (they
+# describe what the source was about to do — e.g. "report the 616.5s timeout").
+_COMPACTION_SNAPSHOT_TAGS = (
+    "current_focus",
+    "completed_tasks",
+    "active_issues",
+    "important_context",
+    "code_state",
+)
+
+_COMPACTION_SNAPSHOT_RE = re.compile(
+    r"<(?:%s)>.*?</(?:%s)>" % ("|".join(_COMPACTION_SNAPSHOT_TAGS), "|".join(_COMPACTION_SNAPSHOT_TAGS)),
+    re.DOTALL,
+)
+
+
+def _strip_compaction_snapshot_text(text: str) -> str:
+    """Remove the in-flight-state blocks from one compaction-summary text part.
+
+    Keeps the ``<system>`` marker, the conversation digest, and the objective
+    ``files_read``/``files_modified``/``latest_user_request`` blocks; drops only
+    the blocks that describe what the *source* session had not finished.
+    """
+    return _COMPACTION_SNAPSHOT_RE.sub("", text)
+
+
+def _strip_compaction_snapshot_line(line: str) -> str:
+    """Strip compaction-snapshot blocks from one context.jsonl line, if it is a
+    compaction summary user message; otherwise return it unchanged."""
+    try:
+        record: dict[str, Any] = json.loads(line)
+    except json.JSONDecodeError:
+        return line
+    if record.get("role") != "user":
+        return line
+    content = record.get("content")
+    if not isinstance(content, list) or not content:
+        return line
+    first = content[0]
+    if not (
+        isinstance(first, dict)
+        and first.get("type") == "text"
+        and first.get("text") == _COMPACTION_SUMMARY_MARKER
+    ):
+        return line
+    kept: list[Any] = []
+    for part in content:
+        if not (isinstance(part, dict) and part.get("type") == "text"):
+            kept.append(part)
+            continue
+        stripped = _strip_compaction_snapshot_text(part.get("text", ""))
+        if stripped.strip():
+            part = dict(part)
+            part["text"] = stripped
+            kept.append(part)
+    record["content"] = kept
+    return json.dumps(record, ensure_ascii=False)
+
 
 @dataclass(frozen=True, slots=True)
 class TurnInfo:
@@ -259,11 +326,14 @@ async def fork_session(
         for line in truncated_wire_lines:
             f.write(line + "\n")
 
-    # Write truncated context.jsonl (overwrites the empty file from create())
+    # Write truncated context.jsonl (overwrites the empty file from create()).
+    # Compaction summaries carried over from the source are stripped of their
+    # in-flight-state blocks (current_focus/active_issues/...): those describe
+    # the source session's unfinished work, which a fork must not inherit.
     new_context_path = new_session_dir / "context.jsonl"
     with open(new_context_path, "w", encoding="utf-8") as f:
         for line in truncated_context_lines:
-            f.write(line + "\n")
+            f.write(_strip_compaction_snapshot_line(line) + "\n")
 
     # Set title and inherit ownership (without owner_id the forked session is
     # filtered out of the session list for authenticated users — looks "killed")

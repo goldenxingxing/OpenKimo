@@ -13,7 +13,7 @@ import {
 } from "@ai-elements";
 import type { ChatStatus } from "ai";
 import type { PromptInputMessage } from "@ai-elements";
-import type { GitDiffStats, Session } from "@/lib/api/models";
+import type { Session } from "@/lib/api/models";
 import type { TokenUsage } from "@/hooks/wireTypes";
 import type { ActivityDetail } from "./activity-status-indicator";
 import { Badge } from "@/components/ui/badge";
@@ -61,8 +61,6 @@ type ChatPromptComposerProps = {
     sessionId: string,
     path?: string,
   ) => Promise<SessionFileEntry[]>;
-  gitDiffStats?: GitDiffStats | null;
-  isGitDiffLoading?: boolean;
   slashCommands?: SlashCommandDef[];
   planMode?: boolean;
   onPlanModeChange?: (enabled: boolean) => void;
@@ -92,8 +90,6 @@ export const ChatPromptComposer = memo(function ChatPromptComposerComponent({
   isReplayingHistory,
   onCancel,
   onListSessionDirectory,
-  gitDiffStats,
-  isGitDiffLoading,
   slashCommands = [],
   planMode = false,
   onPlanModeChange,
@@ -231,9 +227,6 @@ export const ChatPromptComposer = memo(function ChatPromptComposerComponent({
   return (
     <div className="w-full">
       <PromptToolbar
-        gitDiffStats={gitDiffStats}
-        isGitDiffLoading={isGitDiffLoading}
-        workDir={currentSession?.workDir}
         planMode={planMode}
         activityStatus={activityStatus}
         usagePercent={usagePercent}

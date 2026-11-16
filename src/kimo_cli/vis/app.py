@@ -151,7 +151,7 @@ def run_vis_server(
         banner_lines.extend(
             [
                 "<nowrap>  This feature is in Technical Preview and may be unstable.",
-                "<nowrap>  Please report issues at https://github.com/j0x7c4/OpenKimo/issues.",
+                "<nowrap>  Please report issues at https://github.com/goldenxingxing/OpenKimo/issues.",
                 "",
             ]
         )

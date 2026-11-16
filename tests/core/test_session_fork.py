@@ -421,3 +421,71 @@ class TestForkSession:
         new_video = new_session.dir / "uploads" / "test.mp4"
         assert new_video.exists()
         assert new_video.read_text() == "fake video"
+
+    async def test_fork_strips_compaction_snapshot_blocks(
+        self, isolated_share_dir: Path, work_dir: KaosPath
+    ):
+        """Forking a session whose history contains a compaction summary must not
+        carry the source session's in-flight-state blocks (current_focus,
+        active_issues, ...) into the fork, or the fork's model keeps treating the
+        source's unfinished work as its own todo."""
+        from kimo_cli.session import Session
+
+        source = await Session.create(work_dir)
+        _write_wire_file(source.dir, ["continue"])
+
+        marker = (
+            "<system>Previous context has been compacted. Here is the compaction "
+            "output:</system>"
+        )
+        summary_content = [
+            {"type": "text", "text": marker},
+            {
+                "type": "text",
+                "text": (
+                    "<current_focus>\nnext step: report the 616.5s timeout\n</current_focus>\n"
+                    "<completed_tasks>\n- fix drag-drop bug\n</completed_tasks>\n"
+                    "<active_issues>\n- pending timeout report\n</active_issues>\n"
+                    "<important_context>\n- some carried context\n</important_context>\n"
+                    "<code_state>\n- file a\n</code_state>"
+                ),
+            },
+            {"type": "text", "text": "<files_read>\n- /tmp/example.txt\n</files_read>"},
+        ]
+        context_path = source.dir / "context.jsonl"
+        with context_path.open("w", encoding="utf-8") as f:
+            f.write(json.dumps({"role": "user", "content": summary_content}) + "\n")
+            f.write(
+                json.dumps(
+                    {"role": "assistant", "content": [{"type": "text", "text": "ok"}]}
+                )
+                + "\n"
+            )
+
+        new_id = await fork_session(
+            source_session_dir=source.dir,
+            work_dir=work_dir,
+            turn_index=0,
+            source_title="Compaction Session",
+        )
+
+        new_session = await Session.find(work_dir, new_id)
+        assert new_session is not None
+        ctx = (new_session.dir / "context.jsonl").read_text(encoding="utf-8")
+
+        # Snapshot blocks and their content are gone from the fork.
+        for tag in (
+            "<current_focus>",
+            "<completed_tasks>",
+            "<active_issues>",
+            "<important_context>",
+            "<code_state>",
+        ):
+            assert tag not in ctx
+        assert "616.5s timeout" not in ctx
+        assert "pending timeout report" not in ctx
+
+        # The marker and objective blocks survive.
+        assert marker in ctx
+        assert "<files_read>" in ctx
+        assert "/tmp/example.txt" in ctx

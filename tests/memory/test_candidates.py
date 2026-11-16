@@ -198,15 +198,16 @@ class TestWhereWritingIsWiredIn:
         assert "propose_candidates" in inspect.getsource(archivist.archive_compaction)
 
     def test_every_way_a_session_ends_archives(self) -> None:
-        """Both shutdown paths, not just the terminal one.
+        """No shutdown path reaches cross-session archival.
 
-        This asserted the opposite for as long as it took to notice: the
-        worker the desktop app runs closed without archiving, so a session
-        that did not happen to compact left neither summary nor proposal.
-        A real store showed nine summaries and every one came from compaction.
+        Compaction and session-end cross-session memory archival are both
+        disabled: the session summary stays in-session only. Nothing anywhere
+        in the source tree calls ``archive_on_session_end`` (or
+        ``archive_compaction``) any more, so no summary is written to
+        ``recent.jsonl`` and no candidate is queued.
 
-        Kept as a list rather than a count so that adding a third way to end a
-        session is a decision someone makes here, not something that quietly
+        Kept as a search rather than a count so that re-wiring cross-session
+        archival is a decision someone makes here, not something that quietly
         inherits the old behaviour.
         """
         from pathlib import Path
@@ -222,4 +223,4 @@ class TestWhereWritingIsWiredIn:
             and path.name != "archivist.py"
         )
 
-        assert callers == ["cli/__init__.py", "web/runner/worker.py"]
+        assert callers == []

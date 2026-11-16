@@ -117,6 +117,14 @@ def _build_global_config() -> GlobalConfig:
     # 1. Merge LLM_PROVIDERS (YAML) into config.toml
     # ------------------------------------------------------------------
     providers_list = parse_llm_providers_env()
+    # .env LLM_PROVIDERS is the single source of truth for which providers/
+    # models exist (Settings adds/removes there). Names absent from it are
+    # stale leftovers in config.toml (from a config migration, a non-Settings
+    # writer, or a failed prune) and must not be served to the admin panel nor
+    # written back. Empty set (no LLM_PROVIDERS) keeps legacy/plain-config mode.
+    env_provider_names: set[str] = (
+        {p.get("name") for p in providers_list if p.get("name")} if providers_list else set()
+    )
     if providers_list:
         for p in providers_list:
             name = p.get("name")
@@ -238,8 +246,16 @@ def _build_global_config() -> GlobalConfig:
             if not config.default_model:
                 config.default_model = next(iter(config.models.keys()))
 
-    # Persist merged providers/models back to config.toml
+    # Persist merged providers/models back to config.toml. Prune first so a
+    # provider/model removed from .env is not resurrected on every request
+    # (the admin panel reads config.toml, so an unpruned write self-perpetuates
+    # the stale entry).
     if env_models_added:
+        if env_provider_names:
+            for stale_name in list(config.models):
+                if stale_name not in env_provider_names:
+                    config.models.pop(stale_name, None)
+                    config.providers.pop(stale_name, None)
         save_config(config)
         logger.info("Merged environment LLM providers into config.toml")
 
@@ -248,6 +264,10 @@ def _build_global_config() -> GlobalConfig:
     # ------------------------------------------------------------------
     models: list[ConfigModel] = []
     for model_name, model in config.models.items():
+        # .env LLM_PROVIDERS is authoritative for the model list: skip models
+        # that are no longer in the environment (deleted in Settings).
+        if env_provider_names and model_name not in env_provider_names:
+            continue
         provider = config.providers.get(model.provider)
         if provider is None:
             continue

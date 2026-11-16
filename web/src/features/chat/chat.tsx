@@ -28,7 +28,6 @@ import { ChatPromptComposer } from "./components/chat-prompt-composer";
 import { ApprovalDialog } from "./components/approval-dialog";
 import { QuestionDialog, usePendingQuestion } from "./components/question-dialog";
 import { SessionFilesPanel } from "./components/session-files-panel";
-import { useGitDiffStats } from "@/hooks/useGitDiffStats";
 import {
   deriveActivityStatus,
   type ActivityDetail,
@@ -167,10 +166,6 @@ export const ChatWorkspace = memo(function ChatWorkspaceComponent({
   // Check if there's a pending question to replace the prompt composer
   const hasPendingQuestion = usePendingQuestion(messages) !== null;
 
-  // Fetch git diff stats for the current session
-  const { stats: gitDiffStats, isLoading: isGitDiffLoading } = useGitDiffStats(
-    currentSession?.sessionId ?? null
-  );
 
   // Derive activity status for the header indicator
   // Use ref to cache the previous result and avoid unnecessary object reference changes
@@ -395,8 +390,6 @@ export const ChatWorkspace = memo(function ChatWorkspaceComponent({
                       isReplayingHistory={isReplayingHistory}
                       onCancel={onCancel}
                       onListSessionDirectory={onListSessionDirectory}
-                      gitDiffStats={gitDiffStats}
-                      isGitDiffLoading={isGitDiffLoading}
                       slashCommands={slashCommands}
                       planMode={planMode}
                       yolo={yolo}

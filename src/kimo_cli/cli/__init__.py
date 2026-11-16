@@ -41,7 +41,7 @@ class SwitchToVis(Exception):
 cli = typer.Typer(
     cls=LazySubcommandGroup,
     epilog="""\b\
-Documentation:        https://github.com/j0x7c4/OpenKimo""",
+Documentation:        https://github.com/goldenxingxing/OpenKimo""",
     add_completion=False,
     context_settings={"help_option_names": ["-h", "--help"]},
     help="OpenKimo, your general AI agent.",
@@ -734,18 +734,11 @@ def kimo(
                 # end-of-session archival and hook here duplicates summaries
                 # and fires SessionEnd for a session that never ended.
                 if session_is_ending:
-                    # --- Cross-session memory archival ---
-                    # Fail-open: a slow or broken summarizer must not block the
-                    # SessionEnd hook or process exit.
-                    with contextlib.suppress(Exception):
-                        from kimo_cli.memory.archivist import archive_on_session_end
-
-                        await asyncio.wait_for(
-                            archive_on_session_end(instance.soul),
-                            timeout=10,
-                        )
-
                     # --- SessionEnd hook ---
+                    # Cross-session memory archival on session end is disabled:
+                    # the session summary stays in-session only (the context and
+                    # the session's own archive/), nothing is written to
+                    # recent.jsonl here.
                     with contextlib.suppress(Exception):
                         await asyncio.wait_for(
                             instance.soul.hook_engine.trigger(

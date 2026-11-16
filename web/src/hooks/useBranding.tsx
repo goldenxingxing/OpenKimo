@@ -13,7 +13,7 @@ export const BRANDING_DEFAULTS = {
   brand_name: "OpenKimo",
   version: null,
   page_title: "OpenKimo Web UI",
-  logo_url: "https://github.com/j0x7c4/OpenKimo",
+  logo_url: "https://github.com/goldenxingxing/OpenKimo",
   logo: "/logo.png",
   favicon: "/favicon.png",
 } as const;

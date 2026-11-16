@@ -1721,6 +1721,30 @@ async def _communicate_with_timeout(
         raise
 
 
+def _is_app_runtime_path(rel_path: str) -> bool:
+    """True if a git-diff path is app-runtime/metadata noise, not user output.
+
+    The git-diff panel is meant to show what a conversation *produced*. Files
+    the app maintains on its own (session storage, Office/WPS temp lock files,
+    editor/bytecode artifacts) are excluded so the panel does not mix 9 sessions'
+    metadata and temp files into the numbers.
+
+    ``git diff --numstat`` quotes paths containing non-ASCII/whitespace (e.g.
+    ``"output/.~...pptx"``), so strip surrounding quotes before matching.
+    """
+    p = rel_path.strip('"')
+    if p.startswith("session-data/"):
+        return True
+    name = p.rsplit("/", 1)[-1]
+    if name.startswith(".~"):  # Office/WPS temp lock file
+        return True
+    if name.endswith((".tmp", ".swp", ".pyc", ".DS_Store")):
+        return True
+    if "/__pycache__/" in p or p.endswith("/__pycache__"):
+        return True
+    return False
+
+
 @router.get("/{session_id}/git-diff", summary="Get git diff stats")
 async def get_session_git_diff(session_id: UUID, http_request: Request) -> GitDiffStats:
     """get git diff stats for the session's work directory"""
@@ -1773,6 +1797,11 @@ async def get_session_git_diff(session_id: UUID, http_request: Request) -> GitDi
                     continue
                 parts = line.split("\t")
                 if len(parts) >= 3:
+                    # Skip app-runtime/metadata paths: this panel should show
+                    # what the conversation produced, not session storage or
+                    # Office/editor temp files.
+                    if _is_app_runtime_path(parts[2]):
+                        continue
                     add = int(parts[0]) if parts[0] != "-" else 0
                     dele = int(parts[1]) if parts[1] != "-" else 0
                     total_add += add
@@ -1808,6 +1837,8 @@ async def get_session_git_diff(session_id: UUID, http_request: Request) -> GitDi
         # Add untracked files to the result
         for line in untracked_stdout.decode().strip().split("\n"):
             if line:
+                if _is_app_runtime_path(line):
+                    continue
                 files.append(
                     GitFileDiff(
                         path=line,

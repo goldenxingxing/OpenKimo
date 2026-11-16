@@ -12,7 +12,7 @@ Thank you for your interest in contributing!
 ## Development Setup
 
 ```bash
-git clone --recurse-submodules git@github.com:j0x7c4/OpenKimo.git
+git clone --recurse-submodules git@github.com:goldenxingxing/OpenKimo.git
 cd OpenKimo
 cp .env.example .env
 # edit .env with your API keys
@@ -25,7 +25,7 @@ Be respectful and constructive in all interactions.
 
 ## Questions?
 
-Open an [issue](https://github.com/j0x7c4/OpenKimo/issues) or start a [discussion](https://github.com/j0x7c4/OpenKimo/discussions).
+Open an [issue](https://github.com/goldenxingxing/OpenKimo/issues) or start a [discussion](https://github.com/goldenxingxing/OpenKimo/discussions).
 ull Request** against the `main` branch with a clear description.
 
 ## Development Environment Setup

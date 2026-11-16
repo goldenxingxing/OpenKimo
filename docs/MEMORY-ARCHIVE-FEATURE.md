@@ -10,7 +10,7 @@
 
 - LLM 单次往返 5–30 s，**HTTP 请求同步阻塞**，前端 toast 卡死。
 - 一次会话的归档状态在前端**不可见**：用户无法在侧栏分辨哪些会话已归档、哪些有新内容尚未归档、哪些归档失败。
-- 工作流变化场景（compaction / session_end）由 worker 进程在后台自动归档，**前端看不到**。
+- 工作流变化场景（compaction / session_end）曾由 worker 进程在后台自动归档，**前端看不到**；现这些**跨会话自动归档已关闭**，只有 manual 归档写入 `recent.jsonl`。
 
 ---
 
@@ -54,22 +54,17 @@ GET /api/memory/events  (SSE)
 
 **菜单门禁**：当点是 blue 或 green 时，"Record memory" 菜单项置灰；点击弹 `<AlertDialog>` 提示原因（避免无效重复归档）。
 
-### 2.3 自动归档（compaction / session_end）的可见性
+### 2.3 自动归档（compaction / session_end）已关闭
 
-`recent.jsonl` 同时被三个触发器追加（`SessionSummary.trigger`）：
+`recent.jsonl` 现在只被**一个**触发器追加（`SessionSummary.trigger`）：
 
 | trigger | 写入进程 | SSE 实时推送 | 典型颜色 |
 |---|---|---|---|
 | `manual` | gateway | ✅ 经 `MemoryEventBus` | blue → green |
-| `compaction` | worker | ❌ 跨进程 | yellow（压缩后会话仍在继续） |
-| `session_end` | worker | ❌ 跨进程 | green（无新一轮） |
 
-worker 与 gateway 是不同进程，**worker 写入的事件无法直接进入 gateway 的内存总线**。两个补偿机制让自动归档在 ≤60 s 内被前端感知：
+compaction 与 session_end 的**跨会话自动归档已关闭**：会话摘要只留在会话内（会话上下文 + 会话自身 `archive/` 目录，经 `ContextRetrieve` 回读），不再写入 `recent.jsonl`，也不再提案 `candidates.jsonl`。因此 `compaction` / `session_end` 两种 trigger 不再产生记录。
 
-- 60 s `setInterval` 刷新 `useRecentSummaries`
-- `document.visibilitychange` 监听，标签页重新可见时立即刷新
-
-这是有意做成轮询而不是跨进程发布订阅的折中（见"5.4 跨进程推送"）。
+（保留说明：若未来重新启用，需在 `kimosoul.compact_context` 与 `cli/__init__.py` / `web/runner/worker.py` 的 session 结束路径恢复 `archive_compaction` / `archive_on_session_end` 调用。）
 
 ---
 
@@ -205,7 +200,7 @@ StreamingResponse(
 
 ### 5.1 跨进程事件总线
 
-当前 worker 写的归档要 ≤60 s 才被前端感知。可选升级路径：
+当前只有 manual 归档写入 `recent.jsonl`，且由 gateway 进程写入、经 `MemoryEventBus` 推送，前端无需跨进程感知（compaction / session_end 的 worker 自动归档已关闭）。若未来重新启用 worker 自动归档，可选的升级路径：
 
 - **文件 watcher**：gateway 监听 `recent.jsonl` 的 inotify/FSEvents，写入即转 `MemoryEventBus.publish`。零依赖、单机最简单。
 - **Unix domain socket / 命名管道**：worker 写完发一行 owner_id+session_id，gateway 侧守护协程读取并扇出。
@@ -229,7 +224,7 @@ StreamingResponse(
 
 ### 5.6 自动归档触发条件优化
 
-`compaction` 被触发的条件是 `loop_control.compaction_trigger_ratio`，目前是简单的 token 占比阈值。可以进一步：根据上一次 manual archive 与当前 turn 数差值动态决定是否自动归档，避免频繁产生重复语义的 yellow → green 翻转。
+compaction / session_end 的跨会话自动归档已关闭，此优化项随之不再适用（`loop_control.compaction_trigger_ratio` 只影响会话内压缩，不再触发 `recent.jsonl` 写入）。若未来重新启用自动归档，可根据上一次 manual archive 与当前 turn 数差值动态决定，避免频繁产生重复语义的 yellow → green 翻转。
 
 ### 5.7 失败原因的细分展示
 
@@ -272,4 +267,4 @@ StreamingResponse(
 6. 多 tab 同账户：A 触发，B 也应 blue → green。
 7. 服务端 kill -9 后保持 in-flight：≤90 s 自动转 red。
 8. 在 green 上点菜单："Record memory" 灰显，点击弹 "Memory is already up to date…"。
-9. 触发 worker 的 compaction：≤60 s 内（或切焦点）自动出现 yellow/green。
+9. （自动归档已关闭）不再有触发 worker 的 compaction 后自动出现 yellow/green 的行为；只有 manual 归档会产生状态点。

@@ -766,6 +766,13 @@ export const PromptInput = ({
         .split(",")
         .map((rule) => rule.trim().toLowerCase())
         .filter(Boolean);
+      // "*" and "*/*" (possibly alongside other rules) mean "any file", as the
+      // browser treats them in an <input accept> attribute. A literal "*"
+      // matches no MIME type, so without this branch every drop is rejected
+      // (regression introduced by 2ab48a8c).
+      if (rules.includes("*") || rules.includes("*/*")) {
+        return true;
+      }
       const name = f.name.toLowerCase();
       return rules.some((rule) => {
         if (rule.startsWith(".")) {

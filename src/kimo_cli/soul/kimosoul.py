@@ -2538,17 +2538,11 @@ class KimoSoul:
         )
         _hook_task.add_done_callback(lambda t: t.exception() if not t.cancelled() else None)
 
-        # Fire-and-forget: archive the LLM-produced summary into the user's
-        # cross-session memory. Failures must never block the main loop.
-        if self._runtime.role == "root":
-            from kimo_cli.memory.archivist import archive_compaction
-
-            # `history` is what was compacted — the last point at which the
-            # detail exists, and so where memory candidates are noticed.
-            _archive_task = asyncio.create_task(
-                archive_compaction(self, compaction_result, history_before=history)
-            )
-            _archive_task.add_done_callback(lambda t: t.exception() if not t.cancelled() else None)
+        # Compaction stays in-session only: the summary lives in the session
+        # context (result.messages[0]) and the full pre-compaction history is
+        # archived under the session's own archive/ directory (CompactionArchiver),
+        # reachable via ContextRetrieve. Nothing is written to cross-session
+        # memory (recent.jsonl) or the candidate queue (candidates.jsonl) here.
 
     @staticmethod
     def _is_retryable_error(exception: BaseException) -> bool:
