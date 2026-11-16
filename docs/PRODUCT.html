@@ -295,7 +295,7 @@
   <h2>快速上手</h2>
   <p class="kicker">桌面版三步开始工作</p>
   <ol class="steps">
-    <li><b>安装</b> — 从 <a href="https://github.com/goldenxingxing/OpenKimo-releases/releases">Releases 页面</a>下载对应平台的安装包：macOS 选 <code>arm64</code>（Apple 芯片）或 <code>x86_64</code>（Intel），Windows 直接运行安装器。<div class="note">macOS 首次打开如提示未验证开发者：右键 App 图标 → 打开。</div></li>
+    <li><b>安装</b> — 从 <a href="https://github.com/goldenxingxing/OpenKimo/releases">Releases 页面</a>下载对应平台的安装包：macOS 选 <code>arm64</code>（Apple 芯片）或 <code>x86_64</code>（Intel），Windows 直接运行安装器。<div class="note">macOS 首次打开如提示未验证开发者：右键 App 图标 → 打开。</div></li>
     <li><b>配置模型</b> — 首次启动弹出 Settings 窗口，填入至少一个 LLM API Key（Kimo / OpenAI / Anthropic），保存。<div class="note">之后随时可从菜单栏（mac）或托盘图标（Windows）右键打开 Settings 修改。</div></li>
     <li><b>开始会话</b> — 菜单栏图标变为 <span style="color:var(--ok)">● Running</span> 后浏览器自动打开 <code>http://127.0.0.1:5494</code>。选择工作目录，新建会话，用自然语言下达任务。</li>
   </ol>
@@ -304,8 +304,8 @@
   <div class="term">
     <div class="term-bar"><i></i><i></i><i></i><span>shell</span></div>
     <pre><span class="c"># 1. 下载配置文件</span>
-curl -O https://raw.githubusercontent.com/goldenxingxing/OpenKimo-releases/main/docker-compose.yml
-curl -O https://raw.githubusercontent.com/goldenxingxing/OpenKimo-releases/main/.env.example
+curl -O https://raw.githubusercontent.com/goldenxingxing/OpenKimo/main/docker-compose.yml
+curl -O https://raw.githubusercontent.com/goldenxingxing/OpenKimo/main/.env.example
 cp .env.example .env
 <span class="c"># 2. 编辑 .env，填入至少一个 LLM API Key</span>
 <span class="c"># 3. 启动（自动拉取预构建镜像）</span>
@@ -406,7 +406,7 @@ docker compose up -d</pre>
     <table>
       <thead><tr><th>资源</th><th>地址</th></tr></thead>
       <tbody>
-        <tr><td>安装包（GitHub）</td><td><a href="https://github.com/goldenxingxing/OpenKimo-releases/releases">github.com/goldenxingxing/OpenKimo-releases</a></td></tr>
+        <tr><td>安装包（GitHub）</td><td><a href="https://github.com/goldenxingxing/OpenKimo/releases">github.com/goldenxingxing/OpenKimo</a></td></tr>
         <tr><td>安装包（Gitee 镜像）</td><td><a href="https://gitee.com/qunwei/OpenKimo-releases/releases">gitee.com/qunwei/OpenKimo-releases</a></td></tr>
         <tr><td>Docker 镜像</td><td><code>ghcr.io/goldenxingxing/kimo-agent-gateway</code> · <code>kimo-agent-sandbox</code></td></tr>
       </tbody>

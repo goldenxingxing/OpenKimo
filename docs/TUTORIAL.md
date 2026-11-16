@@ -38,7 +38,7 @@ Docker 部署时每个会话跑在一个独立容器里；桌面版（.app / .ex
 
 ### 1.3 路线 A：macOS 应用
 
-从 [Releases](https://github.com/goldenxingxing/OpenKimo-releases/releases) 下载 `OpenKimo-*.dmg`，打开后把
+从 [Releases](https://github.com/goldenxingxing/OpenKimo/releases) 下载 `OpenKimo-*.dmg`，打开后把
 `OpenKimo.app` 拖进 `Applications`，再从启动台打开。启动后它不占 Dock，只在菜单栏留一个图标。
 
 还没填过 LLM 配置的话要先填一次（见下一节）。填完之后菜单栏状态变成
@@ -58,8 +58,8 @@ Docker 部署时每个会话跑在一个独立容器里；桌面版（.app / .ex
 <summary><b>路线 B：Docker Compose（服务器部署）</b></summary>
 
 ```bash
-curl -O https://raw.githubusercontent.com/goldenxingxing/OpenKimo-releases/main/docker-compose.yml
-curl -O https://raw.githubusercontent.com/goldenxingxing/OpenKimo-releases/main/.env.example
+curl -O https://raw.githubusercontent.com/goldenxingxing/OpenKimo/main/docker-compose.yml
+curl -O https://raw.githubusercontent.com/goldenxingxing/OpenKimo/main/.env.example
 cp .env.example .env
 # 编辑 .env，至少填一个 API Key，并把 KIMO_WEB_SESSION_TOKEN 改成随机串
 docker compose up -d
@@ -72,7 +72,7 @@ docker compose up -d
 <details>
 <summary><b>路线 C：Windows</b></summary>
 
-从 [Releases](https://github.com/goldenxingxing/OpenKimo-releases/releases) 下载 Windows 安装包，装好后注意一点：**Shell 工具需要 Git for Windows**，
+从 [Releases](https://github.com/goldenxingxing/OpenKimo/releases) 下载 Windows 安装包，装好后注意一点：**Shell 工具需要 Git for Windows**，
 没装的话界面顶部会出现一条横幅，点里面的链接装完再刷新即可。
 </details>
 

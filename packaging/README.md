@@ -205,13 +205,13 @@ Prerequisites on Windows:
 Runtime deps installed into `runtime/site-packages/` are listed in
 `packaging/requirements-windows.txt`.
 
-Releases are built in the public `goldenxingxing/OpenKimo-releases` repo, where standard Actions runners are free. After pushing a `v*` tag here, run:
+Releases are built and published in this repo (public), where standard Actions runners are free. To release a tag, run:
 
 ```bash
-gh workflow run release.yml -R goldenxingxing/OpenKimo-releases -f tag=v0.2.2
+gh workflow run release.yml -f tag=v0.5.0
 ```
 
-It builds all three artifacts in parallel — macOS arm64 DMG, macOS x86_64 DMG, and Windows x64 installer .exe — plus the Docker images, and uploads them to the GitHub Release there. This repo's `.github/workflows/release.yml` is kept as a manual fallback only.
+It builds all three artifacts in parallel — macOS arm64 DMG, macOS x86_64 DMG, and Windows x64 installer .exe — plus the Docker images, and uploads them to this repo's GitHub Release.
 
 ## Troubleshooting
 

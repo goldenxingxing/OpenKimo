@@ -33,8 +33,8 @@ macOS（Apple Silicon / Intel）与 Windows 10/11 x64。安装后常驻菜单栏
 ### Docker 部署（团队推荐）
 
 ```bash
-curl -O https://raw.githubusercontent.com/goldenxingxing/OpenKimo-releases/main/docker-compose.yml
-curl -O https://raw.githubusercontent.com/goldenxingxing/OpenKimo-releases/main/.env.example
+curl -O https://raw.githubusercontent.com/goldenxingxing/OpenKimo/main/docker-compose.yml
+curl -O https://raw.githubusercontent.com/goldenxingxing/OpenKimo/main/.env.example
 cp .env.example .env   # 填入至少一个 LLM API Key
 docker compose up -d
 ```
@@ -77,7 +77,7 @@ docker compose up -d
 
 | 资源            | 地址                                                                                                                           |
 | ------------- | ---------------------------------------------------------------------------------------------------------------------------- |
-| 安装包（GitHub）   | [https://github.com/goldenxingxing/OpenKimo-releases/releases](https://github.com/goldenxingxing/OpenKimo-releases/releases) |
+| 安装包（GitHub）   | [https://github.com/goldenxingxing/OpenKimo/releases](https://github.com/goldenxingxing/OpenKimo/releases) |
 | 安装包（Gitee 镜像） | [https://gitee.com/qunwei/OpenKimo-releases/releases](https://gitee.com/qunwei/OpenKimo-releases/releases)                   |
 | Docker 镜像     | `ghcr.io/goldenxingxing/kimo-agent-gateway` · `ghcr.io/goldenxingxing/kimo-agent-sandbox`                                    |
 
