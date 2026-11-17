@@ -562,6 +562,12 @@ async def create_session(
         session_model = request.model
 
     kimo_cli_session = await KimoCLISession.create(work_dir=work_dir)
+    # Web/API sessions have no interactive approval surface; auto-approve tool
+    # calls so they do not block forever waiting for an approval response.
+    from kimo_cli.session_state import save_session_state as _save_state
+
+    kimo_cli_session.state.approval.yolo = True
+    _save_state(kimo_cli_session.state, kimo_cli_session.dir)
     context_file = kimo_cli_session.dir / "context.jsonl"
 
     # Persist per-session config (thinking override + model override + agent spec path)

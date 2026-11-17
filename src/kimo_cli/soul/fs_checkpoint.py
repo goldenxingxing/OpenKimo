@@ -26,6 +26,7 @@ process cwd otherwise (terminal CLI on the host).
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
 import os
 from pathlib import Path
@@ -213,18 +214,62 @@ class FsCheckpointer:
             )
         return out.decode(errors="replace").strip()
 
+    # Filesystem checkpointing must never break the agent loop (module
+    # contract: "every failure is fail-open"). A git process that hangs
+    # (e.g. antivirus scanning, a huge/corrupted .git, a stuck index lock)
+    # must be abandoned and reported as a failure, not awaited forever.
+    _GIT_TIMEOUT = 8.0
+
     async def _run_git(self, *args: str) -> tuple[int, bytes, bytes]:
-        proc = await asyncio.create_subprocess_exec(
-            "git",
-            *args,
-            cwd=self._workspace,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-        )
-        out, err = await proc.communicate()
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                "git",
+                *args,
+                cwd=self._workspace,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+        except FileNotFoundError:
+            return 127, b"", b"git not found"
+        try:
+            out, err = await asyncio.wait_for(proc.communicate(), timeout=self._GIT_TIMEOUT)
+        except asyncio.TimeoutError:
+            # ``git.exe`` on Windows is a shim whose child keeps the stdout/stderr
+            # pipes open; killing only the shim leaves the real git orphaned and
+            # ``communicate()`` then waits for EOF forever, re-hanging the loop.
+            # Kill the whole process tree and bound the reap, then fail open.
+            if os.name == "nt":
+                with contextlib.suppress(Exception):
+                    tk = await asyncio.create_subprocess_exec(
+                        "taskkill", "/F", "/T", "/PID", str(proc.pid),
+                        stdout=asyncio.subprocess.DEVNULL,
+                        stderr=asyncio.subprocess.DEVNULL,
+                    )
+                    with contextlib.suppress(asyncio.TimeoutError, Exception):
+                        await asyncio.wait_for(tk.communicate(), timeout=3.0)
+            else:
+                proc.kill()
+            with contextlib.suppress(asyncio.TimeoutError, Exception):
+                await asyncio.wait_for(proc.communicate(), timeout=2.0)
+            raise RuntimeError(
+                f"git {' '.join(args[:2])} timed out after {self._GIT_TIMEOUT}s in {self._workspace}"
+            ) from None
         return proc.returncode if proc.returncode is not None else -1, out, err
 
 
-def workspace_from_env() -> Path:
-    """The workspace the checkpointer should snapshot."""
-    return Path(os.environ.get("KIMO_WORK_DIR", str(Path.cwd())))
+def workspace_from_env(fallback: Path | None = None) -> Path:
+    """The workspace the checkpointer should snapshot.
+
+    Prefers ``KIMO_WORK_DIR`` (the sandbox contract) when set; otherwise the
+    caller-supplied fallback (the session's work dir) when given; otherwise
+    the process cwd. Using the session work dir instead of the bare cwd
+    matters for web-API workers, whose cwd is OpenKimo's own data directory
+    (e.g. ``...AppData\\Roaming\\OpenKimo``) rather than the user's
+    workspace, and where snapshotting would run git against OpenKimo's own
+    (often large, git-blobbing) data directory.
+    """
+    if os.environ.get("KIMO_WORK_DIR"):
+        return Path(os.environ["KIMO_WORK_DIR"])
+    if fallback is not None:
+        return Path(fallback)
+    return Path.cwd()

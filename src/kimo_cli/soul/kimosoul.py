@@ -436,7 +436,13 @@ class KimoSoul:
         # the start of every turn.
         self._issued_tool_calls: set[str] = set()
         self._completed_tool_calls: set[str] = set()
-        self._fs_checkpointer = FsCheckpointer(workspace_from_env())
+        # Snapshot the session's work dir (the user's workspace), not the
+        # process cwd. For web-API workers the cwd is OpenKimo's own data
+        # directory (Roaming\OpenKimo), where git snapshotting is both wrong
+        # and can hang (huge .git); session.work_dir is the real workspace.
+        self._fs_checkpointer = FsCheckpointer(
+            workspace_from_env(Path(str(self._runtime.session.work_dir)))
+        )
         self._truncation_continuations = 0
         self._loop_detector = LoopDetector()
         # Self-evolution evidence recorder. Recording is unconditional —
