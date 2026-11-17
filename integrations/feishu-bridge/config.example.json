@@ -1,0 +1,10 @@
+{
+  "feishu_app_id": "cli_xxxxxxxxxxxx",
+  "feishu_app_secret": "xxxxxxxxxxxx",
+  "openkimo_base_url": "http://127.0.0.1:5494",
+  "openkimo_token": "",
+  "data_dir": "data",
+  "timeout_seconds": 600,
+  "show_thinking": true,
+  "group_chat_enabled": false
+}
