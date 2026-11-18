@@ -12,7 +12,7 @@ import pytest
 from kosong import generate, step
 from kosong.chat_provider import StreamedMessagePart, normalize_finish_reason
 from kosong.chat_provider.mock import MockChatProvider
-from kosong.message import TextPart, ToolCall
+from kosong.message import ToolCall
 from kosong.tooling import CallableTool, ParametersType, ToolOk, ToolReturnValue
 from kosong.tooling.simple import SimpleToolset
 

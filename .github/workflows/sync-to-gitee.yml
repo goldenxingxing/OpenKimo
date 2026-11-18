@@ -7,14 +7,17 @@ on:
         description: Existing v* release tag to synchronize
         required: true
         type: string
-  push:
-    branches: [main]
-    tags:
-      - 'v*'
-  delete:
-  workflow_run:
-    workflows: [Release]
-    types: [completed]
+  # Push/tag/delete/workflow_run triggers are disabled: the Gitee mirror
+  # repository (gitee.com/qunwei/OpenKimo) no longer exists, so every one of
+  # these fired a failing run. Re-enable once the mirror repo is recreated.
+  # push:
+  #   branches: [main]
+  #   tags:
+  #     - 'v*'
+  # delete:
+  # workflow_run:
+  #   workflows: [Release]
+  #   types: [completed]
 
 permissions:
   contents: read
