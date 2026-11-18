@@ -1,11 +1,16 @@
 import asyncio
+import contextlib
+import json
+import os
 import re
+import subprocess
 import sys
 import time
-import json
-import subprocess
+from shutil import which
+
 import requests
 import websockets
+
 # Explicitly, not via `websockets.exceptions` off the bare package. websockets
 # 15 resolves submodules lazily and `import websockets` alone leaves
 # `websockets.exceptions` unresolvable — verified on 15.0.1:
@@ -17,15 +22,12 @@ import websockets
 # connect the AttributeError would replace the error being handled.
 # kimo-cli pins only `websockets>=14.0`, so the resolved version varies.
 import websockets.exceptions
-from typing import Dict, Optional, List
 from loguru import logger
-from playwright.async_api import async_playwright, Page, BrowserContext
-import os
+from playwright.async_api import BrowserContext, Page, async_playwright
 from utils import get_screensize
-from shutil import which
 
 
-def _get_chromium_version(executable_path: str = "/usr/bin/chromium") -> Optional[str]:
+def _get_chromium_version(executable_path: str = "/usr/bin/chromium") -> str | None:
     try:
         exe = executable_path if os.path.exists(executable_path) else (which("chromium") or which("chromium-browser") or executable_path)
         result = subprocess.run([exe, "--version"], capture_output=True, text=True, timeout=3)
@@ -37,13 +39,13 @@ def _get_chromium_version(executable_path: str = "/usr/bin/chromium") -> Optiona
         return None
 
 
-def _chrome_major(version: Optional[str]) -> str:
+def _chrome_major(version: str | None) -> str:
     if not version:
         return "120"
     return version.split(".")[0]
 
 
-def _build_user_agent(version: Optional[str], locale: str) -> str:
+def _build_user_agent(version: str | None, locale: str) -> str:
     # Example: Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.6099.109 Safari/537.36
     chrome_ver = version or "120.0.6099.109"
     return (
@@ -53,7 +55,7 @@ def _build_user_agent(version: Optional[str], locale: str) -> str:
     )
 
 
-def _build_ua_ch_headers(version: Optional[str]) -> Dict[str, str]:
+def _build_ua_ch_headers(version: str | None) -> dict[str, str]:
     major = _chrome_major(version)
     return {
         "Sec-CH-UA": f'"Not A(Brand)";v="99", "Chromium";v="{major}", "Google Chrome";v="{major}"',
@@ -85,8 +87,8 @@ class BrowserGuard:
     def __init__(self, check_interval: float = 1.0):
         self.running: bool = False
         self.check_interval: float = check_interval
-        self.browser: Optional[BrowserContext] = None
-        self.pages: List[Page] = []
+        self.browser: BrowserContext | None = None
+        self.pages: list[Page] = []
         self.current_page_index: int = 0
         self.width: int = int(match.group(1) if match else "1920")
         self.height: int = int(match.group(2) if match else "1080")
@@ -115,7 +117,7 @@ class BrowserGuard:
             ua_ch = _build_ua_ch_headers(chromium_version)
 
             extra_flags = os.getenv("CHROME_FLAGS", "")
-            extra_args: List[str] = []
+            extra_args: list[str] = []
             if extra_flags:
                 extra_args = extra_flags.split(" ")
 
@@ -358,7 +360,7 @@ class BrowserCDPGuard:
     主要功能是在 Chromium 窗口被关闭或被最小化后自动打开新标签页或最大化窗口。
     """
 
-    def __init__(self, check_interval: int = 1, executable_path: Optional[str] = None):
+    def __init__(self, check_interval: int = 1, executable_path: str | None = None):
         self.running = False
         self.check_interval = check_interval
         self.debugging_port = None
@@ -372,7 +374,7 @@ class BrowserCDPGuard:
         self,
         ws,
         command: str,
-        params: Optional[Dict] = None,
+        params: dict | None = None,
         timeout: float = 5.0,
     ):
         """发送 CDP 命令。
@@ -418,7 +420,7 @@ class BrowserCDPGuard:
 
             return await asyncio.wait_for(wait_for_response(), timeout)
 
-        except asyncio.TimeoutError:
+        except TimeoutError:
             logger.error(f"CDP 命令超时: {command} (id={message['id']})")
             return None
         except websockets.exceptions.ConnectionClosed:
@@ -472,7 +474,7 @@ class BrowserCDPGuard:
                 "--js-flags=--max_old_space_size=512",
             ]
             chrome_flags = os.getenv("CHROME_FLAGS", "")
-            extra_args: List[str] = []
+            extra_args: list[str] = []
             if chrome_flags:
                 extra_args = chrome_flags.split(" ")
 
@@ -508,10 +510,8 @@ class BrowserCDPGuard:
                     # 监控循环重启都留下一个僵尸，累积到 SANDBOX_PID_LIMIT。
                     # 放到线程里等：这是协程，直接 wait() 会把事件循环连同上面
                     # 那些 await 一起按住最多 5 秒。
-                    try:
+                    with contextlib.suppress(Exception):
                         await asyncio.to_thread(self.browser_process.wait, 5)
-                    except Exception:
-                        pass
                     self.browser_process = None
                     logger.error(f"浏览器启动失败，尝试第 {count} 次")
                     await asyncio.sleep(0.1 * (2**count))
@@ -738,10 +738,8 @@ class BrowserCDPGuard:
                         # 持续的 CDP 故障会让每一轮监控都留下一个僵尸进程，
                         # 直到撞上 SANDBOX_PID_LIMIT。同样放到线程里等，
                         # 别在监控循环里把事件循环按住 5 秒。
-                        try:
+                        with contextlib.suppress(Exception):
                             await asyncio.to_thread(self.browser_process.wait, 5)
-                        except Exception:
-                            pass
                         self.browser_process = None
                 except Exception as e:
                     logger.error(f"停止浏览器进程失败: {e}")

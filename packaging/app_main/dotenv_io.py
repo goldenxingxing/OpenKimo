@@ -11,6 +11,7 @@ on save so users' hand-edits aren't trampled.
 
 from __future__ import annotations
 
+import contextlib
 import os
 import re
 import tempfile
@@ -191,10 +192,8 @@ def write_env(path: Path, updates: dict[str, str]) -> None:
             f.write(text)
         os.replace(tmp, path)
     except Exception:
-        try:
+        with contextlib.suppress(OSError):
             os.unlink(tmp)
-        except OSError:
-            pass
         raise
 
 

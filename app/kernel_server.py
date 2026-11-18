@@ -8,15 +8,14 @@ import logging
 import os
 import threading
 from contextlib import asynccontextmanager
-from typing import Dict, Any, Optional
+from typing import Any
 
 import uvicorn
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel
-
 from jupyter_kernel import JupyterKernel
+from pydantic import BaseModel
 
 # 配置日志
 logging.basicConfig(
@@ -25,7 +24,7 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # 全局 kernel 实例
-kernel_instance: Optional[JupyterKernel] = None
+kernel_instance: JupyterKernel | None = None
 
 
 @asynccontextmanager
@@ -73,7 +72,7 @@ class ApiResponse(BaseModel):
 
     success: bool
     message: str
-    data: Optional[Dict[str, Any]] = None
+    data: dict[str, Any] | None = None
 
 
 class KernelStatusResponse(BaseModel):
@@ -81,8 +80,8 @@ class KernelStatusResponse(BaseModel):
 
     success: bool
     kernel_alive: bool
-    kernel_pid: Optional[int] = None
-    connection_file: Optional[str] = None
+    kernel_pid: int | None = None
+    connection_file: str | None = None
     client_connected: bool
 
 
@@ -90,15 +89,15 @@ class ConnectionInfoResponse(BaseModel):
     """连接信息响应模型"""
 
     success: bool
-    connection_file: Optional[str] = None
-    connection_info: Optional[Dict[str, Any]] = None
+    connection_file: str | None = None
+    connection_info: dict[str, Any] | None = None
     kernel_alive: bool
-    kernel_pid: Optional[int] = None
-    message: Optional[str] = None
+    kernel_pid: int | None = None
+    message: str | None = None
 
 
 # API 路由
-@app.get("/", response_model=Dict[str, str])
+@app.get("/", response_model=dict[str, str])
 async def root():
     """根路径，返回服务信息"""
     return {
@@ -217,7 +216,7 @@ def interrupt_kernel():
 _CONNECTION_SECRET_FIELDS = frozenset({"key"})
 
 
-def _redact_connection_info(info: Dict[str, Any]) -> Dict[str, Any]:
+def _redact_connection_info(info: dict[str, Any]) -> dict[str, Any]:
     """Drop the HMAC signing key from a connection-info payload.
 
     The ports and transport are useful for diagnosing a wedged kernel; the key

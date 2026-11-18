@@ -31,7 +31,8 @@ import sys
 from pathlib import Path
 from typing import Any
 
-from . import configtoml, dotenv_io, paths as paths_mod
+from . import configtoml, dotenv_io
+from . import paths as paths_mod
 
 log = logging.getLogger(__name__)
 

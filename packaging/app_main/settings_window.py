@@ -15,37 +15,39 @@ Save writes to ``~/Library/Application Support/<AppName>/.env`` via
 
 from __future__ import annotations
 
+import contextlib
 import json
 import logging
 import secrets
-from typing import Any, Callable
+from collections.abc import Callable
+from typing import Any
 
+import objc
 from AppKit import (
     NSAlert,
     NSAlertFirstButtonReturn,
     NSApp,
     NSBackingStoreBuffered,
     NSButton,
+    NSClosableWindowMask,
     NSColor,
     NSFont,
     NSFontWeightSemibold,
     NSLayoutConstraint,
     NSMakeRect,
+    NSMiniaturizableWindowMask,
     NSPopUpButton,
+    NSResizableWindowMask,
     NSScrollView,
     NSSecureTextField,
     NSSlider,
     NSSwitch,
     NSTextField,
     NSTitledWindowMask,
-    NSClosableWindowMask,
-    NSMiniaturizableWindowMask,
-    NSResizableWindowMask,
     NSView,
     NSWindow,
     NSWindowController,
 )
-import objc
 from Foundation import NSObject  # noqa: F401  (kept for symmetry / future use)
 
 from . import dotenv_io
@@ -156,10 +158,8 @@ def _label(text: str, *, semibold: bool = False, size: float = 13.0,
     else:
         f.setFont_(NSFont.systemFontOfSize_(size))
     if secondary:
-        try:
+        with contextlib.suppress(Exception):
             f.setTextColor_(NSColor.secondaryLabelColor())
-        except Exception:
-            pass
     f.setTranslatesAutoresizingMaskIntoConstraints_(False)
     return f
 

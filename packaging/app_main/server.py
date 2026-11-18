@@ -11,6 +11,7 @@ Exit code protocol:
 
 from __future__ import annotations
 
+import contextlib
 import json
 import logging
 import os
@@ -20,9 +21,9 @@ import subprocess
 import sys
 import threading
 import time
+from collections.abc import Callable
 from enum import Enum
 from pathlib import Path
-from typing import Callable
 
 from . import dotenv_io, userenv
 from .paths import AppPaths
@@ -228,10 +229,8 @@ def _write_atomic(path: Path, text: str) -> None:
         tmp.write_text(text, encoding="utf-8")
         os.replace(tmp, path)
     finally:
-        try:
+        with contextlib.suppress(FileNotFoundError):
             tmp.unlink()
-        except FileNotFoundError:
-            pass
 
 
 #: Touched by Settings, polled by the server. A file rather than a signal so
@@ -322,9 +321,7 @@ def _check_health(port: int, expect_pid: int | None = None) -> bool:
     healthy, pid = _probe_health(port)
     if not healthy:
         return False
-    if expect_pid is not None and pid is not None and pid != expect_pid:
-        return False
-    return True
+    return not (expect_pid is not None and pid is not None and pid != expect_pid)
 
 
 def _port_owner_pid(port: int) -> int | None:
@@ -384,7 +381,7 @@ def _reap_orphan_listener_windows(port: int) -> None:
         if len(parts) < 5 or parts[3].upper() != "LISTENING":
             continue
         local = parts[1]
-        if not local.rsplit(":", 1)[-1] == str(port):
+        if local.rsplit(":", 1)[-1] != str(port):
             continue
         try:
             pids.add(int(parts[4]))
@@ -486,10 +483,8 @@ def _reap_orphan_listener(port: int) -> None:
                 break
             time.sleep(0.1)
         else:
-            try:
+            with contextlib.suppress(Exception):
                 os.kill(pid, signal.SIGKILL)
-            except Exception:
-                pass
             time.sleep(0.2)
 
 
@@ -645,10 +640,8 @@ class UvicornSupervisor:
                 _kill_tree_windows(self._proc)
             else:
                 self._proc.kill()
-            try:
+            with contextlib.suppress(subprocess.TimeoutExpired):
                 self._proc.wait(timeout=2)
-            except subprocess.TimeoutExpired:
-                pass
         finally:
             self._proc = None
 

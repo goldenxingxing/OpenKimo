@@ -1,13 +1,13 @@
 import json
 import os
 import queue
-from typing import List, Optional, Dict, Any
-from pydantic import BaseModel
-import time
 import signal
-import psutil
+import time
+from typing import Any
 
+import psutil
 from jupyter_client.manager import KernelManager
+from pydantic import BaseModel
 
 #: How long a single iopub read blocks. Short so the loop can
 #: re-check the caller's deadline between reads.
@@ -26,8 +26,8 @@ _INIT_TIMEOUT_SECONDS = 180
 class ExecutionResult(BaseModel):
     success: bool
     output: str
-    error: Optional[str] = None
-    images: Optional[List[str]] = None
+    error: str | None = None
+    images: list[str] | None = None
 
 
 class JupyterKernel:
@@ -364,7 +364,7 @@ plt.rcParams['axes.unicode_minus'] = False
                     images=[],
                 )
 
-    def reset_kernel(self) -> Dict[str, Any]:
+    def reset_kernel(self) -> dict[str, Any]:
         """重置 kernel"""
         try:
             print("Resetting kernel...")
@@ -380,7 +380,7 @@ plt.rcParams['axes.unicode_minus'] = False
         except Exception as e:
             return {"success": False, "message": f"Failed to reset kernel: {str(e)}"}
 
-    def interrupt_kernel(self) -> Dict[str, Any]:
+    def interrupt_kernel(self) -> dict[str, Any]:
         """中断 kernel 执行"""
         try:
             if not self.km:
@@ -447,7 +447,7 @@ plt.rcParams['axes.unicode_minus'] = False
                 "message": f"Failed to interrupt kernel: {str(e)}",
             }
 
-    def get_connection_info(self) -> Dict[str, Any]:
+    def get_connection_info(self) -> dict[str, Any]:
         """获取 kernel 连接信息"""
         try:
             if not self.km or not self.connection_file:
@@ -456,7 +456,7 @@ plt.rcParams['axes.unicode_minus'] = False
             # 读取连接文件内容
             connection_info = {}
             if os.path.exists(self.connection_file):
-                with open(self.connection_file, "r") as f:
+                with open(self.connection_file) as f:
                     connection_info = json.load(f)
 
             return {
@@ -472,7 +472,7 @@ plt.rcParams['axes.unicode_minus'] = False
                 "message": f"Failed to get connection info: {str(e)}",
             }
 
-    def debug_kernel_manager(self) -> Dict[str, Any]:
+    def debug_kernel_manager(self) -> dict[str, Any]:
         """调试 KernelManager 的状态和属性"""
         debug_info = {
             "km_exists": self.km is not None,
@@ -527,7 +527,7 @@ plt.rcParams['axes.unicode_minus'] = False
 
         return debug_info
 
-    def _get_kernel_pid(self) -> Optional[int]:
+    def _get_kernel_pid(self) -> int | None:
         """安全地获取 kernel 进程 ID"""
         if not self.km:
             return None
@@ -565,6 +565,7 @@ plt.rcParams['axes.unicode_minus'] = False
             # 方法4: 通过连接文件查找相关进程
             if hasattr(self.km, "connection_file") and self.km.connection_file:
                 import os
+
                 import psutil
 
                 connection_file = os.path.basename(self.km.connection_file)
@@ -589,7 +590,7 @@ plt.rcParams['axes.unicode_minus'] = False
 
         return None
 
-    def get_kernel_status(self) -> Dict[str, Any]:
+    def get_kernel_status(self) -> dict[str, Any]:
         """获取 kernel 状态信息"""
         try:
             status = {

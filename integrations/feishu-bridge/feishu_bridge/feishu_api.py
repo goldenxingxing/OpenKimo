@@ -29,22 +29,21 @@ class FeishuAPI:
                 return self._token
             async with aiohttp.ClientSession(
                 timeout=aiohttp.ClientTimeout(total=30)
-            ) as sess:
-                async with sess.post(
-                    f"{API_BASE}/auth/v3/tenant_access_token/internal",
-                    json={
-                        "app_id": self.app_id,
-                        "app_secret": self.app_secret,
-                    },
-                ) as resp:
-                    data = await resp.json()
-                    if data.get("code") != 0:
-                        raise RuntimeError(
-                            f"tenant_access_token 获取失败: {data.get('msg')}"
-                        )
-                    self._token = data["tenant_access_token"]
-                    self._token_expire = time.time() + data.get("expire", 7200)
-                    return self._token
+            ) as sess, sess.post(
+                f"{API_BASE}/auth/v3/tenant_access_token/internal",
+                json={
+                    "app_id": self.app_id,
+                    "app_secret": self.app_secret,
+                },
+            ) as resp:
+                data = await resp.json()
+                if data.get("code") != 0:
+                    raise RuntimeError(
+                        f"tenant_access_token 获取失败: {data.get('msg')}"
+                    )
+                self._token = data["tenant_access_token"]
+                self._token_expire = time.time() + data.get("expire", 7200)
+                return self._token
 
     async def download_message_resource(
         self, message_id: str, file_key: str, resource_type: str
@@ -54,16 +53,15 @@ class FeishuAPI:
         url = f"{API_BASE}/im/v1/messages/{message_id}/resources/{file_key}"
         async with aiohttp.ClientSession(
             timeout=aiohttp.ClientTimeout(total=120)
-        ) as sess:
-            async with sess.get(
-                url, params={"type": resource_type}, headers={"Authorization": f"Bearer {token}"}
-            ) as resp:
-                if resp.status != 200:
-                    body = (await resp.text())[:200]
-                    print(f"[feishu] 资源下载失败 {resource_type} {file_key}: "
-                          f"HTTP {resp.status} {body}")
-                    return None
-                return await resp.read()
+        ) as sess, sess.get(
+            url, params={"type": resource_type}, headers={"Authorization": f"Bearer {token}"}
+        ) as resp:
+            if resp.status != 200:
+                body = (await resp.text())[:200]
+                print(f"[feishu] 资源下载失败 {resource_type} {file_key}: "
+                      f"HTTP {resp.status} {body}")
+                return None
+            return await resp.read()
 
     async def reply_text(self, message_id: str, text: str) -> None:
         """回复指定消息（文本）。超长自动截断（飞书单条上限约 150KB）。"""
@@ -74,15 +72,14 @@ class FeishuAPI:
         }
         async with aiohttp.ClientSession(
             timeout=aiohttp.ClientTimeout(total=30)
-        ) as sess:
-            async with sess.post(
-                f"{API_BASE}/im/v1/messages/{message_id}/reply",
-                headers={"Authorization": f"Bearer {token}"},
-                json=payload,
-            ) as resp:
-                data = await resp.json()
-                if data.get("code") != 0:
-                    print(f"[feishu] 回复失败: {data.get('msg')}")
+        ) as sess, sess.post(
+            f"{API_BASE}/im/v1/messages/{message_id}/reply",
+            headers={"Authorization": f"Bearer {token}"},
+            json=payload,
+        ) as resp:
+            data = await resp.json()
+            if data.get("code") != 0:
+                print(f"[feishu] 回复失败: {data.get('msg')}")
 
 
 def _json_dumps(obj: dict) -> str:

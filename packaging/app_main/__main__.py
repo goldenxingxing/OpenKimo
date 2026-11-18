@@ -14,6 +14,7 @@ Responsibilities:
 from __future__ import annotations
 
 import atexit
+import contextlib
 import logging
 import os
 import shlex
@@ -26,7 +27,8 @@ from pathlib import Path
 
 import rumps
 
-from . import dotenv_io, paths as paths_mod, runtime_repair, seed_branding, userenv
+from . import dotenv_io, runtime_repair, seed_branding, userenv
+from . import paths as paths_mod
 from .server import ServerState, UvicornSupervisor, request_config_reload
 
 log = logging.getLogger(__name__)
@@ -152,9 +154,9 @@ class OpenKimoApp(rumps.App):
         """
         try:
             from AppKit import (
+                NSAttributedString,
                 NSColor,
                 NSForegroundColorAttributeName,
-                NSAttributedString,
             )
         except Exception:
             self.status_item.title = text
@@ -197,10 +199,8 @@ class OpenKimoApp(rumps.App):
             log.debug("could not disable menu auto-enabling", exc_info=True)
 
         def _enable(item: rumps.MenuItem, on: bool) -> None:
-            try:
+            with contextlib.suppress(Exception):
                 item._menuitem.setEnabled_(bool(on))
-            except Exception:
-                pass
 
         if stopped:
             self.toggle_item.title = "Start Server"
@@ -458,7 +458,7 @@ class OpenKimoApp(rumps.App):
         ).start()
 
 
-def _install_shutdown_backstops(supervisor: "UvicornSupervisor") -> None:
+def _install_shutdown_backstops(supervisor: UvicornSupervisor) -> None:
     """Make the uvicorn child die with the menu-bar process on every exit path.
 
     The rumps Quit item routes through ``_on_quit``, but external quits —
@@ -585,10 +585,8 @@ def main() -> int:
     # launched from Finder/Launchpad (where stderr is discarded).
     logfile = p.logs / "menubar.log"
     handlers: list[logging.Handler] = [logging.StreamHandler()]
-    try:
+    with contextlib.suppress(Exception):
         handlers.append(logging.FileHandler(logfile, mode="a"))
-    except Exception:
-        pass
     logging.basicConfig(
         level=logging.INFO,
         format="%(asctime)s %(levelname)s %(name)s: %(message)s",

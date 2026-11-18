@@ -21,6 +21,7 @@ so the two stay easy to diff. The differences vs macOS are:
 from __future__ import annotations
 
 import atexit
+import contextlib
 import logging
 import os
 import signal
@@ -33,7 +34,8 @@ from pathlib import Path
 import pystray
 from PIL import Image
 
-from . import dotenv_io, paths as paths_mod, seed_branding, single_instance, userenv
+from . import dotenv_io, seed_branding, single_instance, userenv
+from . import paths as paths_mod
 from .server import (
     ServerState,
     UvicornSupervisor,
@@ -408,7 +410,7 @@ class OpenKimoApp:
         self.icon.stop()
 
 
-def _install_shutdown_backstops(supervisor: "UvicornSupervisor") -> None:
+def _install_shutdown_backstops(supervisor: UvicornSupervisor) -> None:
     """Make the uvicorn child die with the tray process on every exit path.
 
     The pystray Quit item routes through ``_on_quit``, but interpreter-level
@@ -440,10 +442,8 @@ def main() -> int:
     p = paths_mod.ensure_dirs()
     logfile = p.logs / "tray.log"
     handlers: list[logging.Handler] = [logging.StreamHandler()]
-    try:
+    with contextlib.suppress(Exception):
         handlers.append(logging.FileHandler(logfile, mode="a", encoding="utf-8"))
-    except Exception:
-        pass
     logging.basicConfig(
         level=logging.INFO,
         format="%(asctime)s %(levelname)s %(name)s: %(message)s",

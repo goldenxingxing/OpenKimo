@@ -20,6 +20,7 @@ pruned entry — env's ``LLM_DEFAULT_PROVIDER`` re-seeds it on the next merge.
 
 from __future__ import annotations
 
+import contextlib
 import os
 import re
 import tempfile
@@ -119,10 +120,8 @@ def prune(path: Path, keep_names: set[str], *, allow_empty: bool = False) -> Non
             os.fsync(f.fileno())
         os.replace(tmp, path)
     except Exception:
-        try:
+        with contextlib.suppress(OSError):
             os.unlink(tmp)
-        except OSError:
-            pass
         raise
 
 
@@ -206,10 +205,8 @@ def update_providers(path: Path, providers: list[dict[str, Any]]) -> None:
             os.fsync(f.fileno())
         os.replace(tmp, path)
     except Exception:
-        try:
+        with contextlib.suppress(OSError):
             os.unlink(tmp)
-        except OSError:
-            pass
         raise
 
 
@@ -313,10 +310,8 @@ def update_models(path: Path, models: list[dict[str, Any]]) -> None:
             os.fsync(f.fileno())
         os.replace(tmp, path)
     except Exception:
-        try:
+        with contextlib.suppress(OSError):
             os.unlink(tmp)
-        except OSError:
-            pass
         raise
 
 
@@ -363,10 +358,8 @@ def set_default_model(path: Path, default: str) -> None:
             os.fsync(f.fileno())
         os.replace(tmp, path)
     except Exception:
-        try:
+        with contextlib.suppress(OSError):
             os.unlink(tmp)
-        except OSError:
-            pass
         raise
 
 
@@ -441,10 +434,8 @@ def set_skipped_skill_dirs(path: Path, dirs: list[str]) -> None:
             os.fsync(f.fileno())
         os.replace(tmp, path)
     except Exception:
-        try:
+        with contextlib.suppress(OSError):
             os.unlink(tmp)
-        except OSError:
-            pass
         raise
 
 
@@ -526,10 +517,8 @@ def set_compaction_ratio(path: Path, ratio: float) -> None:
             os.fsync(f.fileno())
         os.replace(tmp, path)
     except Exception:
-        try:
+        with contextlib.suppress(OSError):
             os.unlink(tmp)
-        except OSError:
-            pass
         raise
 
 

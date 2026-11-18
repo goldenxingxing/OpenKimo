@@ -157,9 +157,7 @@ def seed_if_needed(p: AppPaths) -> None:
                 and current
                 and current != value
                 and _data_url_sha256(current) in legacy_asset_hashes
-            ):
-                to_write[key] = value
-            elif not current:
+            ) or not current:
                 to_write[key] = value
         if not to_write:
             return

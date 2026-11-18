@@ -54,11 +54,10 @@ _framework_site = RESOURCES / "runtimes" / "framework-framework-kimo" / "lib" / 
 if _framework_site.is_dir():
     sys.path.insert(0, str(_framework_site))
 
-from AppKit import NSApplication  # noqa: E402
-from Foundation import NSDate, NSRunLoop  # noqa: E402
-
 from app_main import settings_window  # noqa: E402
 from app_main.paths import AppPaths  # noqa: E402
+from AppKit import NSApplication  # noqa: E402
+from Foundation import NSDate, NSRunLoop  # noqa: E402
 
 
 def _make_paths() -> AppPaths:

@@ -794,12 +794,12 @@ def _patch_default_port(app_main_dir: Path, port: int) -> None:
     new = str(port)
     patches = {
         "server.py": [
-            'env.get("KIMO_WEB_PORT", "%s")' % old,
-            "return %s" % old,
-            "self._port = %s" % old,
+            f'env.get("KIMO_WEB_PORT", "{old}")',
+            f"return {old}",
+            f"self._port = {old}",
         ],
         "settings_window.py": [
-            'values.get("KIMO_WEB_PORT", "%s") or "%s"' % (old, old),
+            f'values.get("KIMO_WEB_PORT", "{old}") or "{old}"',
         ],
     }
     for name, literals in patches.items():

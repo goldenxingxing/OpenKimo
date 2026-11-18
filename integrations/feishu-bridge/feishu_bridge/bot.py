@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import time
 import traceback
 from pathlib import Path
@@ -96,10 +97,8 @@ class FeishuOpenKimoBridge:
     # ------------------------------------------------------------------ #
     async def _handle(self, open_id: str, message_id: str, message) -> None:
         if open_id in self._busy:
-            try:
+            with contextlib.suppress(Exception):
                 await self.api.reply_text(message_id, "上一条消息还在处理中，请稍候～")
-            except Exception:
-                pass
             return
         self._busy.add(open_id)
         try:
@@ -127,10 +126,8 @@ class FeishuOpenKimoBridge:
             return
 
         if self.cfg["show_thinking"]:
-            try:
+            with contextlib.suppress(Exception):
                 await self.api.reply_text(message_id, "🤔 正在思考中…")
-            except Exception:
-                pass
 
         session_id = self.sessions.get(open_id) or await self._create_and_map(open_id)
         if not session_id:

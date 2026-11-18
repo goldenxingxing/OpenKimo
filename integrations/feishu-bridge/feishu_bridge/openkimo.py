@@ -41,19 +41,18 @@ class OpenKimoClient:
         try:
             async with aiohttp.ClientSession(
                 timeout=aiohttp.ClientTimeout(total=30)
-            ) as sess:
-                async with sess.post(
-                    f"{self.base_url}/api/sessions/",
-                    json={"yolo": True},
-                    headers=self._headers(),
-                ) as resp:
-                    if resp.status != 200:
-                        return None
-                    data = await resp.json()
-                    sid = data.get("session_id") or data.get("id")
-                    if not sid and isinstance(data.get("kimi_cli_session"), dict):
-                        sid = data["kimi_cli_session"].get("id")
-                    return str(sid) if sid else None
+            ) as sess, sess.post(
+                f"{self.base_url}/api/sessions/",
+                json={"yolo": True},
+                headers=self._headers(),
+            ) as resp:
+                if resp.status != 200:
+                    return None
+                data = await resp.json()
+                sid = data.get("session_id") or data.get("id")
+                if not sid and isinstance(data.get("kimi_cli_session"), dict):
+                    sid = data["kimi_cli_session"].get("id")
+                return str(sid) if sid else None
         except Exception as e:
             print(f"[openkimo] create session failed: {e}")
             return None
@@ -70,43 +69,42 @@ class OpenKimoClient:
         turn_error: str | None = None
         async with aiohttp.ClientSession(
             timeout=aiohttp.ClientTimeout(total=self.timeout)
-        ) as sess:
-            async with sess.ws_connect(
-                self._ws_url(session_id), headers=self._headers(), heartbeat=30
-            ) as ws:
-                async for msg in ws:
-                    if msg.type == aiohttp.WSMsgType.TEXT:
-                        parsed = self._parse_event(msg.data)
-                        if parsed is None:
-                            # JSONRPC 错误响应（如 prompt 校验失败）：{"error": {...}}
-                            err = self._parse_error(msg.data)
-                            if err is not None:
-                                raise RuntimeError(f"OpenKimo 返回错误: {err}")
-                            continue
-                        etype, payload = parsed
-                        if not sent:
-                            if etype == HISTORY_COMPLETE:
-                                await ws.send_json({
-                                    "method": "prompt",
-                                    "id": prompt_id,
-                                    "params": {"user_input": user_input},
-                                })
-                                sent = True
-                            continue
-                        if etype == "ContentPart":
-                            pt = payload.get("type") if isinstance(payload, dict) else None
-                            if pt == "text":
-                                t = payload.get("text", "")
-                                if isinstance(t, str):
-                                    parts.append(t)
-                        elif etype == "TurnEnd":
-                            # TurnEnd.interrupt_reason: user_cancelled | error | max_steps | None
-                            reason = payload.get("interrupt_reason")
-                            if reason == "error":
-                                turn_error = "会话执行出错（interrupt_reason=error）"
-                            break
-                    elif msg.type in (aiohttp.WSMsgType.CLOSED, aiohttp.WSMsgType.ERROR):
+        ) as sess, sess.ws_connect(
+            self._ws_url(session_id), headers=self._headers(), heartbeat=30
+        ) as ws:
+            async for msg in ws:
+                if msg.type == aiohttp.WSMsgType.TEXT:
+                    parsed = self._parse_event(msg.data)
+                    if parsed is None:
+                        # JSONRPC 错误响应（如 prompt 校验失败）：{"error": {...}}
+                        err = self._parse_error(msg.data)
+                        if err is not None:
+                            raise RuntimeError(f"OpenKimo 返回错误: {err}")
+                        continue
+                    etype, payload = parsed
+                    if not sent:
+                        if etype == HISTORY_COMPLETE:
+                            await ws.send_json({
+                                "method": "prompt",
+                                "id": prompt_id,
+                                "params": {"user_input": user_input},
+                            })
+                            sent = True
+                        continue
+                    if etype == "ContentPart":
+                        pt = payload.get("type") if isinstance(payload, dict) else None
+                        if pt == "text":
+                            t = payload.get("text", "")
+                            if isinstance(t, str):
+                                parts.append(t)
+                    elif etype == "TurnEnd":
+                        # TurnEnd.interrupt_reason: user_cancelled | error | max_steps | None
+                        reason = payload.get("interrupt_reason")
+                        if reason == "error":
+                            turn_error = "会话执行出错（interrupt_reason=error）"
                         break
+                elif msg.type in (aiohttp.WSMsgType.CLOSED, aiohttp.WSMsgType.ERROR):
+                    break
         if not sent:
             raise RuntimeError("会话流在 history_complete 前关闭，prompt 未发送")
         text = "".join(parts).strip()

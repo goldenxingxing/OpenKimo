@@ -58,6 +58,7 @@ from __future__ import annotations
 
 import argparse
 import base64
+import contextlib
 import datetime as dt
 import hashlib
 import json
@@ -1062,10 +1063,8 @@ def _du(path: Path) -> str:
         n = 0
         for p in path.rglob("*"):
             if p.is_file():
-                try:
+                with contextlib.suppress(OSError):
                     n += p.stat().st_size
-                except OSError:
-                    pass
     units = ("B", "KiB", "MiB", "GiB")
     i = 0
     f = float(n)

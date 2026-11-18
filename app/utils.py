@@ -1,7 +1,6 @@
 import logging
 import re
 import subprocess
-from typing import List, Optional, Tuple
 
 logger = logging.getLogger(__name__)
 
@@ -13,7 +12,7 @@ DEFAULT_SCREEN_SIZE = (1920, 1080)
 _CURRENT_RE = re.compile(r"current\s+(\d+)\s*x\s*(\d+)")
 
 
-def get_screensize() -> Tuple[int, int]:
+def get_screensize() -> tuple[int, int]:
     """Screen size of the primary display, or DEFAULT_SCREEN_SIZE.
 
     Never raises. It used to shell out to `xrandr | grep -oP ... | tr -d ' '`,
@@ -55,7 +54,7 @@ def get_screensize() -> Tuple[int, int]:
 
 
 def run_command(
-    command: List[str], timeout: int = 30, pipe_output: bool = True
+    command: list[str], timeout: int = 30, pipe_output: bool = True
 ) -> subprocess.CompletedProcess[str]:
     """Run a shell command and return the output, error and exit code."""
     result = subprocess.run(
@@ -69,7 +68,7 @@ def run_command(
 
 
 def run_command_background(
-    command: List[str], log_path: Optional[str] = None
+    command: list[str], log_path: str | None = None
 ) -> subprocess.Popen:
     """Start a command in the background and return the process.
 
