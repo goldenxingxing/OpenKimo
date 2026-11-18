@@ -467,20 +467,22 @@ def test_replay_streams_wire_history(tmp_path) -> None:
         assert resp.get("result", {}).get("status") == "finished"
         assert resp.get("result", {}).get("requests") == 0
         # The server-counted total includes wiki lifecycle notifications whose
-        # presence is host-dependent; pin the behavioral event count instead.
-        behavioral = [
+        # presence is host-dependent; pin the behavioral event count and the
+        # accounting identity instead.
+        wiki_noise = [
             m
             for m in messages
-            if not (
-                m.get("params", {}).get("type") == "Notification"
-                and str((m.get("params", {}).get("payload") or {}).get("type", "")).startswith(
-                    "wiki."
-                )
+            if m.get("params", {}).get("type") == "Notification"
+            and str((m.get("params", {}).get("payload") or {}).get("type", "")).startswith(
+                "wiki."
             )
         ]
+        behavioral = [m for m in messages if m not in wiki_noise]
         assert resp.get("result") == snapshot(
             {"status": "finished", "events": len(behavioral), "requests": 0}
         )
+        # Every stored event must arrive in the replay stream.
+        assert resp.get("result", {}).get("events") == len(messages)
         assert summarize_messages(messages) == snapshot(
             [
                 {

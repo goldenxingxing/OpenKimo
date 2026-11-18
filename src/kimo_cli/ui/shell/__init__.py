@@ -538,9 +538,16 @@ class Shell:
             shell_ok = True
             bg_auto_failures = 0
             deferred_bg_trigger = False
+            deferred_for_approval = False
             try:
                 while True:
-                    if deferred_bg_trigger and not self._should_defer_background_auto_trigger(
+                    if deferred_bg_trigger and deferred_for_approval:
+                        # Approval-related deferral: do not re-check on a timer
+                        # (the grace window can expire while the user is still
+                        # reading). Wait for an actual user event; the pending
+                        # notification survives until the user has spoken.
+                        result = await idle_events.get()
+                    elif deferred_bg_trigger and not self._should_defer_background_auto_trigger(
                         prompt_session, self._approval_activity_in_flight()
                     ):
                         result = None
@@ -558,13 +565,16 @@ class Shell:
                             result = await bg_watcher.wait_for_next(idle_events)
 
                     if result is None:
+                        approval_active = self._approval_activity_in_flight()
                         if self._should_defer_background_auto_trigger(
-                            prompt_session, self._approval_activity_in_flight()
+                            prompt_session, approval_active
                         ):
                             deferred_bg_trigger = True
+                            deferred_for_approval = approval_active
                             resume_prompt.set()
                             continue
                         deferred_bg_trigger = False
+                        deferred_for_approval = False
                         logger.info("Background task completed while idle, triggering agent")
                         resume_prompt.set()
                         ok = await self.run_soul_command(
@@ -618,6 +628,7 @@ class Shell:
                     assert user_input is not None
                     bg_auto_failures = 0
                     deferred_bg_trigger = False
+                    deferred_for_approval = False
                     if not user_input:
                         logger.debug("Got empty input, skipping")
                         resume_prompt.set()
