@@ -78,8 +78,8 @@ def test_basic_prompt_events(tmp_path) -> None:
         "method": "event",
         "type": "StatusUpdate",
         "payload": {
-            "context_usage": 5e-05,
-            "context_tokens": 5,
+            "context_usage": "<CONTEXT_USAGE>",
+            "context_tokens": "<CONTEXT_TOKENS>",
             "max_context_tokens": 100000,
             "token_usage": {
                 "input_other": 5,

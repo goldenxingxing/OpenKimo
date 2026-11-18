@@ -484,6 +484,14 @@ def summarize_messages(
             "type": params.get("type"),
             "payload": normalize_value(params.get("payload"), replacements=replacements),
         }
+        # Token counts depend on the tokenizer available on the host (and its
+        # cache state), so the same transcript yields 86 tokens on a CI runner
+        # and 100 locally. The protocol shape is what these tests pin, not the
+        # tokenizer internals.
+        if entry["type"] == "StatusUpdate" and isinstance(entry["payload"], dict):
+            for key in ("context_tokens", "context_usage"):
+                if entry["payload"].get(key) is not None:
+                    entry["payload"][key] = f"<{key.upper()}>"
         summary.append(entry)
     return _normalize_message_order(summary)
 

@@ -533,7 +533,7 @@ class Shell:
             try:
                 while True:
                     if deferred_bg_trigger and not self._should_defer_background_auto_trigger(
-                        prompt_session, self._approval_modal is not None
+                        prompt_session, self._approval_activity_in_flight()
                     ):
                         result = None
                     elif deferred_bg_trigger:
@@ -551,7 +551,7 @@ class Shell:
 
                     if result is None:
                         if self._should_defer_background_auto_trigger(
-                            prompt_session, self._approval_modal is not None
+                            prompt_session, self._approval_activity_in_flight()
                         ):
                             deferred_bg_trigger = True
                             resume_prompt.set()
@@ -1041,6 +1041,19 @@ class Shell:
             self._maybe_present_pending_approvals()
             remove_sigint()
         return False
+
+    def _approval_activity_in_flight(self) -> bool:
+        """True while an approval request is queued, current, or modaling.
+
+        The gap between a request arriving and the modal opening is exactly
+        where a background-completion follow-up used to slip in and steal the
+        flow, swallowing input typed for the modal.
+        """
+        return (
+            self._approval_modal is not None
+            or self._current_prompt_approval_request is not None
+            or bool(self._pending_approval_requests)
+        )
 
     @staticmethod
     def _should_defer_background_auto_trigger(

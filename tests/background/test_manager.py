@@ -856,7 +856,7 @@ def test_recover_marks_stale_kill_requested_task_as_killed(runtime):
         spec.id,
         TaskRuntime(
             status="running",
-            worker_pid=333,
+            worker_pid=2_000_002,
             heartbeat_at=time.time() - 60,
             updated_at=time.time() - 60,
         ),
@@ -1019,7 +1019,7 @@ def test_reconcile_recovers_and_publishes_lost_notification(runtime):
         spec.id,
         TaskRuntime(
             status="running",
-            worker_pid=333,
+            worker_pid=2_000_002,
             heartbeat_at=time.time() - 60,
             updated_at=time.time() - 60,
         ),

@@ -213,8 +213,8 @@ def test_clear_context_rotates(tmp_path) -> None:
         "method": "event",
         "type": "StatusUpdate",
         "payload": {
-            "context_usage": 0.0,
-            "context_tokens": 0,
+            "context_usage": "<CONTEXT_USAGE>",
+            "context_tokens": "<CONTEXT_TOKENS>",
             "max_context_tokens": 100000,
             "token_usage": None,
             "message_id": None,
@@ -301,8 +301,8 @@ def test_manual_compact(tmp_path) -> None:
         "method": "event",
         "type": "StatusUpdate",
         "payload": {
-            "context_usage": 0.001,
-            "context_tokens": 100,
+            "context_usage": "<CONTEXT_USAGE>",
+            "context_tokens": "<CONTEXT_TOKENS>",
             "max_context_tokens": 100000,
             "token_usage": None,
             "message_id": None,
