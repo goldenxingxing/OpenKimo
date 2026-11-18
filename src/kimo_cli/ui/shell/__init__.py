@@ -526,9 +526,16 @@ class Shell:
                 self._route_prompt_events(prompt_session, idle_events, resume_prompt)
             )
             background_autotrigger_armed = False
+            # The interactive shell and the wire server gate the same feature:
+            # a completed background task may auto-follow-up only when the
+            # user enabled auto_followup.
+            background_autotrigger_enabled = (
+                isinstance(self.soul, KimoSoul)
+                and self.soul.runtime.config.background.auto_followup
+            )
 
             def _can_auto_trigger_pending() -> bool:
-                return background_autotrigger_armed
+                return background_autotrigger_enabled and background_autotrigger_armed
 
             bg_watcher = _BackgroundCompletionWatcher(
                 self.soul,

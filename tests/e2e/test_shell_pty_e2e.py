@@ -722,7 +722,14 @@ def test_shell_approval_reject_and_recover(tmp_path: Path) -> None:
         ),
         "text: Recovery turn completed.",
     ]
-    config_path = write_scripted_config(tmp_path, scripts)
+    # The background-completion auto follow-up races the modal choreography on
+    # loaded CI runners and is incidental to what this test pins (the drafted
+    # buffer survives the approval modal) — disable it for determinism.
+    config_path = write_scripted_config(
+        tmp_path,
+        scripts,
+        config_overrides={"background": {"auto_followup": False}},
+    )
     work_dir = make_work_dir(tmp_path)
     home_dir = make_home_dir(tmp_path)
     shell = start_shell_pty(
