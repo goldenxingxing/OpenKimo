@@ -62,42 +62,42 @@ def test_basic_prompt_events(tmp_path) -> None:
         )
         resp, messages = collect_until_response(wire, "prompt-1")
         assert resp.get("result", {}).get("status") == "finished"
-        assert summarize_messages(messages) == snapshot(
-            [
-                {
-                    "method": "event",
-                    "type": "TurnBegin",
-                    "payload": {"user_input": "hi", "todos": None},
-                },
-                {"method": "event", "type": "StepBegin", "payload": {"n": 1}},
-                {
-                    "method": "event",
-                    "type": "ContentPart",
-                    "payload": {"type": "text", "text": "Hello wire"},
-                },
-                {
-                    "method": "event",
-                    "type": "StatusUpdate",
-                    "payload": {
-                        "context_usage": 5e-05,
-                        "context_tokens": 5,
-                        "max_context_tokens": 100000,
-                        "token_usage": {
-                            "input_other": 5,
-                            "output": 2,
-                            "input_cache_read": 0,
-                            "input_cache_creation": 0,
-                        },
-                        "message_id": "scripted-1",
-                        "plan_mode": False,
-                        "yolo": None,
-                        "mcp_status": None,
-                        "waiting_on_background": None,
-                    },
-                },
-                {"method": "event", "type": "TurnEnd", "payload": {}},
-            ]
-        )
+        assert summarize_messages(messages) == snapshot([
+    {
+        "method": "event",
+        "type": "TurnBegin",
+        "payload": {"user_input": "hi", "todos": None},
+    },
+    {"method": "event", "type": "StepBegin", "payload": {"n": 1}},
+    {
+        "method": "event",
+        "type": "ContentPart",
+        "payload": {"type": "text", "text": "Hello wire"},
+    },
+    {
+        "method": "event",
+        "type": "StatusUpdate",
+        "payload": {
+            "context_usage": 5e-05,
+            "context_tokens": 5,
+            "max_context_tokens": 100000,
+            "token_usage": {
+                "input_other": 5,
+                "output": 2,
+                "input_cache_read": 0,
+                "input_cache_creation": 0,
+                "reasoning_output": None,
+            },
+            "message_id": "scripted-1",
+            "plan_mode": False,
+            "thinking_suppressed": False,
+            "yolo": None,
+            "mcp_status": None,
+            "waiting_on_background": None,
+        },
+    },
+    {"method": "event", "type": "TurnEnd", "payload": {"interrupt_reason": None}},
+])
     finally:
         wire.close()
 
@@ -259,76 +259,72 @@ def test_max_steps_reached(tmp_path) -> None:
         )
         resp, messages = collect_until_response(wire, "prompt-1")
         assert resp.get("result", {}).get("status") == "max_steps_reached"
-        assert normalize_response(resp) == snapshot(
-            {"result": {"status": "max_steps_reached", "steps": 1}}
-        )
-        assert summarize_messages(messages) == snapshot(
-            [
-                {
-                    "method": "event",
-                    "type": "TurnBegin",
-                    "payload": {"user_input": "run", "todos": None},
-                },
-                {"method": "event", "type": "StepBegin", "payload": {"n": 1}},
-                {
-                    "method": "event",
-                    "type": "ContentPart",
-                    "payload": {"type": "text", "text": "start"},
-                },
-                {
-                    "method": "event",
-                    "type": "ToolCall",
-                    "payload": {
-                        "type": "function",
-                        "id": "tc-1",
-                        "function": {
-                            "name": "SetTodoList",
-                            "arguments": '{"todos": [{"title": "x", "status": "pending"}]}',
-                        },
-                        "extras": None,
-                    },
-                },
-                {
-                    "method": "event",
-                    "type": "StatusUpdate",
-                    "payload": {
-                        "context_usage": None,
-                        "context_tokens": None,
-                        "max_context_tokens": None,
-                        "token_usage": None,
-                        "message_id": None,
-                        "plan_mode": False,
-                        "yolo": None,
-                        "mcp_status": None,
-                        "waiting_on_background": None,
-                    },
-                },
-                {
-                    "method": "event",
-                    "type": "ToolResult",
-                    "payload": {
-                        "tool_call_id": "tc-1",
-                        "return_value": {
-                            "is_error": False,
-                            "output": "Todo list updated",
-                            "message": "Todo list updated",
-                            "display": [
-                                {
-                                    "type": "todo",
-                                    "items": [{"title": "x", "status": "pending"}],
-                                }
-                            ],
-                            "extras": None,
-                        },
-                    },
-                },
-                {
-                    "method": "event",
-                    "type": "TurnEnd",
-                    "payload": {},
-                },
-            ]
-        )
+        assert normalize_response(resp) == snapshot({"result": {"status": "max_steps_reached", "steps": 1}})
+        assert summarize_messages(messages) == snapshot([
+    {
+        "method": "event",
+        "type": "TurnBegin",
+        "payload": {"user_input": "run", "todos": None},
+    },
+    {"method": "event", "type": "StepBegin", "payload": {"n": 1}},
+    {
+        "method": "event",
+        "type": "ContentPart",
+        "payload": {"type": "text", "text": "start"},
+    },
+    {
+        "method": "event",
+        "type": "ToolCall",
+        "payload": {
+            "type": "function",
+            "id": "tc-1",
+            "function": {
+                "name": "SetTodoList",
+                "arguments": '{"todos": [{"title": "x", "status": "pending"}]}',
+            },
+            "extras": None,
+        },
+    },
+    {
+        "method": "event",
+        "type": "StatusUpdate",
+        "payload": {
+            "context_usage": None,
+            "context_tokens": None,
+            "max_context_tokens": None,
+            "token_usage": None,
+            "message_id": None,
+            "plan_mode": False,
+            "thinking_suppressed": False,
+            "yolo": None,
+            "mcp_status": None,
+            "waiting_on_background": None,
+        },
+    },
+    {
+        "method": "event",
+        "type": "ToolResult",
+        "payload": {
+            "tool_call_id": "tc-1",
+            "return_value": {
+                "is_error": False,
+                "output": "Todo list updated",
+                "message": "Todo list updated",
+                "display": [
+                    {"type": "todo", "items": [{"title": "x", "status": "pending"}]}
+                ],
+                "extras": None,
+            },
+        },
+    },
+    {"method": "event", "type": "StepBegin", "payload": {"n": 2}},
+    {"method": "event", "type": "StepInterrupted", "payload": {}},
+    {
+        "method": "event",
+        "type": "TurnEnd",
+        "payload": {"interrupt_reason": "max_steps"},
+    },
+])
     finally:
         wire.close()
 
@@ -367,27 +363,27 @@ def test_status_update_fields(tmp_path) -> None:
         payload = status.get("payload")
         assert isinstance(payload, dict)
         assert isinstance(payload.get("token_usage"), dict)
-        assert status == snapshot(
-            {
-                "type": "StatusUpdate",
-                "payload": {
-                    "context_usage": 5e-05,
-                    "context_tokens": 5,
-                    "max_context_tokens": 100000,
-                    "token_usage": {
-                        "input_other": 5,
-                        "output": 2,
-                        "input_cache_read": 0,
-                        "input_cache_creation": 0,
-                    },
-                    "message_id": "scripted-1",
-                    "plan_mode": False,
-                    "yolo": None,
-                    "mcp_status": None,
-                    "waiting_on_background": None,
-                },
-            }
-        )
+        assert status == snapshot({
+    "type": "StatusUpdate",
+    "payload": {
+        "context_usage": 5e-05,
+        "context_tokens": 5,
+        "max_context_tokens": 100000,
+        "token_usage": {
+            "input_other": 5,
+            "output": 2,
+            "input_cache_read": 0,
+            "input_cache_creation": 0,
+            "reasoning_output": None,
+        },
+        "message_id": "scripted-1",
+        "plan_mode": False,
+        "thinking_suppressed": False,
+        "yolo": None,
+        "mcp_status": None,
+        "waiting_on_background": None,
+    },
+})
     finally:
         wire.close()
 
@@ -433,119 +429,114 @@ def test_concurrent_prompt_error(tmp_path) -> None:
             }
         )
         prompt2_resp = normalize_response(read_response(wire, "prompt-2"))
-        assert prompt2_resp == snapshot(
-            {
-                "error": {
-                    "code": -32000,
-                    "message": "An agent turn is already in progress",
-                    "data": None,
-                }
-            }
-        )
+        assert prompt2_resp == snapshot({
+    "error": {
+        "code": -32000,
+        "message": "An agent turn is already in progress",
+        "data": None,
+    }
+})
 
         wire.send_json(build_approval_response(request_msg, "approve"))
         prompt1_resp, messages_after = collect_until_response(wire, "prompt-1")
         assert prompt1_resp.get("result", {}).get("status") == "finished"
-        assert summarize_messages(messages + messages_after) == snapshot(
-            [
-                {
-                    "method": "event",
-                    "type": "TurnBegin",
-                    "payload": {"user_input": "run", "todos": None},
-                },
-                {"method": "event", "type": "StepBegin", "payload": {"n": 1}},
-                {
-                    "method": "event",
-                    "type": "ContentPart",
-                    "payload": {"type": "text", "text": "step1"},
-                },
-                {
-                    "method": "event",
-                    "type": "ToolCall",
-                    "payload": {
-                        "type": "function",
-                        "id": "tc-1",
-                        "function": {
-                            "name": "Shell",
-                            "arguments": '{"command": "echo hi"}',
-                        },
-                        "extras": None,
-                    },
-                },
-                {
-                    "method": "event",
-                    "type": "StatusUpdate",
-                    "payload": {
-                        "context_usage": None,
-                        "context_tokens": None,
-                        "max_context_tokens": None,
-                        "token_usage": None,
-                        "message_id": None,
-                        "plan_mode": False,
-                        "yolo": None,
-                        "mcp_status": None,
-                        "waiting_on_background": None,
-                    },
-                },
-                {
-                    "method": "request",
-                    "type": "ApprovalRequest",
-                    "payload": {
-                        "id": "<uuid>",
-                        "tool_call_id": "tc-1",
-                        "sender": "Shell",
-                        "action": "run command",
-                        "description": "Run command `echo hi`",
-                        "source_kind": "foreground_turn",
-                        "source_id": "<uuid>",
-                        "agent_id": None,
-                        "subagent_type": None,
-                        "source_description": None,
-                        "display": [{"type": "shell", "language": "bash", "command": "echo hi"}],
-                    },
-                },
-                {
-                    "method": "event",
-                    "type": "ApprovalResponse",
-                    "payload": {"request_id": "<uuid>", "response": "approve", "feedback": ""},
-                },
-                {
-                    "method": "event",
-                    "type": "ToolResult",
-                    "payload": {
-                        "tool_call_id": "tc-1",
-                        "return_value": {
-                            "is_error": False,
-                            "output": "hi\n",
-                            "message": "Command executed successfully.",
-                            "display": [],
-                            "extras": None,
-                        },
-                    },
-                },
-                {"method": "event", "type": "StepBegin", "payload": {"n": 2}},
-                {
-                    "method": "event",
-                    "type": "ContentPart",
-                    "payload": {"type": "text", "text": "done"},
-                },
-                {
-                    "method": "event",
-                    "type": "StatusUpdate",
-                    "payload": {
-                        "context_usage": None,
-                        "context_tokens": None,
-                        "max_context_tokens": None,
-                        "token_usage": None,
-                        "message_id": None,
-                        "plan_mode": False,
-                        "yolo": None,
-                        "mcp_status": None,
-                        "waiting_on_background": None,
-                    },
-                },
-                {"method": "event", "type": "TurnEnd", "payload": {}},
-            ]
-        )
+        assert summarize_messages(messages + messages_after) == snapshot([
+    {
+        "method": "event",
+        "type": "TurnBegin",
+        "payload": {"user_input": "run", "todos": None},
+    },
+    {"method": "event", "type": "StepBegin", "payload": {"n": 1}},
+    {
+        "method": "event",
+        "type": "ContentPart",
+        "payload": {"type": "text", "text": "step1"},
+    },
+    {
+        "method": "event",
+        "type": "ToolCall",
+        "payload": {
+            "type": "function",
+            "id": "tc-1",
+            "function": {"name": "Shell", "arguments": '{"command": "echo hi"}'},
+            "extras": None,
+        },
+    },
+    {
+        "method": "event",
+        "type": "StatusUpdate",
+        "payload": {
+            "context_usage": None,
+            "context_tokens": None,
+            "max_context_tokens": None,
+            "token_usage": None,
+            "message_id": None,
+            "plan_mode": False,
+            "thinking_suppressed": False,
+            "yolo": None,
+            "mcp_status": None,
+            "waiting_on_background": None,
+        },
+    },
+    {
+        "method": "request",
+        "type": "ApprovalRequest",
+        "payload": {
+            "id": "<uuid>",
+            "tool_call_id": "tc-1",
+            "sender": "Shell",
+            "action": "run command",
+            "description": "Run command `echo hi`",
+            "source_kind": "foreground_turn",
+            "source_id": "<uuid>",
+            "agent_id": None,
+            "subagent_type": None,
+            "source_description": None,
+            "display": [{"type": "shell", "language": "bash", "command": "echo hi"}],
+        },
+    },
+    {
+        "method": "event",
+        "type": "ApprovalResponse",
+        "payload": {"request_id": "<uuid>", "response": "approve", "feedback": ""},
+    },
+    {
+        "method": "event",
+        "type": "ToolResult",
+        "payload": {
+            "tool_call_id": "tc-1",
+            "return_value": {
+                "is_error": False,
+                "output": "hi\n",
+                "message": "Command executed successfully.",
+                "display": [],
+                "extras": None,
+            },
+        },
+    },
+    {"method": "event", "type": "StepBegin", "payload": {"n": 2}},
+    {
+        "method": "event",
+        "type": "ContentPart",
+        "payload": {"type": "text", "text": "done"},
+    },
+    {
+        "method": "event",
+        "type": "StatusUpdate",
+        "payload": {
+            "context_usage": None,
+            "context_tokens": None,
+            "max_context_tokens": None,
+            "token_usage": None,
+            "message_id": None,
+            "plan_mode": False,
+            "thinking_suppressed": False,
+            "yolo": None,
+            "mcp_status": None,
+            "waiting_on_background": None,
+        },
+    },
+    {"method": "event", "type": "TurnEnd", "payload": {"interrupt_reason": None}},
+])
     finally:
         wire.close()

@@ -90,104 +90,104 @@ def test_shell_approval_approve(tmp_path) -> None:
             request_handler=lambda msg: build_approval_response(msg, "approve"),
         )
         assert resp.get("result", {}).get("status") == "finished"
-        assert summarize_messages(messages) == snapshot(
-            [
-                {
-                    "method": "event",
-                    "type": "TurnBegin",
-                    "payload": {"user_input": "run shell", "todos": None},
-                },
-                {"method": "event", "type": "StepBegin", "payload": {"n": 1}},
-                {
-                    "method": "event",
-                    "type": "ContentPart",
-                    "payload": {"type": "text", "text": "step1"},
-                },
-                {
-                    "method": "event",
-                    "type": "ToolCall",
-                    "payload": {
-                        "type": "function",
-                        "id": "tc-1",
-                        "function": {"name": "Shell", "arguments": '{"command": "echo ok"}'},
-                        "extras": None,
-                    },
-                },
-                {
-                    "method": "event",
-                    "type": "StatusUpdate",
-                    "payload": {
-                        "context_usage": None,
-                        "context_tokens": None,
-                        "max_context_tokens": None,
-                        "token_usage": None,
-                        "message_id": None,
-                        "plan_mode": False,
-                        "yolo": None,
-                        "mcp_status": None,
-                        "waiting_on_background": None,
-                    },
-                },
-                {
-                    "method": "request",
-                    "type": "ApprovalRequest",
-                    "payload": {
-                        "id": "<uuid>",
-                        "tool_call_id": "tc-1",
-                        "sender": "Shell",
-                        "action": "run command",
-                        "description": "Run command `echo ok`",
-                        "source_kind": "foreground_turn",
-                        "source_id": "<uuid>",
-                        "agent_id": None,
-                        "subagent_type": None,
-                        "source_description": None,
-                        "display": [{"type": "shell", "language": "bash", "command": "echo ok"}],
-                    },
-                },
-                {
-                    "method": "event",
-                    "type": "ApprovalResponse",
-                    "payload": {"request_id": "<uuid>", "response": "approve", "feedback": ""},
-                },
-                {
-                    "method": "event",
-                    "type": "ToolResult",
-                    "payload": {
-                        "tool_call_id": "tc-1",
-                        "return_value": {
-                            "is_error": False,
-                            "output": "ok\n",
-                            "message": "Command executed successfully.",
-                            "display": [],
-                            "extras": None,
-                        },
-                    },
-                },
-                {"method": "event", "type": "StepBegin", "payload": {"n": 2}},
-                {
-                    "method": "event",
-                    "type": "ContentPart",
-                    "payload": {"type": "text", "text": "done"},
-                },
-                {
-                    "method": "event",
-                    "type": "StatusUpdate",
-                    "payload": {
-                        "context_usage": None,
-                        "context_tokens": None,
-                        "max_context_tokens": None,
-                        "token_usage": None,
-                        "message_id": None,
-                        "plan_mode": False,
-                        "yolo": None,
-                        "mcp_status": None,
-                        "waiting_on_background": None,
-                    },
-                },
-                {"method": "event", "type": "TurnEnd", "payload": {}},
-            ]
-        )
+        assert summarize_messages(messages) == snapshot([
+    {
+        "method": "event",
+        "type": "TurnBegin",
+        "payload": {"user_input": "run shell", "todos": None},
+    },
+    {"method": "event", "type": "StepBegin", "payload": {"n": 1}},
+    {
+        "method": "event",
+        "type": "ContentPart",
+        "payload": {"type": "text", "text": "step1"},
+    },
+    {
+        "method": "event",
+        "type": "ToolCall",
+        "payload": {
+            "type": "function",
+            "id": "tc-1",
+            "function": {"name": "Shell", "arguments": '{"command": "echo ok"}'},
+            "extras": None,
+        },
+    },
+    {
+        "method": "event",
+        "type": "StatusUpdate",
+        "payload": {
+            "context_usage": None,
+            "context_tokens": None,
+            "max_context_tokens": None,
+            "token_usage": None,
+            "message_id": None,
+            "plan_mode": False,
+            "thinking_suppressed": False,
+            "yolo": None,
+            "mcp_status": None,
+            "waiting_on_background": None,
+        },
+    },
+    {
+        "method": "request",
+        "type": "ApprovalRequest",
+        "payload": {
+            "id": "<uuid>",
+            "tool_call_id": "tc-1",
+            "sender": "Shell",
+            "action": "run command",
+            "description": "Run command `echo ok`",
+            "source_kind": "foreground_turn",
+            "source_id": "<uuid>",
+            "agent_id": None,
+            "subagent_type": None,
+            "source_description": None,
+            "display": [{"type": "shell", "language": "bash", "command": "echo ok"}],
+        },
+    },
+    {
+        "method": "event",
+        "type": "ApprovalResponse",
+        "payload": {"request_id": "<uuid>", "response": "approve", "feedback": ""},
+    },
+    {
+        "method": "event",
+        "type": "ToolResult",
+        "payload": {
+            "tool_call_id": "tc-1",
+            "return_value": {
+                "is_error": False,
+                "output": "ok\n",
+                "message": "Command executed successfully.",
+                "display": [],
+                "extras": None,
+            },
+        },
+    },
+    {"method": "event", "type": "StepBegin", "payload": {"n": 2}},
+    {
+        "method": "event",
+        "type": "ContentPart",
+        "payload": {"type": "text", "text": "done"},
+    },
+    {
+        "method": "event",
+        "type": "StatusUpdate",
+        "payload": {
+            "context_usage": None,
+            "context_tokens": None,
+            "max_context_tokens": None,
+            "token_usage": None,
+            "message_id": None,
+            "plan_mode": False,
+            "thinking_suppressed": False,
+            "yolo": None,
+            "mcp_status": None,
+            "waiting_on_background": None,
+        },
+    },
+    {"method": "event", "type": "TurnEnd", "payload": {"interrupt_reason": None}},
+])
     finally:
         wire.close()
 
@@ -229,83 +229,82 @@ def test_shell_approval_reject(tmp_path) -> None:
             request_handler=lambda msg: build_approval_response(msg, "reject"),
         )
         assert resp.get("result", {}).get("status") == "finished"
-        assert summarize_messages(messages) == snapshot(
-            [
-                {
-                    "method": "event",
-                    "type": "TurnBegin",
-                    "payload": {"user_input": "run shell", "todos": None},
-                },
-                {"method": "event", "type": "StepBegin", "payload": {"n": 1}},
-                {
-                    "method": "event",
-                    "type": "ContentPart",
-                    "payload": {"type": "text", "text": "step1"},
-                },
-                {
-                    "method": "event",
-                    "type": "ToolCall",
-                    "payload": {
-                        "type": "function",
-                        "id": "tc-1",
-                        "function": {"name": "Shell", "arguments": '{"command": "echo ok"}'},
-                        "extras": None,
-                    },
-                },
-                {
-                    "method": "event",
-                    "type": "StatusUpdate",
-                    "payload": {
-                        "context_usage": None,
-                        "context_tokens": None,
-                        "max_context_tokens": None,
-                        "token_usage": None,
-                        "message_id": None,
-                        "plan_mode": False,
-                        "yolo": None,
-                        "mcp_status": None,
-                        "waiting_on_background": None,
-                    },
-                },
-                {
-                    "method": "request",
-                    "type": "ApprovalRequest",
-                    "payload": {
-                        "id": "<uuid>",
-                        "tool_call_id": "tc-1",
-                        "sender": "Shell",
-                        "action": "run command",
-                        "description": "Run command `echo ok`",
-                        "source_kind": "foreground_turn",
-                        "source_id": "<uuid>",
-                        "agent_id": None,
-                        "subagent_type": None,
-                        "source_description": None,
-                        "display": [{"type": "shell", "language": "bash", "command": "echo ok"}],
-                    },
-                },
-                {
-                    "method": "event",
-                    "type": "ApprovalResponse",
-                    "payload": {"request_id": "<uuid>", "response": "reject", "feedback": ""},
-                },
-                {
-                    "method": "event",
-                    "type": "ToolResult",
-                    "payload": {
-                        "tool_call_id": "tc-1",
-                        "return_value": {
-                            "is_error": True,
-                            "output": "",
-                            "message": "The tool call is rejected by the user. Stop what you are doing and wait for the user to tell you how to proceed.",
-                            "display": [{"type": "brief", "text": "Rejected by user"}],
-                            "extras": None,
-                        },
-                    },
-                },
-                {"method": "event", "type": "TurnEnd", "payload": {}},
-            ]
-        )
+        assert summarize_messages(messages) == snapshot([
+    {
+        "method": "event",
+        "type": "TurnBegin",
+        "payload": {"user_input": "run shell", "todos": None},
+    },
+    {"method": "event", "type": "StepBegin", "payload": {"n": 1}},
+    {
+        "method": "event",
+        "type": "ContentPart",
+        "payload": {"type": "text", "text": "step1"},
+    },
+    {
+        "method": "event",
+        "type": "ToolCall",
+        "payload": {
+            "type": "function",
+            "id": "tc-1",
+            "function": {"name": "Shell", "arguments": '{"command": "echo ok"}'},
+            "extras": None,
+        },
+    },
+    {
+        "method": "event",
+        "type": "StatusUpdate",
+        "payload": {
+            "context_usage": None,
+            "context_tokens": None,
+            "max_context_tokens": None,
+            "token_usage": None,
+            "message_id": None,
+            "plan_mode": False,
+            "thinking_suppressed": False,
+            "yolo": None,
+            "mcp_status": None,
+            "waiting_on_background": None,
+        },
+    },
+    {
+        "method": "request",
+        "type": "ApprovalRequest",
+        "payload": {
+            "id": "<uuid>",
+            "tool_call_id": "tc-1",
+            "sender": "Shell",
+            "action": "run command",
+            "description": "Run command `echo ok`",
+            "source_kind": "foreground_turn",
+            "source_id": "<uuid>",
+            "agent_id": None,
+            "subagent_type": None,
+            "source_description": None,
+            "display": [{"type": "shell", "language": "bash", "command": "echo ok"}],
+        },
+    },
+    {
+        "method": "event",
+        "type": "ApprovalResponse",
+        "payload": {"request_id": "<uuid>", "response": "reject", "feedback": ""},
+    },
+    {
+        "method": "event",
+        "type": "ToolResult",
+        "payload": {
+            "tool_call_id": "tc-1",
+            "return_value": {
+                "is_error": True,
+                "output": "",
+                "message": "The tool call is rejected by the user. Stop what you are doing and wait for the user to tell you how to proceed.",
+                "display": [{"type": "brief", "text": "Rejected by user"}],
+                "extras": None,
+            },
+        },
+    },
+    {"method": "event", "type": "TurnEnd", "payload": {"interrupt_reason": None}},
+])
     finally:
         wire.close()
 
@@ -366,180 +365,182 @@ def test_approve_for_session(tmp_path) -> None:
         resp2, messages2 = collect_until_response(wire, "prompt-2")
         assert resp2.get("result", {}).get("status") == "finished"
         assert all(msg.get("method") != "request" for msg in messages2)
-        assert summarize_messages(messages1 + messages2) == snapshot(
-            [
-                {
-                    "method": "event",
-                    "type": "TurnBegin",
-                    "payload": {"user_input": "run shell", "todos": None},
-                },
-                {"method": "event", "type": "StepBegin", "payload": {"n": 1}},
-                {
-                    "method": "event",
-                    "type": "ContentPart",
-                    "payload": {"type": "text", "text": "step1"},
-                },
-                {
-                    "method": "event",
-                    "type": "ToolCall",
-                    "payload": {
-                        "type": "function",
-                        "id": "tc-1",
-                        "function": {"name": "Shell", "arguments": '{"command": "echo first"}'},
-                        "extras": None,
-                    },
-                },
-                {
-                    "method": "event",
-                    "type": "StatusUpdate",
-                    "payload": {
-                        "context_usage": None,
-                        "context_tokens": None,
-                        "max_context_tokens": None,
-                        "token_usage": None,
-                        "message_id": None,
-                        "plan_mode": False,
-                        "yolo": None,
-                        "mcp_status": None,
-                        "waiting_on_background": None,
-                    },
-                },
-                {
-                    "method": "request",
-                    "type": "ApprovalRequest",
-                    "payload": {
-                        "id": "<uuid>",
-                        "tool_call_id": "tc-1",
-                        "sender": "Shell",
-                        "action": "run command",
-                        "description": "Run command `echo first`",
-                        "source_kind": "foreground_turn",
-                        "source_id": "<uuid>",
-                        "agent_id": None,
-                        "subagent_type": None,
-                        "source_description": None,
-                        "display": [{"type": "shell", "language": "bash", "command": "echo first"}],
-                    },
-                },
-                {
-                    "method": "event",
-                    "type": "ApprovalResponse",
-                    "payload": {
-                        "request_id": "<uuid>",
-                        "response": "approve_for_session",
-                        "feedback": "",
-                    },
-                },
-                {
-                    "method": "event",
-                    "type": "ToolResult",
-                    "payload": {
-                        "tool_call_id": "tc-1",
-                        "return_value": {
-                            "is_error": False,
-                            "output": "first\n",
-                            "message": "Command executed successfully.",
-                            "display": [],
-                            "extras": None,
-                        },
-                    },
-                },
-                {"method": "event", "type": "StepBegin", "payload": {"n": 2}},
-                {
-                    "method": "event",
-                    "type": "ContentPart",
-                    "payload": {"type": "text", "text": "done"},
-                },
-                {
-                    "method": "event",
-                    "type": "StatusUpdate",
-                    "payload": {
-                        "context_usage": None,
-                        "context_tokens": None,
-                        "max_context_tokens": None,
-                        "token_usage": None,
-                        "message_id": None,
-                        "plan_mode": False,
-                        "yolo": None,
-                        "mcp_status": None,
-                        "waiting_on_background": None,
-                    },
-                },
-                {"method": "event", "type": "TurnEnd", "payload": {}},
-                {
-                    "method": "event",
-                    "type": "TurnBegin",
-                    "payload": {"user_input": "run shell again", "todos": None},
-                },
-                {"method": "event", "type": "StepBegin", "payload": {"n": 1}},
-                {
-                    "method": "event",
-                    "type": "ContentPart",
-                    "payload": {"type": "text", "text": "step1"},
-                },
-                {
-                    "method": "event",
-                    "type": "ToolCall",
-                    "payload": {
-                        "type": "function",
-                        "id": "tc-2",
-                        "function": {"name": "Shell", "arguments": '{"command": "echo second"}'},
-                        "extras": None,
-                    },
-                },
-                {
-                    "method": "event",
-                    "type": "StatusUpdate",
-                    "payload": {
-                        "context_usage": None,
-                        "context_tokens": None,
-                        "max_context_tokens": None,
-                        "token_usage": None,
-                        "message_id": None,
-                        "plan_mode": False,
-                        "yolo": None,
-                        "mcp_status": None,
-                        "waiting_on_background": None,
-                    },
-                },
-                {
-                    "method": "event",
-                    "type": "ToolResult",
-                    "payload": {
-                        "tool_call_id": "tc-2",
-                        "return_value": {
-                            "is_error": False,
-                            "output": "second\n",
-                            "message": "Command executed successfully.",
-                            "display": [],
-                            "extras": None,
-                        },
-                    },
-                },
-                {"method": "event", "type": "StepBegin", "payload": {"n": 2}},
-                {
-                    "method": "event",
-                    "type": "ContentPart",
-                    "payload": {"type": "text", "text": "done"},
-                },
-                {
-                    "method": "event",
-                    "type": "StatusUpdate",
-                    "payload": {
-                        "context_usage": None,
-                        "context_tokens": None,
-                        "max_context_tokens": None,
-                        "token_usage": None,
-                        "message_id": None,
-                        "plan_mode": False,
-                        "yolo": None,
-                        "mcp_status": None,
-                        "waiting_on_background": None,
-                    },
-                },
-                {"method": "event", "type": "TurnEnd", "payload": {}},
-            ]
-        )
+        assert summarize_messages(messages1 + messages2) == snapshot([
+    {
+        "method": "event",
+        "type": "TurnBegin",
+        "payload": {"user_input": "run shell", "todos": None},
+    },
+    {"method": "event", "type": "StepBegin", "payload": {"n": 1}},
+    {
+        "method": "event",
+        "type": "ContentPart",
+        "payload": {"type": "text", "text": "step1"},
+    },
+    {
+        "method": "event",
+        "type": "ToolCall",
+        "payload": {
+            "type": "function",
+            "id": "tc-1",
+            "function": {"name": "Shell", "arguments": '{"command": "echo first"}'},
+            "extras": None,
+        },
+    },
+    {
+        "method": "event",
+        "type": "StatusUpdate",
+        "payload": {
+            "context_usage": None,
+            "context_tokens": None,
+            "max_context_tokens": None,
+            "token_usage": None,
+            "message_id": None,
+            "plan_mode": False,
+            "thinking_suppressed": False,
+            "yolo": None,
+            "mcp_status": None,
+            "waiting_on_background": None,
+        },
+    },
+    {
+        "method": "request",
+        "type": "ApprovalRequest",
+        "payload": {
+            "id": "<uuid>",
+            "tool_call_id": "tc-1",
+            "sender": "Shell",
+            "action": "run command",
+            "description": "Run command `echo first`",
+            "source_kind": "foreground_turn",
+            "source_id": "<uuid>",
+            "agent_id": None,
+            "subagent_type": None,
+            "source_description": None,
+            "display": [{"type": "shell", "language": "bash", "command": "echo first"}],
+        },
+    },
+    {
+        "method": "event",
+        "type": "ApprovalResponse",
+        "payload": {
+            "request_id": "<uuid>",
+            "response": "approve_for_session",
+            "feedback": "",
+        },
+    },
+    {
+        "method": "event",
+        "type": "ToolResult",
+        "payload": {
+            "tool_call_id": "tc-1",
+            "return_value": {
+                "is_error": False,
+                "output": "first\n",
+                "message": "Command executed successfully.",
+                "display": [],
+                "extras": None,
+            },
+        },
+    },
+    {"method": "event", "type": "StepBegin", "payload": {"n": 2}},
+    {
+        "method": "event",
+        "type": "ContentPart",
+        "payload": {"type": "text", "text": "done"},
+    },
+    {
+        "method": "event",
+        "type": "StatusUpdate",
+        "payload": {
+            "context_usage": None,
+            "context_tokens": None,
+            "max_context_tokens": None,
+            "token_usage": None,
+            "message_id": None,
+            "plan_mode": False,
+            "thinking_suppressed": False,
+            "yolo": None,
+            "mcp_status": None,
+            "waiting_on_background": None,
+        },
+    },
+    {"method": "event", "type": "TurnEnd", "payload": {"interrupt_reason": None}},
+    {
+        "method": "event",
+        "type": "TurnBegin",
+        "payload": {"user_input": "run shell again", "todos": None},
+    },
+    {"method": "event", "type": "StepBegin", "payload": {"n": 1}},
+    {
+        "method": "event",
+        "type": "ContentPart",
+        "payload": {"type": "text", "text": "step1"},
+    },
+    {
+        "method": "event",
+        "type": "ToolCall",
+        "payload": {
+            "type": "function",
+            "id": "tc-2",
+            "function": {"name": "Shell", "arguments": '{"command": "echo second"}'},
+            "extras": None,
+        },
+    },
+    {
+        "method": "event",
+        "type": "StatusUpdate",
+        "payload": {
+            "context_usage": None,
+            "context_tokens": None,
+            "max_context_tokens": None,
+            "token_usage": None,
+            "message_id": None,
+            "plan_mode": False,
+            "thinking_suppressed": False,
+            "yolo": None,
+            "mcp_status": None,
+            "waiting_on_background": None,
+        },
+    },
+    {
+        "method": "event",
+        "type": "ToolResult",
+        "payload": {
+            "tool_call_id": "tc-2",
+            "return_value": {
+                "is_error": False,
+                "output": "second\n",
+                "message": "Command executed successfully.",
+                "display": [],
+                "extras": None,
+            },
+        },
+    },
+    {"method": "event", "type": "StepBegin", "payload": {"n": 2}},
+    {
+        "method": "event",
+        "type": "ContentPart",
+        "payload": {"type": "text", "text": "done"},
+    },
+    {
+        "method": "event",
+        "type": "StatusUpdate",
+        "payload": {
+            "context_usage": None,
+            "context_tokens": None,
+            "max_context_tokens": None,
+            "token_usage": None,
+            "message_id": None,
+            "plan_mode": False,
+            "thinking_suppressed": False,
+            "yolo": None,
+            "mcp_status": None,
+            "waiting_on_background": None,
+        },
+    },
+    {"method": "event", "type": "TurnEnd", "payload": {"interrupt_reason": None}},
+])
     finally:
         wire.close()
 
@@ -578,82 +579,82 @@ def test_yolo_skips_approval(tmp_path) -> None:
         resp, messages = collect_until_response(wire, "prompt-1")
         assert resp.get("result", {}).get("status") == "finished"
         assert all(msg.get("method") != "request" for msg in messages)
-        assert summarize_messages(messages) == snapshot(
-            [
-                {
-                    "method": "event",
-                    "type": "TurnBegin",
-                    "payload": {"user_input": "run shell", "todos": None},
-                },
-                {"method": "event", "type": "StepBegin", "payload": {"n": 1}},
-                {
-                    "method": "event",
-                    "type": "ContentPart",
-                    "payload": {"type": "text", "text": "step1"},
-                },
-                {
-                    "method": "event",
-                    "type": "ToolCall",
-                    "payload": {
-                        "type": "function",
-                        "id": "tc-1",
-                        "function": {"name": "Shell", "arguments": '{"command": "echo ok"}'},
-                        "extras": None,
-                    },
-                },
-                {
-                    "method": "event",
-                    "type": "StatusUpdate",
-                    "payload": {
-                        "context_usage": None,
-                        "context_tokens": None,
-                        "max_context_tokens": None,
-                        "token_usage": None,
-                        "message_id": None,
-                        "plan_mode": False,
-                        "yolo": None,
-                        "mcp_status": None,
-                        "waiting_on_background": None,
-                    },
-                },
-                {
-                    "method": "event",
-                    "type": "ToolResult",
-                    "payload": {
-                        "tool_call_id": "tc-1",
-                        "return_value": {
-                            "is_error": False,
-                            "output": "ok\n",
-                            "message": "Command executed successfully.",
-                            "display": [],
-                            "extras": None,
-                        },
-                    },
-                },
-                {"method": "event", "type": "StepBegin", "payload": {"n": 2}},
-                {
-                    "method": "event",
-                    "type": "ContentPart",
-                    "payload": {"type": "text", "text": "done"},
-                },
-                {
-                    "method": "event",
-                    "type": "StatusUpdate",
-                    "payload": {
-                        "context_usage": None,
-                        "context_tokens": None,
-                        "max_context_tokens": None,
-                        "token_usage": None,
-                        "message_id": None,
-                        "plan_mode": False,
-                        "yolo": None,
-                        "mcp_status": None,
-                        "waiting_on_background": None,
-                    },
-                },
-                {"method": "event", "type": "TurnEnd", "payload": {}},
-            ]
-        )
+        assert summarize_messages(messages) == snapshot([
+    {
+        "method": "event",
+        "type": "TurnBegin",
+        "payload": {"user_input": "run shell", "todos": None},
+    },
+    {"method": "event", "type": "StepBegin", "payload": {"n": 1}},
+    {
+        "method": "event",
+        "type": "ContentPart",
+        "payload": {"type": "text", "text": "step1"},
+    },
+    {
+        "method": "event",
+        "type": "ToolCall",
+        "payload": {
+            "type": "function",
+            "id": "tc-1",
+            "function": {"name": "Shell", "arguments": '{"command": "echo ok"}'},
+            "extras": None,
+        },
+    },
+    {
+        "method": "event",
+        "type": "StatusUpdate",
+        "payload": {
+            "context_usage": None,
+            "context_tokens": None,
+            "max_context_tokens": None,
+            "token_usage": None,
+            "message_id": None,
+            "plan_mode": False,
+            "thinking_suppressed": False,
+            "yolo": None,
+            "mcp_status": None,
+            "waiting_on_background": None,
+        },
+    },
+    {
+        "method": "event",
+        "type": "ToolResult",
+        "payload": {
+            "tool_call_id": "tc-1",
+            "return_value": {
+                "is_error": False,
+                "output": "ok\n",
+                "message": "Command executed successfully.",
+                "display": [],
+                "extras": None,
+            },
+        },
+    },
+    {"method": "event", "type": "StepBegin", "payload": {"n": 2}},
+    {
+        "method": "event",
+        "type": "ContentPart",
+        "payload": {"type": "text", "text": "done"},
+    },
+    {
+        "method": "event",
+        "type": "StatusUpdate",
+        "payload": {
+            "context_usage": None,
+            "context_tokens": None,
+            "max_context_tokens": None,
+            "token_usage": None,
+            "message_id": None,
+            "plan_mode": False,
+            "thinking_suppressed": False,
+            "yolo": None,
+            "mcp_status": None,
+            "waiting_on_background": None,
+        },
+    },
+    {"method": "event", "type": "TurnEnd", "payload": {"interrupt_reason": None}},
+])
     finally:
         wire.close()
 
@@ -886,87 +887,87 @@ def test_display_block_todo(tmp_path) -> None:
         )
         resp, messages = collect_until_response(wire, "prompt-1")
         assert resp.get("result", {}).get("status") == "finished"
-        assert summarize_messages(messages) == snapshot(
-            [
-                {
-                    "method": "event",
-                    "type": "TurnBegin",
-                    "payload": {"user_input": "todo", "todos": None},
-                },
-                {"method": "event", "type": "StepBegin", "payload": {"n": 1}},
-                {
-                    "method": "event",
-                    "type": "ContentPart",
-                    "payload": {"type": "text", "text": "todo"},
-                },
-                {
-                    "method": "event",
-                    "type": "ToolCall",
-                    "payload": {
-                        "type": "function",
-                        "id": "tc-1",
-                        "function": {
-                            "name": "SetTodoList",
-                            "arguments": '{"todos": [{"title": "one", "status": "pending"}]}',
-                        },
-                        "extras": None,
-                    },
-                },
-                {
-                    "method": "event",
-                    "type": "StatusUpdate",
-                    "payload": {
-                        "context_usage": None,
-                        "context_tokens": None,
-                        "max_context_tokens": None,
-                        "token_usage": None,
-                        "message_id": None,
-                        "plan_mode": False,
-                        "yolo": None,
-                        "mcp_status": None,
-                        "waiting_on_background": None,
-                    },
-                },
-                {
-                    "method": "event",
-                    "type": "ToolResult",
-                    "payload": {
-                        "tool_call_id": "tc-1",
-                        "return_value": {
-                            "is_error": False,
-                            "output": "Todo list updated",
-                            "message": "Todo list updated",
-                            "display": [
-                                {"type": "todo", "items": [{"title": "one", "status": "pending"}]}
-                            ],
-                            "extras": None,
-                        },
-                    },
-                },
-                {"method": "event", "type": "StepBegin", "payload": {"n": 2}},
-                {
-                    "method": "event",
-                    "type": "ContentPart",
-                    "payload": {"type": "text", "text": "done"},
-                },
-                {
-                    "method": "event",
-                    "type": "StatusUpdate",
-                    "payload": {
-                        "context_usage": None,
-                        "context_tokens": None,
-                        "max_context_tokens": None,
-                        "token_usage": None,
-                        "message_id": None,
-                        "plan_mode": False,
-                        "yolo": None,
-                        "mcp_status": None,
-                        "waiting_on_background": None,
-                    },
-                },
-                {"method": "event", "type": "TurnEnd", "payload": {}},
-            ]
-        )
+        assert summarize_messages(messages) == snapshot([
+    {
+        "method": "event",
+        "type": "TurnBegin",
+        "payload": {"user_input": "todo", "todos": None},
+    },
+    {"method": "event", "type": "StepBegin", "payload": {"n": 1}},
+    {
+        "method": "event",
+        "type": "ContentPart",
+        "payload": {"type": "text", "text": "todo"},
+    },
+    {
+        "method": "event",
+        "type": "ToolCall",
+        "payload": {
+            "type": "function",
+            "id": "tc-1",
+            "function": {
+                "name": "SetTodoList",
+                "arguments": '{"todos": [{"title": "one", "status": "pending"}]}',
+            },
+            "extras": None,
+        },
+    },
+    {
+        "method": "event",
+        "type": "StatusUpdate",
+        "payload": {
+            "context_usage": None,
+            "context_tokens": None,
+            "max_context_tokens": None,
+            "token_usage": None,
+            "message_id": None,
+            "plan_mode": False,
+            "thinking_suppressed": False,
+            "yolo": None,
+            "mcp_status": None,
+            "waiting_on_background": None,
+        },
+    },
+    {
+        "method": "event",
+        "type": "ToolResult",
+        "payload": {
+            "tool_call_id": "tc-1",
+            "return_value": {
+                "is_error": False,
+                "output": "Todo list updated",
+                "message": "Todo list updated",
+                "display": [
+                    {"type": "todo", "items": [{"title": "one", "status": "pending"}]}
+                ],
+                "extras": None,
+            },
+        },
+    },
+    {"method": "event", "type": "StepBegin", "payload": {"n": 2}},
+    {
+        "method": "event",
+        "type": "ContentPart",
+        "payload": {"type": "text", "text": "done"},
+    },
+    {
+        "method": "event",
+        "type": "StatusUpdate",
+        "payload": {
+            "context_usage": None,
+            "context_tokens": None,
+            "max_context_tokens": None,
+            "token_usage": None,
+            "message_id": None,
+            "plan_mode": False,
+            "thinking_suppressed": False,
+            "yolo": None,
+            "mcp_status": None,
+            "waiting_on_background": None,
+        },
+    },
+    {"method": "event", "type": "TurnEnd", "payload": {"interrupt_reason": None}},
+])
     finally:
         wire.close()
 
@@ -1007,92 +1008,92 @@ def test_tool_call_part_streaming(tmp_path) -> None:
         )
         resp, messages = collect_until_response(wire, "prompt-1")
         assert resp.get("result", {}).get("status") == "finished"
-        assert summarize_messages(messages) == snapshot(
-            [
-                {
-                    "method": "event",
-                    "type": "TurnBegin",
-                    "payload": {"user_input": "stream", "todos": None},
-                },
-                {"method": "event", "type": "StepBegin", "payload": {"n": 1}},
-                {
-                    "method": "event",
-                    "type": "ContentPart",
-                    "payload": {"type": "text", "text": "start"},
-                },
-                {
-                    "method": "event",
-                    "type": "ToolCall",
-                    "payload": {
-                        "type": "function",
-                        "id": "tc-1",
-                        "function": {"name": "SetTodoList", "arguments": None},
-                        "extras": None,
-                    },
-                },
-                {"method": "event", "type": "ToolCallPart", "payload": {"arguments_part": "{"}},
-                {
-                    "method": "event",
-                    "type": "ToolCallPart",
-                    "payload": {"arguments_part": '"todos":[{"title":"a","status":"pending"}]'},
-                },
-                {"method": "event", "type": "ToolCallPart", "payload": {"arguments_part": "}"}},
-                {"method": "event", "type": "ToolCallPart", "payload": {"arguments_part": None}},
-                {
-                    "method": "event",
-                    "type": "StatusUpdate",
-                    "payload": {
-                        "context_usage": None,
-                        "context_tokens": None,
-                        "max_context_tokens": None,
-                        "token_usage": None,
-                        "message_id": None,
-                        "plan_mode": False,
-                        "yolo": None,
-                        "mcp_status": None,
-                        "waiting_on_background": None,
-                    },
-                },
-                {
-                    "method": "event",
-                    "type": "ToolResult",
-                    "payload": {
-                        "tool_call_id": "tc-1",
-                        "return_value": {
-                            "is_error": False,
-                            "output": "Todo list updated",
-                            "message": "Todo list updated",
-                            "display": [
-                                {"type": "todo", "items": [{"title": "a", "status": "pending"}]}
-                            ],
-                            "extras": None,
-                        },
-                    },
-                },
-                {"method": "event", "type": "StepBegin", "payload": {"n": 2}},
-                {
-                    "method": "event",
-                    "type": "ContentPart",
-                    "payload": {"type": "text", "text": "done"},
-                },
-                {
-                    "method": "event",
-                    "type": "StatusUpdate",
-                    "payload": {
-                        "context_usage": None,
-                        "context_tokens": None,
-                        "max_context_tokens": None,
-                        "token_usage": None,
-                        "message_id": None,
-                        "plan_mode": False,
-                        "yolo": None,
-                        "mcp_status": None,
-                        "waiting_on_background": None,
-                    },
-                },
-                {"method": "event", "type": "TurnEnd", "payload": {}},
-            ]
-        )
+        assert summarize_messages(messages) == snapshot([
+    {
+        "method": "event",
+        "type": "TurnBegin",
+        "payload": {"user_input": "stream", "todos": None},
+    },
+    {"method": "event", "type": "StepBegin", "payload": {"n": 1}},
+    {
+        "method": "event",
+        "type": "ContentPart",
+        "payload": {"type": "text", "text": "start"},
+    },
+    {
+        "method": "event",
+        "type": "ToolCall",
+        "payload": {
+            "type": "function",
+            "id": "tc-1",
+            "function": {"name": "SetTodoList", "arguments": None},
+            "extras": None,
+        },
+    },
+    {"method": "event", "type": "ToolCallPart", "payload": {"arguments_part": "{"}},
+    {
+        "method": "event",
+        "type": "ToolCallPart",
+        "payload": {"arguments_part": '"todos":[{"title":"a","status":"pending"}]'},
+    },
+    {"method": "event", "type": "ToolCallPart", "payload": {"arguments_part": "}"}},
+    {"method": "event", "type": "ToolCallPart", "payload": {"arguments_part": None}},
+    {
+        "method": "event",
+        "type": "StatusUpdate",
+        "payload": {
+            "context_usage": None,
+            "context_tokens": None,
+            "max_context_tokens": None,
+            "token_usage": None,
+            "message_id": None,
+            "plan_mode": False,
+            "thinking_suppressed": False,
+            "yolo": None,
+            "mcp_status": None,
+            "waiting_on_background": None,
+        },
+    },
+    {
+        "method": "event",
+        "type": "ToolResult",
+        "payload": {
+            "tool_call_id": "tc-1",
+            "return_value": {
+                "is_error": False,
+                "output": "Todo list updated",
+                "message": "Todo list updated",
+                "display": [
+                    {"type": "todo", "items": [{"title": "a", "status": "pending"}]}
+                ],
+                "extras": None,
+            },
+        },
+    },
+    {"method": "event", "type": "StepBegin", "payload": {"n": 2}},
+    {
+        "method": "event",
+        "type": "ContentPart",
+        "payload": {"type": "text", "text": "done"},
+    },
+    {
+        "method": "event",
+        "type": "StatusUpdate",
+        "payload": {
+            "context_usage": None,
+            "context_tokens": None,
+            "max_context_tokens": None,
+            "token_usage": None,
+            "message_id": None,
+            "plan_mode": False,
+            "thinking_suppressed": False,
+            "yolo": None,
+            "mcp_status": None,
+            "waiting_on_background": None,
+        },
+    },
+    {"method": "event", "type": "TurnEnd", "payload": {"interrupt_reason": None}},
+])
     finally:
         wire.close()
 
@@ -1131,82 +1132,82 @@ def test_default_agent_missing_tool(tmp_path) -> None:
         )
         resp, messages = collect_until_response(wire, "prompt-1")
         assert resp.get("result", {}).get("status") == "finished"
-        assert summarize_messages(messages) == snapshot(
-            [
-                {
-                    "method": "event",
-                    "type": "TurnBegin",
-                    "payload": {"user_input": "dmail", "todos": None},
-                },
-                {"method": "event", "type": "StepBegin", "payload": {"n": 1}},
-                {
-                    "method": "event",
-                    "type": "ContentPart",
-                    "payload": {"type": "text", "text": "missing tool"},
-                },
-                {
-                    "method": "event",
-                    "type": "ToolCall",
-                    "payload": {
-                        "type": "function",
-                        "id": "tc-1",
-                        "function": {"name": "SendDMail", "arguments": '{"message": "hi"}'},
-                        "extras": None,
-                    },
-                },
-                {
-                    "method": "event",
-                    "type": "StatusUpdate",
-                    "payload": {
-                        "context_usage": None,
-                        "context_tokens": None,
-                        "max_context_tokens": None,
-                        "token_usage": None,
-                        "message_id": None,
-                        "plan_mode": False,
-                        "yolo": None,
-                        "mcp_status": None,
-                        "waiting_on_background": None,
-                    },
-                },
-                {
-                    "method": "event",
-                    "type": "ToolResult",
-                    "payload": {
-                        "tool_call_id": "tc-1",
-                        "return_value": {
-                            "is_error": True,
-                            "output": "",
-                            "message": "Tool `SendDMail` not found",
-                            "display": [{"type": "brief", "text": "Tool `SendDMail` not found"}],
-                            "extras": None,
-                        },
-                    },
-                },
-                {"method": "event", "type": "StepBegin", "payload": {"n": 2}},
-                {
-                    "method": "event",
-                    "type": "ContentPart",
-                    "payload": {"type": "text", "text": "done"},
-                },
-                {
-                    "method": "event",
-                    "type": "StatusUpdate",
-                    "payload": {
-                        "context_usage": None,
-                        "context_tokens": None,
-                        "max_context_tokens": None,
-                        "token_usage": None,
-                        "message_id": None,
-                        "plan_mode": False,
-                        "yolo": None,
-                        "mcp_status": None,
-                        "waiting_on_background": None,
-                    },
-                },
-                {"method": "event", "type": "TurnEnd", "payload": {}},
-            ]
-        )
+        assert summarize_messages(messages) == snapshot([
+    {
+        "method": "event",
+        "type": "TurnBegin",
+        "payload": {"user_input": "dmail", "todos": None},
+    },
+    {"method": "event", "type": "StepBegin", "payload": {"n": 1}},
+    {
+        "method": "event",
+        "type": "ContentPart",
+        "payload": {"type": "text", "text": "missing tool"},
+    },
+    {
+        "method": "event",
+        "type": "ToolCall",
+        "payload": {
+            "type": "function",
+            "id": "tc-1",
+            "function": {"name": "SendDMail", "arguments": '{"message": "hi"}'},
+            "extras": None,
+        },
+    },
+    {
+        "method": "event",
+        "type": "StatusUpdate",
+        "payload": {
+            "context_usage": None,
+            "context_tokens": None,
+            "max_context_tokens": None,
+            "token_usage": None,
+            "message_id": None,
+            "plan_mode": False,
+            "thinking_suppressed": False,
+            "yolo": None,
+            "mcp_status": None,
+            "waiting_on_background": None,
+        },
+    },
+    {
+        "method": "event",
+        "type": "ToolResult",
+        "payload": {
+            "tool_call_id": "tc-1",
+            "return_value": {
+                "is_error": True,
+                "output": "",
+                "message": "Tool `SendDMail` not found",
+                "display": [{"type": "brief", "text": "Tool `SendDMail` not found"}],
+                "extras": None,
+            },
+        },
+    },
+    {"method": "event", "type": "StepBegin", "payload": {"n": 2}},
+    {
+        "method": "event",
+        "type": "ContentPart",
+        "payload": {"type": "text", "text": "done"},
+    },
+    {
+        "method": "event",
+        "type": "StatusUpdate",
+        "payload": {
+            "context_usage": None,
+            "context_tokens": None,
+            "max_context_tokens": None,
+            "token_usage": None,
+            "message_id": None,
+            "plan_mode": False,
+            "thinking_suppressed": False,
+            "yolo": None,
+            "mcp_status": None,
+            "waiting_on_background": None,
+        },
+    },
+    {"method": "event", "type": "TurnEnd", "payload": {"interrupt_reason": None}},
+])
     finally:
         wire.close()
 
@@ -1259,81 +1260,81 @@ def test_custom_agent_exclude_tool(tmp_path) -> None:
         )
         resp, messages = collect_until_response(wire, "prompt-1")
         assert resp.get("result", {}).get("status") == "finished"
-        assert summarize_messages(messages) == snapshot(
-            [
-                {
-                    "method": "event",
-                    "type": "TurnBegin",
-                    "payload": {"user_input": "shell", "todos": None},
-                },
-                {"method": "event", "type": "StepBegin", "payload": {"n": 1}},
-                {
-                    "method": "event",
-                    "type": "ContentPart",
-                    "payload": {"type": "text", "text": "missing tool"},
-                },
-                {
-                    "method": "event",
-                    "type": "ToolCall",
-                    "payload": {
-                        "type": "function",
-                        "id": "tc-1",
-                        "function": {"name": "Shell", "arguments": '{"command": "echo hi"}'},
-                        "extras": None,
-                    },
-                },
-                {
-                    "method": "event",
-                    "type": "StatusUpdate",
-                    "payload": {
-                        "context_usage": None,
-                        "context_tokens": None,
-                        "max_context_tokens": None,
-                        "token_usage": None,
-                        "message_id": None,
-                        "plan_mode": False,
-                        "yolo": None,
-                        "mcp_status": None,
-                        "waiting_on_background": None,
-                    },
-                },
-                {
-                    "method": "event",
-                    "type": "ToolResult",
-                    "payload": {
-                        "tool_call_id": "tc-1",
-                        "return_value": {
-                            "is_error": True,
-                            "output": "",
-                            "message": "Tool `Shell` not found",
-                            "display": [{"type": "brief", "text": "Tool `Shell` not found"}],
-                            "extras": None,
-                        },
-                    },
-                },
-                {"method": "event", "type": "StepBegin", "payload": {"n": 2}},
-                {
-                    "method": "event",
-                    "type": "ContentPart",
-                    "payload": {"type": "text", "text": "done"},
-                },
-                {
-                    "method": "event",
-                    "type": "StatusUpdate",
-                    "payload": {
-                        "context_usage": None,
-                        "context_tokens": None,
-                        "max_context_tokens": None,
-                        "token_usage": None,
-                        "message_id": None,
-                        "plan_mode": False,
-                        "yolo": None,
-                        "mcp_status": None,
-                        "waiting_on_background": None,
-                    },
-                },
-                {"method": "event", "type": "TurnEnd", "payload": {}},
-            ]
-        )
+        assert summarize_messages(messages) == snapshot([
+    {
+        "method": "event",
+        "type": "TurnBegin",
+        "payload": {"user_input": "shell", "todos": None},
+    },
+    {"method": "event", "type": "StepBegin", "payload": {"n": 1}},
+    {
+        "method": "event",
+        "type": "ContentPart",
+        "payload": {"type": "text", "text": "missing tool"},
+    },
+    {
+        "method": "event",
+        "type": "ToolCall",
+        "payload": {
+            "type": "function",
+            "id": "tc-1",
+            "function": {"name": "Shell", "arguments": '{"command": "echo hi"}'},
+            "extras": None,
+        },
+    },
+    {
+        "method": "event",
+        "type": "StatusUpdate",
+        "payload": {
+            "context_usage": None,
+            "context_tokens": None,
+            "max_context_tokens": None,
+            "token_usage": None,
+            "message_id": None,
+            "plan_mode": False,
+            "thinking_suppressed": False,
+            "yolo": None,
+            "mcp_status": None,
+            "waiting_on_background": None,
+        },
+    },
+    {
+        "method": "event",
+        "type": "ToolResult",
+        "payload": {
+            "tool_call_id": "tc-1",
+            "return_value": {
+                "is_error": True,
+                "output": "",
+                "message": "Tool `Shell` not found",
+                "display": [{"type": "brief", "text": "Tool `Shell` not found"}],
+                "extras": None,
+            },
+        },
+    },
+    {"method": "event", "type": "StepBegin", "payload": {"n": 2}},
+    {
+        "method": "event",
+        "type": "ContentPart",
+        "payload": {"type": "text", "text": "done"},
+    },
+    {
+        "method": "event",
+        "type": "StatusUpdate",
+        "payload": {
+            "context_usage": None,
+            "context_tokens": None,
+            "max_context_tokens": None,
+            "token_usage": None,
+            "message_id": None,
+            "plan_mode": False,
+            "thinking_suppressed": False,
+            "yolo": None,
+            "mcp_status": None,
+            "waiting_on_background": None,
+        },
+    },
+    {"method": "event", "type": "TurnEnd", "payload": {"interrupt_reason": None}},
+])
     finally:
         wire.close()

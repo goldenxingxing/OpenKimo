@@ -186,7 +186,10 @@ def test_llm_not_set(tmp_path) -> None:
         },
         "providers": {
             "bad-provider": {
-                "type": "kimo",
+                # Empty model name against a valid provider type: the wire
+                # server must answer the prompt with LLMNotSet instead of
+                # dying at startup.
+                "type": "openai_legacy",
                 "base_url": "",
                 "api_key": "",
                 "env": {"KIMO_SCRIPTED_ECHO_SCRIPTS": str(scripts_path)},
@@ -216,9 +219,7 @@ def test_llm_not_set(tmp_path) -> None:
             }
         )
         resp, _ = collect_until_response(wire, "prompt-1")
-        assert normalize_response(resp) == snapshot(
-            {"error": {"code": -32001, "message": "LLM is not set", "data": None}}
-        )
+        assert normalize_response(resp) == snapshot({"error": {"code": -32001, "message": "LLM is not set", "data": None}})
     finally:
         wire.close()
 

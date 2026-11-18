@@ -77,9 +77,7 @@ def test_session_files_created(tmp_path) -> None:
     assert wire_file.exists()
     assert context_file.stat().st_size > 0
     assert wire_file.stat().st_size > 0
-    assert sorted(p.name for p in session_dir.iterdir()) == snapshot(
-        ["context.jsonl", "notifications", "state.json", "wire.jsonl"]
-    )
+    assert sorted(p.name for p in session_dir.iterdir()) == snapshot(["context.jsonl", "evolution", "notifications", "state.json", "wire.jsonl"])
 
 
 def test_continue_session_appends(tmp_path) -> None:
@@ -151,20 +149,18 @@ def test_continue_session_appends(tmp_path) -> None:
         "context_after": context_after,
         "wire_before": wire_before,
         "wire_after": wire_after,
-    } == snapshot({"context_before": 5, "context_after": 9, "wire_before": 7, "wire_after": 12})
-    assert _read_roles(context_file) == snapshot(
-        [
-            "_system_prompt",
-            "_checkpoint",
-            "user",
-            "_checkpoint",
-            "assistant",
-            "_checkpoint",
-            "user",
-            "_checkpoint",
-            "assistant",
-        ]
-    )
+    } == snapshot({"context_before": 5, "context_after": 9, "wire_before": 6, "wire_after": 11})
+    assert _read_roles(context_file) == snapshot([
+    "_system_prompt",
+    "_checkpoint",
+    "user",
+    "_checkpoint",
+    "assistant",
+    "_checkpoint",
+    "user",
+    "_checkpoint",
+    "assistant",
+])
 
 
 def test_clear_context_rotates(tmp_path) -> None:
@@ -202,36 +198,35 @@ def test_clear_context_rotates(tmp_path) -> None:
         )
         resp, messages = collect_until_response(wire, "prompt-2")
         assert resp.get("result", {}).get("status") == "finished"
-        assert summarize_messages(messages) == snapshot(
-            [
-                {
-                    "method": "event",
-                    "type": "TurnBegin",
-                    "payload": {"user_input": "/clear", "todos": None},
-                },
-                {
-                    "method": "event",
-                    "type": "ContentPart",
-                    "payload": {"type": "text", "text": "The context has been cleared."},
-                },
-                {
-                    "method": "event",
-                    "type": "StatusUpdate",
-                    "payload": {
-                        "context_usage": 0.0,
-                        "context_tokens": 0,
-                        "max_context_tokens": 100000,
-                        "token_usage": None,
-                        "message_id": None,
-                        "plan_mode": None,
-                        "yolo": None,
-                        "mcp_status": None,
-                        "waiting_on_background": None,
-                    },
-                },
-                {"method": "event", "type": "TurnEnd", "payload": {}},
-            ]
-        )
+        assert summarize_messages(messages) == snapshot([
+    {
+        "method": "event",
+        "type": "TurnBegin",
+        "payload": {"user_input": "/clear", "todos": None},
+    },
+    {
+        "method": "event",
+        "type": "ContentPart",
+        "payload": {"type": "text", "text": "The context has been cleared."},
+    },
+    {
+        "method": "event",
+        "type": "StatusUpdate",
+        "payload": {
+            "context_usage": 0.0,
+            "context_tokens": 0,
+            "max_context_tokens": 100000,
+            "token_usage": None,
+            "message_id": None,
+            "plan_mode": None,
+            "thinking_suppressed": None,
+            "yolo": None,
+            "mcp_status": None,
+            "waiting_on_background": None,
+        },
+    },
+    {"method": "event", "type": "TurnEnd", "payload": {"interrupt_reason": None}},
+])
     finally:
         wire.close()
 
@@ -247,9 +242,7 @@ def test_clear_context_rotates(tmp_path) -> None:
         if p.is_file() and p.name.startswith("context_") and p.suffix == ".jsonl"
     )
     assert rotated == snapshot(["context_1.jsonl"])
-    assert _read_roles(session_dir / rotated[0]) == snapshot(
-        ["_system_prompt", "_checkpoint", "user", "_checkpoint", "assistant"]
-    )
+    assert _read_roles(session_dir / rotated[0]) == snapshot(["_system_prompt", "_checkpoint", "user", "_checkpoint", "assistant"])
 
 
 def test_manual_compact(tmp_path) -> None:
@@ -291,38 +284,37 @@ def test_manual_compact(tmp_path) -> None:
         )
         resp, messages = collect_until_response(wire, "prompt-2")
         assert resp.get("result", {}).get("status") == "finished"
-        assert summarize_messages(messages) == snapshot(
-            [
-                {
-                    "method": "event",
-                    "type": "TurnBegin",
-                    "payload": {"user_input": "/compact", "todos": None},
-                },
-                {"method": "event", "type": "CompactionBegin", "payload": {}},
-                {"method": "event", "type": "CompactionEnd", "payload": {}},
-                {
-                    "method": "event",
-                    "type": "ContentPart",
-                    "payload": {"type": "text", "text": "The context has been compacted."},
-                },
-                {
-                    "method": "event",
-                    "type": "StatusUpdate",
-                    "payload": {
-                        "context_usage": 1e-05,
-                        "context_tokens": 1,
-                        "max_context_tokens": 100000,
-                        "token_usage": None,
-                        "message_id": None,
-                        "plan_mode": None,
-                        "yolo": None,
-                        "mcp_status": None,
-                        "waiting_on_background": None,
-                    },
-                },
-                {"method": "event", "type": "TurnEnd", "payload": {}},
-            ]
-        )
+        assert summarize_messages(messages) == snapshot([
+    {
+        "method": "event",
+        "type": "TurnBegin",
+        "payload": {"user_input": "/compact", "todos": None},
+    },
+    {"method": "event", "type": "CompactionBegin", "payload": {}},
+    {"method": "event", "type": "CompactionEnd", "payload": {"success": True}},
+    {
+        "method": "event",
+        "type": "ContentPart",
+        "payload": {"type": "text", "text": "The context has been compacted."},
+    },
+    {
+        "method": "event",
+        "type": "StatusUpdate",
+        "payload": {
+            "context_usage": 0.001,
+            "context_tokens": 100,
+            "max_context_tokens": 100000,
+            "token_usage": None,
+            "message_id": None,
+            "plan_mode": None,
+            "thinking_suppressed": None,
+            "yolo": None,
+            "mcp_status": None,
+            "waiting_on_background": None,
+        },
+    },
+    {"method": "event", "type": "TurnEnd", "payload": {"interrupt_reason": None}},
+])
     finally:
         wire.close()
 
@@ -433,88 +425,82 @@ def test_replay_streams_wire_history(tmp_path) -> None:
 
         wire.send_json({"jsonrpc": "2.0", "id": "replay-1", "method": "replay"})
         resp, messages = collect_until_response(wire, "replay-1")
-        assert resp.get("result") == snapshot(
-            {
-                "status": "finished",
-                "events": 11,
-                "requests": 0,
-            }
-        )
-        assert summarize_messages(messages) == snapshot(
-            [
-                {
-                    "method": "event",
-                    "type": "TurnBegin",
-                    "payload": {"user_input": "run shell", "todos": None},
-                },
-                {"method": "event", "type": "StepBegin", "payload": {"n": 1}},
-                {
-                    "method": "event",
-                    "type": "ContentPart",
-                    "payload": {"type": "text", "text": "step1"},
-                },
-                {
-                    "method": "event",
-                    "type": "ToolCall",
-                    "payload": {
-                        "type": "function",
-                        "id": "tc-1",
-                        "function": {"name": "Shell", "arguments": '{"command": "echo ok"}'},
-                        "extras": None,
-                    },
-                },
-                {
-                    "method": "event",
-                    "type": "StatusUpdate",
-                    "payload": {
-                        "context_usage": None,
-                        "context_tokens": None,
-                        "max_context_tokens": None,
-                        "token_usage": None,
-                        "message_id": None,
-                        "plan_mode": False,
-                        "yolo": None,
-                        "mcp_status": None,
-                        "waiting_on_background": None,
-                    },
-                },
-                {
-                    "method": "event",
-                    "type": "ToolResult",
-                    "payload": {
-                        "tool_call_id": "tc-1",
-                        "return_value": {
-                            "is_error": False,
-                            "output": "ok\n",
-                            "message": "Command executed successfully.",
-                            "display": [],
-                            "extras": None,
-                        },
-                    },
-                },
-                {"method": "event", "type": "StepBegin", "payload": {"n": 2}},
-                {
-                    "method": "event",
-                    "type": "ContentPart",
-                    "payload": {"type": "text", "text": "done"},
-                },
-                {
-                    "method": "event",
-                    "type": "StatusUpdate",
-                    "payload": {
-                        "context_usage": None,
-                        "context_tokens": None,
-                        "max_context_tokens": None,
-                        "token_usage": None,
-                        "message_id": None,
-                        "plan_mode": False,
-                        "yolo": None,
-                        "mcp_status": None,
-                        "waiting_on_background": None,
-                    },
-                },
-                {"method": "event", "type": "TurnEnd", "payload": {}},
-            ]
-        )
+        assert resp.get("result") == snapshot({"status": "finished", "events": 10, "requests": 0})
+        assert summarize_messages(messages) == snapshot([
+    {
+        "method": "event",
+        "type": "TurnBegin",
+        "payload": {"user_input": "run shell", "todos": None},
+    },
+    {"method": "event", "type": "StepBegin", "payload": {"n": 1}},
+    {
+        "method": "event",
+        "type": "ContentPart",
+        "payload": {"type": "text", "text": "step1"},
+    },
+    {
+        "method": "event",
+        "type": "ToolCall",
+        "payload": {
+            "type": "function",
+            "id": "tc-1",
+            "function": {"name": "Shell", "arguments": '{"command": "echo ok"}'},
+            "extras": None,
+        },
+    },
+    {
+        "method": "event",
+        "type": "StatusUpdate",
+        "payload": {
+            "context_usage": None,
+            "context_tokens": None,
+            "max_context_tokens": None,
+            "token_usage": None,
+            "message_id": None,
+            "plan_mode": False,
+            "thinking_suppressed": False,
+            "yolo": None,
+            "mcp_status": None,
+            "waiting_on_background": None,
+        },
+    },
+    {
+        "method": "event",
+        "type": "ToolResult",
+        "payload": {
+            "tool_call_id": "tc-1",
+            "return_value": {
+                "is_error": False,
+                "output": "ok\n",
+                "message": "Command executed successfully.",
+                "display": [],
+                "extras": None,
+            },
+        },
+    },
+    {"method": "event", "type": "StepBegin", "payload": {"n": 2}},
+    {
+        "method": "event",
+        "type": "ContentPart",
+        "payload": {"type": "text", "text": "done"},
+    },
+    {
+        "method": "event",
+        "type": "StatusUpdate",
+        "payload": {
+            "context_usage": None,
+            "context_tokens": None,
+            "max_context_tokens": None,
+            "token_usage": None,
+            "message_id": None,
+            "plan_mode": False,
+            "thinking_suppressed": False,
+            "yolo": None,
+            "mcp_status": None,
+            "waiting_on_background": None,
+        },
+    },
+    {"method": "event", "type": "TurnEnd", "payload": {"interrupt_reason": None}},
+])
     finally:
         wire.close()

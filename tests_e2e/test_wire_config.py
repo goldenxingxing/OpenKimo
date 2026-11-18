@@ -80,12 +80,17 @@ def test_config_string(tmp_path) -> None:
                         "token_usage": None,
                         "message_id": None,
                         "plan_mode": False,
+                        "thinking_suppressed": False,
                         "yolo": None,
                         "mcp_status": None,
                         "waiting_on_background": None,
                     },
                 },
-                {"method": "event", "type": "TurnEnd", "payload": {}},
+                {
+                    "method": "event",
+                    "type": "TurnEnd",
+                    "payload": {"interrupt_reason": None},
+                },
             ]
         )
     finally:
@@ -172,12 +177,17 @@ def test_model_override(tmp_path) -> None:
                         "token_usage": None,
                         "message_id": None,
                         "plan_mode": False,
+                        "thinking_suppressed": False,
                         "yolo": None,
                         "mcp_status": None,
                         "waiting_on_background": None,
                     },
                 },
-                {"method": "event", "type": "TurnEnd", "payload": {}},
+                {
+                    "method": "event",
+                    "type": "TurnEnd",
+                    "payload": {"interrupt_reason": None},
+                },
             ]
         )
     finally:
