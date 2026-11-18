@@ -583,6 +583,3 @@ async def test_openai_legacy_auto_reasoning_effort_still_works_with_default_keys
         body = json.loads(mock.calls.last.request.content.decode())
         assert body["reasoning_effort"] == "medium"
         assert body["messages"][1]["reasoning_content"] == "Let me think..."
-
-
-

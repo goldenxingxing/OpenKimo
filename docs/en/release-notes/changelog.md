@@ -2,1159 +2,761 @@
 
 This page documents the changes in each Kimo Code CLI release.
 
-## Unreleased
-
-- Kosong: Stop sending an empty `anthropic-beta` header when no beta features are declared — adaptive thinking removes the interleaved-thinking beta, which previously left an empty header value that some backends reject
+All notable changes to this project are documented here. The format
+follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and
+this project adheres to [Semantic Versioning](https://semver.org/).
 
-## 1.49.0 (2026-07-16)
+## v0.5.1 (2026-11-18)
 
-**Highlights**: The completion-token budget for Kimo providers now adapts to the model's remaining context window, reducing context-length overflow errors on long turns
+- **IM 桥接（飞书 + 钉钉）**：IM 机器人接入 OpenKimo Web 服务端进程内，前端「IM 桥接」页管理渠道（应用凭据、开关、白名单、绑定、待授权一键通过）；飞书经 lark-oapi 长连接，钉钉经 dingtalk-stream Stream 模式（均无需公网回调）；IM 消息写入普通会话，Web 会话视图直接承接；白名单外陌生人拒答并记录待授权。
+- **桌面端退出清理**：macOS（rumps before_quit/atexit/SIGTERM）与 Windows（atexit/SIGTERM）全路径退出都会关停 uvicorn 子进程，不再残留孤儿服务器占端口。
 
-- LLM: Clamp the Kimo completion-token budget to the model's remaining context window — the CLI no longer sends a fixed `max_tokens=32000` but estimates the remaining context for each request and caps `max_completion_tokens` accordingly. Set the new `KIMO_MODEL_MAX_COMPLETION_TOKENS` env var for an explicit hard cap (`KIMO_MODEL_MAX_TOKENS` remains a compatibility alias; `0` or a negative value disables clamping)
-- Kosong: Stop Kimo from automatically sending the legacy `reasoning_effort` parameter when configuring thinking — requests now use `thinking.type` exclusively while preserving explicit legacy passthrough
-- Kosong: Fix empty-string `reasoning_content` from thinking models being dropped from history — a reply that reasoned but ended with empty reasoning was recorded as having no reasoning at all, so Preserved Thinking backends that require `reasoning_content` on every assistant message rejected the next request with a 400
+- **会话流恢复**：WebSocket 空闲 30s 服务端心跳探活；网络抖动后 online 事件无条件重连；看门狗/超时放弃时纠正「干活中」假状态——不再出现永久运行中无输出。
+- **前端热更新**：SPA 的 index.html 改为按请求读盘，替换静态资源不再需要重启进程。
+- **IM 目录泄漏**：IM 桥工作目录不再出现在「新建会话」的最近目录列表，也不会被记为启动目录。
+- **渠道断连**：停用 IM 渠道时真正断开平台长连接（飞书/钉钉同构修复），同一机器人在多处桥接时不再互相分流消息。
+- **渠道状态留存**：adapter 崩溃后的错误信息保留在 UI（红点悬停可见），不再重置为空白「已停止」。
+- **LLM 单步挂起检测**：`loop_control.step_timeout_s`（默认 300s）超时转重试，消除单步无限挂起。
+- **CI 工作流路径**：ci.yml 适配当前仓库布局（src 在根目录），Ruff/Pyright 关卡校准到能拦真缺陷的规则集。
+- **IM 上下文丢失**：同一发送者的后续消息不再因会话解析依赖 web 端 metadata 而每次都新建会话——IM 桥直接按渠道绑定加载会话，对话上下文跨消息保留。
+- **IM 提问挂起**：IM 渠道中模型发起交互式提问时自动应答并引导其改用纯文本反问，turn 不再干等到渠道超时才失败。
 
-## 1.47.0 (2026-06-05)
+## v0.5.0 (2026-11-09)
 
-- Shell: Guide users to the new standalone Kimo Code — adds a `/upgrade` command that installs it (migrating your config & sessions automatically), a welcome-screen nudge, and a once-per-day tip shown on exit
-- Shell: Show trailing output in tool error briefs when commands fail
+- **品牌与仓库**：项目更名为 **OpenKimo**，产品名为 **Kimo Code CLI**；仓库迁至 `goldenxingxing/OpenKimo`。旧的 `kimi-code` 包装包与 `kimo-sdk` 不再作为发布单元，发布单元收敛为根包 `kimo-cli`、`packages/kosong` 与 `packages/kaos`。
+- **模型无关化**：内置 provider 收敛为通用协议——`openai_legacy` / `openai_responses` / `anthropic` / `google_genai` / `gemini` / `vertexai` 等，不再依赖任何单一厂商。`derive_model_capabilities` 纯配置驱动，能力/显示名不再硬编码。
 
-## 1.46.0 (2026-05-28)
+- **Moonshot 强绑定**：移除 `kimo`/`kimi` provider 类型、Moonshot OAuth 平台绑定（`auth.kimi.com`）与相关环境变量分支；接入任意兼容大模型。
+- **Moonshot Search/Fetch 服务**：移除 `moonshot_search` / `moonshot_fetch` 配置、`SearchWeb` 工具（`tools/web/search.py`）与 `FetchURL` 的 Moonshot 服务分支；`FetchURL` 保留本地 HTTP/Playwright 抓取（SSRF 防护、`trafilatura` 提取、403 回退）作为通用工具。
+- **外部 Moonshot skill**：移除 `kimi-find-skills` / `kimi-help-center` / `kimi-skills-finder` / `kimi-widget` 四个 skill，以及 `backend-building` 的 Kimi OAuth auth 功能（`api/kimi/`、`scripts/template/auth/`、`docs/Authentication.md`）。
+- **迁移叙事**：移除文档中的「升级到 Kimo Code」迁移横幅与 `EvolutionBanner.vue` 组件；GitHub 链接指向 `goldenxingxing/OpenKimo`。
 
-- Shell: Support styled text in welcome tips
-- ACP: Replay session history on load
-- Core: Prevent TTY hang on exit
-- Core: Close MCP connections during shutdown
+## v0.4.11 (2026-11-08)
 
-## 1.45.0 (2026-05-26)
+- **本地免登录模式**：无登录页的本地部署自动使用稳定的 `local` 用户身份，会话与跨会话记忆获得固定 `owner_id`，不再落入匿名占位符；桌面版启动时自动注入本地免登录环境变量并隐藏 Dock 图标。
+- **路径悬停「打开所在文件夹」**：回复里的本地路径悬停可一键打开所在文件夹（macOS / Windows 桌面版）。
 
-- Shell: `/clear` is now an alias for `/new` — both commands start a new session; previously `/clear` only cleared context without creating a new session
-- Shell: Fix misleading "Quota exceeded" prefix shown on every 403 error
+- **百分号编码本地链接解析**：回复里的本地文件/目录链接先解码百分号编码再解析，含空格或特殊字符的路径不再被误判为网页路由而返回 404。
 
-## 1.44.0 (2026-05-13)
+## v0.4.10 (2026-11-03)
 
-- Shell: Add slash command alias resolution — aliases such as `/h`, `?`, and `status` now resolve to their canonical commands (`/help`, `/usage`); the completer and help output display alias matches as `/name (alias)` for clarity
-- Shell: Fix `/usage` alias registration — the alias was incorrectly stored as `"/status"` instead of `"status"`, causing alias lookup to fail
+- **压缩后的上下文仍可找回**：会话上下文压缩时会自动归档完整原文，模型可按需调用 ContextRetrieve 取回被摘要掉的细节，不再“压缩即丢”。
+- **终端实验特性开关**：`/experimental` 查看/启用实验特性，`/theme load <file>` 加载自定义主题，`/image` 与 `/mermaid` 可在支持的终端内联预览图片和图表；`/sessions` 选择器新增文本过滤，可按标题/会话 ID/工作目录筛选。
 
-## 1.43.0 (2026-05-12)
+- **回复里的本地文件与目录链接可直接打开**：`output/...` 这类相对路径现在用系统默认应用打开文件、用访达打开目录，不再被当成网页路由返回 404；跨工作区（如 `local_agent_work/...`）路径也能正确解析。
+- **自进化验证进程不再残留**：验证子进程按整个进程组终止，后台任务拒绝脱离会话运行，避免停止后留下孤儿进程。
+- **Windows 端启动崩溃修复**：`fcntl` 改为按需导入，Windows 下不再因缺少 Unix 专属模块在启动时报 `ModuleNotFoundError`。
 
-- Security: Bump pillow to 12.2.0 to address CVE-2026-25990 (out-of-bounds write when loading PSD images); unblocks installs in environments that gate on the older pinned version
-- Shell: Fix missing visual spacing in the shell UI — add blank lines after user input echoes, content blocks, tool call results, notifications, error panels, and steer inputs so consecutive elements no longer collapse together
-- Shell: Restore markdown link highlighting (bright blue underlined text and cyan underlined URLs) and add underline separators to h2-h6 headings; adjust table rendering to use square box borders with visible edges
-- Core: Include completion timestamp and elapsed duration in background task terminal notifications, and add `finished_at` and `duration_s` to the notification payload for easier tracking
-- MCP: Stop FastMCP OAuth startup from printing Authlib deprecation warnings by upgrading the MCP client stack to FastMCP 3.2.4
-- MCP: Store OAuth MCP tokens in `~/.kimo/mcp-oauth/` using FastMCP 3's persistent storage API; users with existing OAuth MCP authorizations may need to run `kimo mcp auth <name>` once after upgrading
+## v0.4.9 (2026-10-30)
 
-## 1.42.0 (2026-05-11)
+- **自进化证据覆盖工作区会话**：自进化「证据 / 总览」现在把工作区（`session-data/`）里的任务执行证据也计入，不只是 App 自带的会话目录——用命令行或本地工作区跑的会话，其证据也能被「发起改进」分析与复用。
+- **「发起改进」不再无证据可改**：之前在工作区跑了真实任务后点「发起改进」可能报 “No replayable task evidence found”；现在证据从所有会话根聚合，有真实任务即可正常发起。
 
-- Shell: Switch the Windows shell backend from PowerShell to Git Bash, so the Shell tool now runs commands through `bash.exe` (POSIX semantics) instead of `powershell.exe`. Windows users get the same Unix-style command syntax (`&&`, `||`, `|`, `/dev/null`, `grep`, `sed`, etc.) as Linux/macOS. **Requires Git for Windows installed**: kimo-cli locates `bash.exe` via the `KIMO_CLI_GIT_BASH_PATH` env override → `where.exe git` → standard install paths (`C:\Program Files\Git\bin\bash.exe`); if none resolve, kimo-cli prints an install hint and exits at startup
-- Shell: Defend against hallucinated CMD-style `2>nul` redirects on Windows by rewriting them to `2>/dev/null` before reaching git-bash — without this defense git-bash would create a file literally named `nul` (a Windows reserved device name) that breaks `git add .` and `git clone`; on Linux/macOS, `>nul` is a legitimate redirect to a file named `nul` and is left untouched
-- File: Accept POSIX-form paths on Windows in `ReadFile`, `WriteFile`, `StrReplaceFile`, `Glob`, and `Grep` — these tools now recognize `/c/Users/foo` (Git Bash style), `/cygdrive/c/Users/foo` (Cygwin style), and `\\server\share` (UNC) in addition to native Windows paths, automatically converting to native form for filesystem operations
-- Shell: Clear partial streamed output when an LLM step is retried — previously, if a step failed mid-stream (e.g. rate limit or server error), the incomplete text and unfinished tool-call blocks from the aborted attempt would remain on screen and be mixed with the new attempt's output. The shell UI now discards the partial state and prints a retry banner showing the reason, attempt count, and wait time; print mode also discards buffered assistant messages on retry
-- Wire: Bump protocol version to 1.10 — add `StepRetry` event emitted when a step attempt fails and will be retried, carrying attempt count, wait time, and error details
-- Core: Stop plan-mode and afk-mode workflow prompts from being injected into subagents — subagents share session-level mode state for persistence, but their YAMLs typically exclude root workflow tools such as `EnterPlanMode`, `ExitPlanMode`, and `AskUserQuestion`. These prompt injections are now root-only. Tool-level read-only checks under plan mode are unchanged, so behavior compatibility is preserved
-
-## 1.41.0 (2026-04-30)
-
-- Plugin: Support installing plugins directly from a `.zip` URL — `kimo plugin install` now accepts HTTP(S) URLs ending in `.zip` (e.g. GitHub/GitLab archive links like `.../archive/refs/heads/main.zip`) and downloads + extracts them before resolving `plugin.json`, in addition to the existing git URL, local directory, and local zip-file sources
-- Shell: Enable clipboard image paste on headless Linux over SSH — when pyperclip is unavailable (e.g. DISPLAY is not set), Ctrl-V now falls back to xclip or wl-paste so remote clipboard bridges can still inject images; also prevents a UI crash from built-in clipboard shortcuts when pyperclip is broken
-
-## 1.40.0 (2026-04-28)
-
-- Core: Fix `--yolo` mode unintentionally preventing the model from calling `AskUserQuestion` — yolo used to inject a system reminder telling the model it was in "non-interactive mode" and must not ask, and the ask-user tool auto-dismissed in yolo. Both were wrong: yolo only bypasses permission approvals; it does not mean "the user is gone". Yolo no longer injects model guidance, and the user remains reachable through `AskUserQuestion`
-- CLI: Split permission bypass from unattended execution — `--yolo` bypasses permission approvals while the user is still at the terminal, while `--afk` / `/afk` means away-from-keyboard: `AskUserQuestion` is auto-dismissed and approvals are handled automatically. `--print` now uses runtime AFK behavior instead of yolo, matching its non-interactive execution model. The status bar shows `yolo` and `afk` independently, and `/yolo` and `/afk` toggle their own flag without disturbing the other
-- Config: Replace `skip_yolo_prompt_injection` with `skip_afk_prompt_injection` now that yolo no longer injects model guidance. The old config key is ignored if present
-- Shell: Fix `/yolo` toggling producing misleading UI messages when afk is also active — `/yolo` used to read the combined auto-approval state, so pressing it under afk would claim approval was now required even though afk still handled approvals automatically. `/yolo` now reads and writes only the yolo flag, leaving afk alone
-- Web: Fix AI title generation overwriting a manually-set title when the LLM call finishes after the user has already renamed the session — the final write now reloads state and yields to a `title_generated` flag set by another request
-- Web: Surface session rename, archive, unarchive, and title generation failures as toast notifications instead of only logging to the console
-- Web: Keep tool media previews visible when tool details are collapsed — images and videos returned by tools now render below the tool card instead of inside the collapsible detail area, so preview thumbnails remain accessible after collapsing a tool
-- Kosong: Fix stale API key after OAuth token refresh in Kimo provider — `on_retryable_error` now reads the current `api_key` from the live client instead of the cached `_api_key`, so that OAuth token refreshes applied via `client.api_key` are preserved when the client is rebuilt after a retryable error
-- Core: Approval requests no longer auto-timeout after 5 minutes, which previously surfaced as `Rejected by user`; active foreground and subagent approvals now wait indefinitely for user response
-- Shell: Fix `/usage` remaining quota rendering — the progress bar, warning colors, and `% left` label now all use the remaining quota ratio consistently, so high remaining quota shows as green/full and near-exhausted quota shows as yellow or red
-- Shell: Show active background agent task count in the prompt status bar — the existing `⚙ bash: N` badge only counted background Shell tasks and filtered out background Agent subagents, so when many subagents were running the prompt looked idle and users could not tell work was in progress; the toolbar now renders `⚙ bash: N` and `⚙ agent: N` as two independent badges (each hidden when its count is 0) and drops the agent badge first when the terminal is too narrow to fit both
-- Auth: Fix managed model list refresh silently failing for OAuth users with expired tokens — the background `/models` sync now detects 401 responses, forces an OAuth token refresh, and retries with the refreshed token; if the refresh fails or the refreshed token is still rejected, it falls back to the originally configured static API key instead of skipping the provider
-- Core: Fix connection recovery not triggering OAuth refresh when the retry returns 401 — after recreating the HTTP client on `APIConnectionError` or `APITimeoutError`, the retry now re-enters the full recovery path so a subsequent 401 correctly refreshes the OAuth token instead of bubbling to the user as an unrecoverable error
-- Shell: Echo `/skill:*` and `/flow:*` inputs in the transcript so workflow commands stay visible after enter; operational slash commands like `/usage` and `/model` remain hidden
-- Core: Raise default `max_steps_per_turn` from 500 to 1000 so long-running agents are less likely to hit the per-turn limit
-
-## 1.39.0 (2026-04-24)
-
-- Skill: Fix project-scope skills being ignored and user-scope skills silently winning name conflicts — the system prompt now groups discovered skills under `### Project` / `### User` / `### Extra` / `### Built-in` headings so the model can tell where each skill came from, and when the same name exists in multiple scopes the more specific scope wins (Project > User > Extra > Built-in) so a project's own `.kimo/skills/foo` or `.claude/skills/foo` correctly overrides a user-level or bundled `foo` instead of the other way around
-- Skill: Accept single-file `<name>.md` skills alongside the canonical `<name>/SKILL.md` subdirectory layout — useful when migrating a flat markdown collection into a skills directory; `name` defaults to the filename stem (frontmatter `name:` still wins if set), description follows the same three-step chain as subdirectory skills (frontmatter `description:` → first non-empty body line, capped at 240 characters → `"No description provided."` placeholder), and if a flat and a subdirectory skill share a name in the same directory the subdirectory wins with a warning
-- Skill: Add `extra_skill_dirs` config field for pulling in custom skill directories on top of the built-in / user / project auto-discovery — each entry may be an absolute path, a `~`-prefixed path (expanded against `$HOME`), or a path relative to the project root (the nearest `.git` ancestor of the work directory, not the current working directory); non-existent entries are silently skipped and symlink/trailing-slash duplicates canonicalize to a single root so a path listed twice or aliased to an already-discovered directory does not render twice in the system prompt
-- Skill: Harden discovery against `OSError` from `is_dir` / `iterdir` (for example when an `extra_skill_dirs` entry points at a directory with restricted permissions) — affected entries are logged and skipped instead of aborting the whole skill-discovery pass
-- Core: Fix DeepSeek V4 (and other OpenAI-compatible thinking-mode backends) returning 400 `The reasoning_content in the thinking mode must be passed back to the API` when a tool call follows a reasoning turn — `openai_legacy` providers now default `reasoning_key` to `"reasoning_content"` so the response's reasoning is stored in history and round-tripped automatically on subsequent turns. An optional `reasoning_key` field is also added to `LLMProvider` to override the field name (e.g. `"reasoning"` for non-standard gateways) or disable round-tripping entirely by setting it to `""`
-- Core: Add `skip_yolo_prompt_injection` config option to suppress the system reminder normally injected when yolo mode is active — useful when building custom applications on top of `KimoSoul` that do not need the non-interactive mode hint
-- Kimo: Add `KIMO_MODEL_THINKING_KEEP` environment variable that forwards its value verbatim to the Moonshot API as `thinking.keep`, enabling Preserved Thinking (e.g. `export KIMO_MODEL_THINKING_KEEP=all` to retain historical `reasoning_content` across turns); effective only for Moonshot models supporting Preserved Thinking (e.g. `kimi-k2.6` / `kimi-k2-thinking`), unset or empty string preserves the previous behavior and omits the field, and the override only applies when the current model is actually in thinking mode so the API never receives a `thinking.keep` without the companion `thinking.type`. Note that `keep=all` increases input tokens and API cost because history reasoning is resent
-- Kosong: Fix `Kimo.with_extra_body` silently dropping previously set `thinking.type` when a later call added another `thinking.*` field — the `thinking` sub-dict is now merged field-by-field instead of shallow-replaced, so composing `with_thinking(...)` with `with_extra_body({"thinking": {...}})` preserves both contributions
-- Kosong: Fix Kimo provider sending empty `content` alongside `tool_calls`, which caused 400 "text content is empty" errors from the Moonshot API. When an assistant message has tool calls and its visible content is effectively empty (no text or only whitespace/think parts), the `content` field is now omitted entirely
-- Shell: Fix approval request feedback text cursor rendering — the block cursor now correctly renders at the actual cursor position instead of always being pinned to the end of the line; when the cursor is in the middle of the text, the character under the cursor is drawn with reverse video (mimicking a terminal's native block cursor)
-- Kosong: Fix Moonshot 400 `At path 'properties.X': type is not defined` when an MCP server exposes tools whose parameter schemas have enum-only or otherwise type-less properties (seen with the JetBrains Rider MCP's `truncateMode`) — the Kimo provider now patches each tool's schema in-flight to fill in a JSON Schema `type` (inferred from `enum`/`const` values when possible, else defaulted to `"string"`), so the whole session no longer fails every request with a schema validation error; OpenAI and Anthropic paths are unaffected
-- Skill: Project-scope skill discovery now walks up to the nearest `.git` ancestor before looking for `.kimo/skills` / `.claude/skills` / `.codex/skills` / `.agents/skills`, so skills defined at the repository root are picked up even when kimo-cli is launched from a subdirectory (for example inside a monorepo package). Falls back to the work directory itself when no `.git` marker is found, so we never walk up into an unrelated parent tree.
-- Skill: Change the default of `merge_all_available_skills` from `false` to `true`. kimo-cli now merges all existing user- and project-level brand skill directories (`.kimo/skills`, `.claude/skills`, `.codex/skills`) by default instead of only using the first one found, so users who keep skills in multiple brand directories — for example both `~/.kimo/skills` and `~/.claude/skills` — see every skill out of the box. **Behavior change**: users who previously relied on the first-match default can restore it by setting `merge_all_available_skills = false` in their config.
-
-## 1.38.0 (2026-04-22)
-- Shell: Fix `Rejected by user` misleading message when an approval modal times out — after the 300s safety timeout, the tool call now rejects with `Rejected: approval timed out`, so users returning to their session after stepping away can tell the rejection was a timeout rather than a manual rejection. Pass `--yolo`/`-y` to auto-approve tool calls if you regularly leave sessions unattended
-- Auth: Fix OAuth users being forced to `/login` again after an unrelated refresh-token rotation race — when a concurrently-running kimo-cli instance (terminal, VS Code extension, or `kimo -p` one-shot) legitimately rotated the refresh token, the current instance's now-stale refresh request would come back with a 401, and a TOCTOU window between the "did another instance rotate?" disk check and the `delete_tokens` call could wipe the credentials file even though a valid rotated token was about to be written to it; the in-memory cache is still cleared so truly revoked tokens surface on the next request, but the file is preserved so a concurrent instance's freshly-rotated token can be recovered, and an eventual `/login` still overwrites it atomically
-- Kosong: Fix parallel tool results being split into multiple user messages in Anthropic provider — consecutive tool-result-only user messages are now merged into a single message, complying with the Anthropic Messages API spec that all `tool_use` blocks in an assistant turn must be answered within one user message; this fixes 400 errors on strict Anthropic-compatible backends (e.g. DeepSeek `/anthropic` endpoint) and prevents the official backend from silently teaching the model to avoid parallel tool calls
-
-## 1.37.0 (2026-04-20)
-
-- Print: Wait for background tasks before exiting — in one-shot `--print` mode, the process now waits for running background agents to finish and lets the model process their results, instead of exiting and killing them. The wait is capped at `min(max(active_task.timeout_s or agent_task_timeout_s), print_wait_ceiling_s)` (default ceiling 1h); on timeout the tasks are killed and the model gets one more turn via a `<system-reminder>` to summarise before exit
-- Shell/Print: On exit the CLI now lists each background task being killed (id + description) on stderr and waits out the configured grace period before reporting any tasks that have not reached terminal state (split into "still terminating" for workers mid-shutdown vs "stop request failed" for genuinely leaking tasks); `keep_alive_on_exit=true` still skips the entire path
-- Auth: Auto-refresh the managed model list at startup for OAuth-logged-in users — the CLI now fetches the latest models from the provider's `/models` endpoint as a background task when the shell launches, so newly released models become available without needing to log out and log back in; failures are silent and never block startup, and custom `--config` sessions keep their previous behavior
-- Shell: Show the provider-supplied `display_name` (e.g. `k2.6-code-preview`) for managed models across the welcome panel, prompt status bar, `/model` picker, and `/model` switch confirmation messages; when the backend does not return one, the CLI falls back to the internal model ID as before
-
-## 1.36.0 (2026-04-17)
-
-- Anthropic: Fix Claude Opus 4.7 returning `invalid_request_error` — Opus 4.7 (which rejects the legacy `{type: "enabled", budget_tokens: N}` thinking config) now correctly uses adaptive thinking, and the client explicitly sets `display: "summarized"` so thinking content still streams back (Opus 4.7 silently changed the default to `"omitted"`); Bedrock/Vertex name variants (e.g., `aws/claude-opus-4-7`, `anthropic.claude-opus-4-7-v1:0`) and `claude-mythos-preview` are also recognised, and future Claude versions ≥ 4.6 are detected automatically via version extrapolation instead of hard-coded substring matching
-- Web: Fix markdown rendering spacing in the web UI — restore proper vertical spacing between paragraphs, lists, code blocks, blockquotes, and headings instead of collapsing all margins to zero
-- Shell: Fix missing loading indicator during active turns — the moon spinner now shows as a fallback whenever the model is working but no other indicator is visible, covering gaps after tool calls finish, between turn start and first step, and when an empty thinking block arrives from the provider
-- Core: Increase default `max_steps_per_turn` from 100 to 500 to allow longer uninterrupted agent runs out of the box
-- Web: Fix unresponsive copy, download, and preview buttons on rendered code blocks
-
-## 1.35.0 (2026-04-15)
-
-- Shell: Flip `show_thinking_stream` default to `true` so fresh installs see the streaming reasoning preview out of the box; set it to `false` in your config to keep the compact 1.32 indicator
-- Web: Prevent stream watchdog from reconnecting during pending approval or question — the 45-second inactivity watchdog no longer triggers a reconnect while the user is actively handling an approval request or answering a question, preventing interrupted interactions
-- Web: Fix session recovery after stream errors — when a session process exits or hits a read-loop error, stale in-flight prompt IDs are now cleared before broadcasting the error, allowing the frontend to send new messages instead of getting "Session is busy"; the activity status indicator also surfaces the actual error message from the stream
-- Core: Fix Wire server prompt handler leaving sessions stuck busy on uncaught exceptions — SSL errors, connection errors, and other unexpected failures are now caught by a fallback handler and returned as `INTERNAL_ERROR`, allowing the session to recover instead of hanging indefinitely
-
-## 1.34.0 (2026-04-14)
-
-- Core: Fix CLI crash on `TaskStop` — stopping a stuck background agent no longer prints `Unhandled exception in event loop / Exception None` and freezes the terminal; the cancelled task is now kept in the manager's live-tasks dict until its runner finishes cleaning up, preventing Python's GC from reaping the still-pending task
-- Shell: Fix inline diff highlights misaligned on lines containing tabs — raw-code diff offsets are now mapped to rendered positions via expandtabs column tracking so highlight spans land correctly after tab expansion
-- Shell: Add `show_thinking_stream` config option to opt back into the legacy streaming reasoning preview — when set to `true`, the live area shows the classic `Thinking...` spinner above a 6-line scrolling preview of the raw reasoning text and the full reasoning markdown is committed to history when the block ends; defaults to `false` to keep the compact 1.32 indicator
-
-## 1.33.0 (2026-04-13)
-
-- Shell: Unify managed model display as "Kimo for Code" and drop hardcoded `kimi-k2.5` version references from the welcome screen and `/login` tip
-
-## 1.32.0 (2026-04-13)
-
-- Core: Truncate MCP tool output to 100K characters to prevent context overflow — all content types (text and inline media such as image/audio/video data URLs) share a single character budget; tools like Playwright that return full DOMs (500KB+) or large base64 screenshots are now capped with a truncation notice; oversized media parts are dropped; unsupported MCP content types are gracefully handled instead of crashing the turn
-- CLI: Fix PyInstaller binary missing lazy CLI subcommands — `kimo info`, `kimo export`, `kimo mcp`, `kimo plugin`, `kimo vis`, and `kimo web` now work correctly in the standalone binary distribution
-- Shell: Streamline the thinking indicator into a compact single-line layout — shows a `Thinking` label with animated dots, elapsed time, token count, and a live tokens/second pulse; finalises with a `Thought for Xs · N tokens` trace in history
-
-## 1.31.0 (2026-04-10)
-
-- Core: Cap `list_directory` output as a depth-limited tree to prevent token-limit blowup in large directories — replaces the unbounded flat listing with a 2-level tree (root: 30 entries, child: 10 per subdirectory), dirs-first alphabetical sorting, and `"... and N more"` truncation hints so the model knows to explore further (fixes #1809)
-- Shell: Add blocking update gate on interactive shell startup — when a newer version is detected (from the existing background check cache), a blocking prompt appears before the shell loads, offering `[Enter]` to upgrade immediately, `[q]` to continue and be reminded next time, or `[s]` to skip reminders for that version; respects the `KIMO_CLI_NO_AUTO_UPDATE` environment variable; replaces the previous repeating toast notification for available updates
-- Auth: Harden OAuth token refresh to prevent unnecessary re-login — 401 errors now trigger automatic token refresh and retry instead of forcing `/login`; multiple simultaneous CLI instances coordinate refresh via a cross-process file lock to avoid race conditions; token persistence uses atomic writes with `fsync` to prevent corruption; adds dynamic refresh threshold, 5xx retry during token refresh, and proper token revocation cleanup
-- Core: Fix agent loop silently stopping when model response contains only thinking content — detect think-only responses (reasoning content with no text or tool calls) as an incomplete response error and retry automatically
-- Core: Fix crash on streaming mid-flight network disconnection — when the OpenAI SDK raises a base `APIError` (instead of `APIConnectionError`) during long-running streams, the error is now correctly classified as retryable, enabling automatic retry and connection recovery instead of an unrecoverable crash
-- Shell: Exclude empty current session from `/sessions` picker — completely empty sessions (no conversation history and no custom title) are no longer shown in the session list; sessions with a custom title are still displayed
-- Shell: Fix slash command completion Enter key behavior — accepting a completion now submits in a single Enter press; auto-submit is limited to slash command completions only; file mention completions (`@`) accept without submitting so the user can continue editing; re-completion after accepting is suppressed to prevent stale completion state
-- Shell: Add directory scope toggle to `/sessions` picker — press `Ctrl+A` to switch between showing sessions for the current working directory only or across all known directories; uses a new full-screen session picker UI with header scope indicator and footer hint bar
-- Shell: Add `/btw` side question command — ask a quick question during streaming without interrupting the main conversation; uses the same system prompt and tool definitions for prompt cache alignment; responses display in a scrollable modal panel with streaming support
-- Shell: Redesign bottom dynamic area — split the monolithic `visualize.py` (1865 lines) into a modular package (`visualize/`) with dedicated modules for input routing, interactive prompts, approval/question panels, and btw modal; unify input semantics with `classify_input()` for consistent command routing
-- Shell: Add queue and steer dual-channel input during streaming — Enter queues messages for delivery after the current turn; Ctrl+S injects messages immediately into the running turn's context; queued messages display in the prompt area with count indicator and can be recalled with ↑
-- Shell: Add `BtwBegin`/`BtwEnd` wire events for cross-client side question support
-- Shell: Improve elapsed time formatting in spinners — durations over 60 seconds now display as `"1m 23s"` instead of `"83s"`; sub-second durations show `"<1s"`
-- Shell: Fix Rich markup injection in btw panel — user questions containing `[`/`]` characters are now escaped to prevent broken rendering or style injection in spinner text and panel titles
-- Core: Improve error diagnostics — enrich internal logging coverage, include relevant log files and system manifest in `kimo export` archives, and surface actionable error messages for common failures (auth, network, timeout, quota)
-- Shell: Gracefully exit with crash report when working directory becomes inaccessible during session — detects CWD loss (external drive unplugged, directory deleted, or filesystem unmounted) and prints a session recovery panel with session ID and work directory before exiting cleanly
-- Shell: Use `git ls-files` for `@` file mention discovery — file completer now queries `git ls-files --recurse-submodules` with a 5-second timeout as the primary discovery mechanism, falling back to `os.walk` for non-git repositories; this fixes large repositories (e.g., apache/superset with 65k+ files) where the 1000-file limit caused late-alphabetical directories to be unreachable (fixes #1375)
-- Core: Add shared `file_filter` module — unifies file mention logic between shell and web UIs via `src/kimo_cli/utils/file_filter.py`, providing consistent path filtering, ignored directory exclusion, and git-aware file discovery
-- Shell: Prevent path traversal in file mention scope parameter — the `scope` parameter in file completer requests is now validated to prevent directory traversal attacks
-- Web: Restore unfiltered directory listing in file browser API — file browser endpoint no longer applies git-aware filtering, ensuring all files are visible in the web UI file picker
-- Todo: Refactor SetTodoList to persist state and prevent tool call storms — todos are now persisted to session state (root agent) and independent state files (sub-agents); adds query mode (omit `todos` to read current state) and clear mode (pass `[]`); includes anti-storm guidance in tool description to prevent repeated calls without progress (fixes #1710)
-- ReadFile: Add total line count to every read response and support negative `line_offset` for tail mode — the tool now reports `Total lines in file: N.` in its message so the model can plan subsequent reads; negative `line_offset` (e.g. `-100`) reads the last N lines using a sliding window, useful for viewing recent log output without shell commands; the absolute value is capped at 1000 (MAX_LINES)
-- Shell: Fix black background on inline code and code blocks in Markdown rendering — `NEUTRAL_MARKDOWN_THEME` now overrides all Rich default `markdown.*` styles to `"none"`, preventing Rich's built-in `"cyan on black"` from leaking through on non-black terminals
-
-## 1.30.0 (2026-04-02)
-
-- Shell: Refine idle background completion auto-trigger — resumed shell sessions no longer auto-start a foreground turn from stale pending background notifications before the user sends a message, and fresh background completions now wait briefly while the user is actively typing to avoid stealing the prompt or breaking CJK IME composition
-- Core: Fix interrupted foreground turns leaving unbalanced wire events — `TurnEnd` is now emitted even when a turn exits via cancellation or step interruption, preventing dirty session wire logs from accumulating across resume cycles
-- Core: Improve session startup resilience — `--continue`/`--resume` now tolerate malformed `context.jsonl` records and corrupted subagent, background-task, or notification artifacts; the CLI skips invalid persisted state where possible instead of failing to restore the session
-- CLI: Improve `kimo export` session export UX — `kimo export` now previews the previous session for the current working directory and asks for confirmation, showing the session ID, title, and last user-message time; adds `--yes` to skip confirmation; also fixes explicit session-ID invocations where `--output` after the argument was incorrectly parsed as a subcommand
-- Grep: Add `include_ignored` parameter to search files excluded by `.gitignore` — when set to `true`, ripgrep's `--no-ignore` flag is enabled, allowing searches in gitignored artifacts such as build outputs or `node_modules`; sensitive files (like `.env`) remain filtered by the sensitive-file protection layer; defaults to `false` to preserve existing behavior
-- Core: Add sensitive file protection to Grep and Read tools — `.env`, SSH private keys (`id_rsa`, `id_ed25519`, `id_ecdsa`), and cloud credentials (`.aws/credentials`, `.gcp/credentials`) are now detected and blocked; Grep filters them from results with a warning, Read rejects them outright; `.env.example`/`.env.sample`/`.env.template` are exempted
-- Core: Fix parallel foreground subagent approval requests hanging the session — in interactive shell mode, `_set_active_approval_sink` no longer flushes pending approval requests to the live view sink (which cannot render approval modals); requests stay in the pending queue for the prompt modal path; also adds a 300-second timeout to `wait_for_response` so that any unresolved approval request eventually raises `ApprovalCancelledError` instead of hanging forever
-- CLI: Add `--session`/`--resume` (`-S`/`-r`) flag to resume sessions — without an argument opens an interactive session picker (shell UI only); with a session ID resumes that specific session; replaces the reverted `--pick-session`/`--list-sessions` design with a unified optional-value flag
-- CLI: Add CJK-safe `shorten()` utility — replaces all `textwrap.shorten` calls so that CJK text without spaces is truncated gracefully instead of collapsing to just the placeholder
-- Core: Fix skills in brand directories (e.g. `~/.kimo/skills/`) silently disappearing when a generic directory (`~/.config/agents/skills/`) exists but is empty — skill directory discovery now searches brand and generic directory groups independently and merges both results, instead of stopping at the first existing directory across all candidates
-- Core: Add `merge_all_available_skills` config option — when enabled, skills from all existing brand directories (`~/.kimo/skills/`, `~/.claude/skills/`, `~/.codex/skills/`) are loaded and merged instead of using only the first one found; same-name skills follow priority order kimo > claude > codex; disabled by default
-- CLI: Add `--plan` flag and `default_plan_mode` config option — start new sessions in plan mode via `kimo --plan` or by setting `default_plan_mode = true` in `~/.kimo/config.toml`; resumed sessions preserve their existing plan mode state
-- Shell: Add `/undo` and `/fork` commands for session forking — `/undo` lets you pick a previous turn and fork a new session with the selected message pre-filled for re-editing; `/fork` duplicates the entire session history into a new session; the original session is always preserved
-- CLI: Add `-r` as a short alias for `--session` and print a resume hint (`kimo -r <session-id>`) whenever a session exits — covers normal exit, Ctrl-C, `/undo`, `/fork`, and `/sessions` switch so users can always find their way back
-- Core: Fix `custom_headers` not being passed to non-Kimo providers — OpenAI, Anthropic, Google GenAI, and Vertex AI providers now correctly forward custom headers configured in `providers.*.custom_headers`
-
-## 1.29.0 (2026-04-01)
-
-- Core: Support hierarchical `AGENTS.md` loading — the CLI now discovers and merges `AGENTS.md` files from the git project root down to the working directory, including `.kimo/AGENTS.md` at each level; deeper files take priority under a 32 KiB budget cap, ensuring the most specific instructions are never truncated
-- Core: Fix empty sessions lingering on disk after exit — sessions created but never used are now cleaned up on all exit paths (failure exit, session switch, unexpected errors), not just on successful exit
-- Shell: Add `KIMO_CLI_PASTE_CHAR_THRESHOLD` and `KIMO_CLI_PASTE_LINE_THRESHOLD` environment variables to control when pasted text is folded into a placeholder — lowering these thresholds works around CJK input method breakage after multiline paste on some terminals (e.g., XShell over SSH)
-- Shell: Fix diff panel rendering corruption on terminals without truecolor support (e.g. Xshell) — `render_to_ansi` no longer hardcodes 24-bit color; Rich now auto-detects terminal capability via `COLORTERM`/`TERM` environment variables
-- Web: Fix white screen after CLI upgrade caused by browser caching stale `index.html` — the server now returns `Cache-Control: no-cache` for HTML and `immutable` for hashed assets, preventing 404s on renamed chunks
-- Core: Fix file write converting LF to CRLF on Windows — `writetext` now opens files with `newline=""` to prevent Python's universal newline translation from silently converting `\n` to `\r\n`
-- Core: Support `socks://` proxy scheme — proxy tools like V2RayN set `ALL_PROXY=socks://...` which httpx/aiohttp don't recognise; the CLI now normalises `socks://` to `socks5://` at startup so all HTTP clients and subprocesses work correctly behind a SOCKS proxy
-- Shell: Add `/title` (alias `/rename`) command to manually set session titles — titles are now stored in `state.json` alongside other session state; legacy `metadata.json` is automatically migrated on first load
-- Shell: Fix garbled pager output when `MANPAGER` is set (e.g. `bat`) — the console pager now ignores `MANPAGER` and delegates to `pydoc.pager()`, preserving `PAGER` and all platform-specific fallbacks
-- Explore: Enhance explore agent with specialist role, thoroughness levels, and automatic environment context — explore agents now gather repository environment information at launch to improve investigation quality; the main agent is guided to prefer explore for codebase research and plan mode encourages explore-first investigation
-- Shell: Fix tool call display showing raw OSC 8 escape bytes (e.g. `8;id=391551;https://…`) instead of clean text — hyperlink sequences are now wrapped as zero-width escapes for prompt_toolkit compatibility, preserving clickable links in supported terminals
-- Core: Add OS and shell information to the system prompt — the model now knows which platform it is running on and receives a Windows-specific instruction to prefer built-in tools over Shell commands, preventing Linux command errors in PowerShell
-- Shell: Fix `command` parameter description saying "bash command" regardless of platform — the description is now platform-neutral
-- Web: Fix auto-title overwriting manual session rename — when a user renames a session through the web UI, the new title is now preserved and no longer replaced by the auto-generated title
-## 1.28.0 (2026-03-30)
-
-- Core: Fix file write/replace tools freezing the event loop — diff computation (`build_diff_blocks`) is now offloaded to a thread via `asyncio.to_thread`, preventing the UI from hanging when editing large files
-- Shell: Fix `_watch_root_wire_hub` silently dying on handler exceptions — the watcher now catches and logs exceptions (matching the pattern in `wire/server.py`) and handles `QueueShutDown` gracefully, preventing approval flow from silently breaking mid-session
-- Core: Skip O(n²) diff computation for huge files (>10 000 lines) — files above the threshold now show a summary block instead of computing a full diff, and unchanged files short-circuit immediately
-- Wire: Add `is_summary` field to `DiffDisplayBlock` (Wire 1.8) — marks diff blocks that contain a line-count summary instead of actual diff content, allowing clients to render them appropriately
-- Web: Render large-file diff summaries — when a diff block is marked `is_summary`, the web UI shows a compact "File too large for inline diff" notice with line counts instead of attempting to compute a diff
-- Auth: Fix OAuth users getting "incorrect API KEY" when running skills or after idle — 401 errors now show a clear "please /login" message instead of the raw API error; the ACP layer correctly triggers re-login flow for VS Code extension users
-- Web: Fix session title generation always failing for OAuth users — the title generator now uses OAuth tokens and refreshes them before calling the model
-- Core: Add timeout protection for Agent tool and HTTP requests — all `aiohttp` sessions now default to 120 s total / 60 s read timeout; the Agent tool gains an optional `timeout` parameter (foreground default 10 min, background default 15 min); background agent tasks are marked `timed_out` on expiry with proper notification semantics
-- Grep: Fix tool hanging and becoming uninterruptible — replaced blocking `ripgrepy.run()` with async subprocess execution; the tool now responds to Ctrl-C immediately and has a 20-second timeout with partial result return
-- Grep: Add token efficiency improvements — default `head_limit` of 250 with `offset` pagination, `--hidden` search with VCS directory exclusion, `files_with_matches` sorted by modification time, relative path output, and `--max-columns 500` for non-content modes
-- Grep: `line_number` (`-n`) now defaults to `true` in content mode — line numbers are included by default so the model can reference precise code locations
-- Grep: `count_matches` mode now includes a summary in the message — e.g. "Found 30 total occurrences across 10 files."
-- ACP: Fix `ValueError: list.index(x): x not in list` crash when ACP is launched via `kimi-code` or `kimo-cli` entry-points (e.g. JetBrains AI Assistant)
-- Core: Fix OpenAI-compatible APIs (e.g. One API) returning 400 errors in multi-turn conversations when the server returns `reasoning_content` by default — `reasoning_effort` is now auto-set to `"medium"` when history contains thinking content and `reasoning_key` is configured
-- Shell: Add `/theme` command and dark/light theme support — users with light terminal backgrounds can now switch to a light color palette via `/theme light` or `theme = "light"` in `config.toml`; diff highlights, task browser, prompt UI, and MCP status colors all adapt to the selected theme
-- Core: Fix context overflow before compaction — tool result tokens are now estimated and included in the auto-compaction trigger check, preventing "exceeded model token limit" errors when large tool outputs push the context beyond the model limit between API calls
-- Core: Add hooks system (Beta) — configure `[[hooks]]` in `config.toml` to run custom shell commands at 13 lifecycle events including `PreToolUse`, `PostToolUse`, `SessionStart`, `Stop`, etc.; supports regex matching, timeout handling, and blocking operations via exit code 2
-- Shell: Add `/hooks` command — list all configured hooks with event counts
-- Wire: Add `HookTriggered` and `HookResolved` event types (Wire 1.7) — notify clients when hooks start and finish executing, including event type, target, action (allow/block), and duration
-- Wire: Add `HookRequest` and `HookResponse` message types — allow wire clients to subscribe to hook events and provide their own handling logic with allow/block decisions
-- CLI: `--skills-dir` now supports multiple directories and overrides default discovery — when specified, the directories replace user/project skills discovery (repeatable flag)
-- Shell: Fix notification messages leaking into session replay and export — background task notification tags (`<notification>`, `<task-notification>`) are now filtered out when resuming a session (`/sessions`) and when exporting (`/export`) or importing (`/import`) conversation history
-- Web: The "Open" button in the workspace header now remembers the last-used application — clicking "Open" directly opens with the previous choice, while the dropdown arrow lets you pick a different app
-- Web: Fix archived sessions count badge showing only the loaded page size — the badge now displays "100+" when more archived sessions exist beyond the first page
-- Shell: Fix pasted text placeholders not expanded in modal answers — clipboard content pasted into approval or question panels is now correctly interpolated before being sent to the model
-- Vis: Add `--network / -n` flag — launch the visualizer on all network interfaces with auto-detected LAN IP display, matching `kimo web` behavior
-- Vis: Add `/vis` slash command — switch from the interactive shell to the tracing visualizer in one step, mirroring the existing `/web` command
-- Vis: Improve session list performance — async backend scanning, request concurrency limiting, and infinite-scroll pagination prevent browser freezes on large session stores
-- Vis: Add 7 missing wire event types — `SteerInput`, `MCPLoadingBegin/End`, `Notification`, `PlanDisplay`, `ToolCallRequest`, and `QuestionRequest` now display with proper colors and summaries
-- Vis: Show token and cache details in StatusUpdate — each status update now displays context token count, max tokens, input token breakdown with cache hit rate, and MCP connection status
-- Vis: Show structured tool call summaries — `ReadFile`, `Shell`, `Glob`, `Grep`, `Agent`, and other tool calls display file paths, commands, or patterns inline instead of just the function name
-- Vis: Add System Prompt card in Context Messages — the `_system_prompt` entry is rendered as a dedicated blue card showing estimated token count and expandable full content
-- Vis: Show cache hit rate in session header — the stats bar now displays overall cache efficiency (e.g., `89% cache`) alongside token counts
-- Vis: Highlight slow operations — time deltas exceeding 10 s appear in amber and those exceeding 60 s in red, making performance bottlenecks immediately visible
-- Vis: Prefer human-readable `message` field in ToolResult summaries — results now show descriptive text like "Command executed successfully" instead of raw output
-- Vis: Show approval rejection feedback — `ApprovalResponse` summaries include the user's correction text when a tool call is rejected
-
-## 1.27.0 (2026-03-28)
-
-- Shell: Add `/feedback` command — submit feedback directly from the CLI session; the command falls back to opening GitHub Issues on network errors or timeouts
-- Shell: Redesign diff rendering for tool results — file diffs now display with line numbers, background colors (green/red), syntax highlighting, and inline word-level change markers; approval previews show only changed lines for a compact view; Ctrl-E pager uses the same unified style
-- Shell: Update syntax highlighting theme — replace the magenta-heavy color scheme with a more balanced palette mapped to ANSI colors for terminal compatibility; improved color diversity and readability across dark and light terminal backgrounds
-- Shell: Fix approval panel not visible when multiple subagents are running — approval and question panels are now rendered at the top of the live view, ensuring they remain visible even when tool-call output exceeds the terminal height
-- CLI: Fix `--print` mode returning exit code 0 on errors — print mode now exits with code 1 for permanent failures (auth errors, invalid config, etc.) and code 75 for retryable failures (429 rate limit, 5xx server errors, connection timeouts), enabling CI/eval runners to detect failures and decide whether to retry
-- Plan: Display plan content inline in the chat instead of hiding behind a pager — plans are now rendered as a bordered panel directly in the conversation history, with the plan file path shown for reference
-- Plan: Add "Reject and Exit" option to plan approval — users can now reject a plan and exit plan mode in one step, in addition to the existing Approve, Revise, and Reject options
-- Wire: Add `PlanDisplay` event type (Wire 1.7) — carries plan content and file path for inline rendering by clients
-- Shell: Stream markdown output incrementally — completed markdown blocks (paragraphs, lists, code fences, tables) are now rendered and printed to the terminal as they arrive during streaming, instead of being buffered until the turn ends
-- Shell: Show elapsed time and estimated token count on thinking/composing spinners — the spinner now displays `Thinking... 5s · 312 tokens` with a live-updating counter during generation
-- Shell: Add scrolling preview for thinking content — the last 6 lines of the model's thinking process are shown in real time as a grey italic preview beneath the spinner
-- Shell: Reduce prompt input area reserved space from 10 to 6 lines
-- Glob: Allow `Glob` tool to access skills directories — the tool can now search within discovered skill roots in addition to the workspace
-- Glob: Expand `~` in directory path before validation — the Glob tool now resolves the tilde to the user's home directory before checking path validity
-
-## 1.26.0 (2026-03-25)
-
-- Kosong: Fix Google GenAI provider sending `id` in `FunctionCall`/`FunctionResponse` parts — Gemini API returns HTTP 400 when `id` is included; remove the field from wire format while keeping internal `tool_call_id` tracking unchanged
-- Core: Fix MCP server stderr pollution — stderr redirection is now installed before MCP servers start, so subprocess logs (e.g., OAuth debug output from `mcp-remote`) are captured into the log file instead of being printed to the terminal
-- Shell: Fix subprocess hang on interactive prompts — the `Shell` tool now closes stdin immediately and sets `GIT_TERMINAL_PROMPT=0` so commands that require credentials (e.g. `git push` over HTTPS) fail fast instead of blocking until timeout
-- Core: Fix JSON parsing error when LLM tool call arguments contain unescaped control characters — use `json.loads(strict=False)` across all LLM output parsing paths to prevent tool execution failure and session corruption
-- Shell: Auto-trigger agent when background tasks complete while idle — the shell now detects when a background bash command or agent task finishes and automatically starts a new agent turn to process the results, instead of waiting for the user to type something
-- Core: Fix `QuestionRequest` hanging in print mode — `AskUserQuestion`, `EnterPlanMode`, and `ExitPlanMode` now auto-resolve when running in non-interactive (yolo) mode, preventing indefinite tool call hangs in `--print` sessions
-- Core: Fix background agent task output not visible until completion — `/task` browser and `TaskOutput` tool now show real-time output while background agent tasks are running, by tee-writing to the task log during execution instead of copying on completion
-- Core: Strengthen system prompt to encourage tool use for coding tasks — the agent now defaults to taking action with tools instead of outputting code as plain text
-- Core: Retry `httpx.ProtocolError` and `504 Gateway Timeout` during generation — streaming protocol disconnects and transient 504 responses now follow the existing retry path instead of aborting the turn immediately on unstable networks
-- Kosong: Fix `httpx.ReadTimeout` leaking through Anthropic provider during streaming — the exception now correctly converts to `APITimeoutError`, enabling retry logic that was previously bypassed
-
-## 1.25.0 (2026-03-23)
-
-- Core: Add plugin system (Skills + Tools) — plugins extend Kimo Code CLI with custom tools packaged as `plugin.json`; tools are commands that run in isolated subprocesses and return their stdout to the agent; plugins support automatic credential injection via `inject` configuration
-- Core: Support multi-plugin repositories — `kimo plugin install` accepts git URLs with subpath to install a specific plugin from a monorepo (e.g., `https://github.com/org/repo.git/plugins/my-plugin`); when no subpath is provided and no root `plugin.json` exists, the CLI lists available plugins in immediate subdirectories
-- Core: Unify plugin credential injection — plugins can declare `inject` fields in `plugin.json` to receive `api_key` and `base_url` from the host's configured LLM provider; works with both OAuth-managed tokens and static API keys
-- Core: Add `Agent` tool for subagent delegation — the agent can now spawn persistent subagent instances with three built-in types (`coder`, `explore`, `plan`) to handle focused subtasks; each instance maintains its own context history within the session and can run in foreground or background with automatic result summarization
-- Core: Unified approval runtime — approval requests from both foreground tool calls and background subagents are now coordinated through a single runtime and surfaced through the root UI channel; rejection responses can include feedback text to guide the model's next attempt
-- Shell: Add interactive approval request panel — a new inline panel displays tool call details (diffs, shell commands) with options to approve once, approve for session, reject, or reject with written feedback to instruct the model on what to do instead
-- Wire: Bump protocol version to 1.6 — `SubagentEvent` now includes `agent_id`, `subagent_type`, and `parent_tool_call_id` fields; `ApprovalRequest` includes source metadata (`source_kind`, `source_id`); `ApprovalResponse` supports a `feedback` field
-- Vis: Add agents panel — new "Agents" tab in `kimo vis` to inspect subagent instances, view their events, and filter the wire timeline by agent scope
-- Core: Change `TaskOutput` `block` parameter default from `true` to `false` — `TaskOutput` now returns a non-blocking status/output snapshot by default; set `block=true` only when you intentionally want to wait for task completion
-- Shell: Show the current working directory, git branch, dirty state, and ahead/behind sync status directly in the prompt toolbar
-- Shell: Surface active background bash task counts in the toolbar, rotate shortcut tips on a timer, and gracefully truncate the toolbar on narrow terminals to avoid overflow
-- Web: Fix tool execution status synchronization on cancel and approval — tools now correctly transition to `output-denied` state when generation is stopped, and show the loading spinner (instead of checkmark) while executing after approval
-- Web: Dismiss stale approval and question dialogs on session replay — when replaying a session or when the backend reports idle/stopped/error status, any pending approval/question dialogs are now properly dismissed to prevent orphaned interactive elements
-- Web: Enable inline math formula rendering — single-dollar inline math (`$...$`) is now supported in addition to block math (`$$...$$`)
-- Web: Improve Switch toggle proportions and alignment — the toggle track is now larger (36×20) with a consistent 16px thumb and smoother 16px travel animation
-- Web: Show subagent type labels in activity panels — subagent activities now display their type (e.g. "Coder agent working") instead of the generic "Agent" label
-- Web: Add feedback mode to approval dialog — press `4` to reject with written feedback text that guides the model's next attempt; approval requests from subagents show a source label and preview content (diffs, commands)
-- Web: Visually distinguish sub-agent origin tool calls — tool messages originating from a subagent are rendered with a left border and a source type label for clearer attribution
-
-## 1.24.0 (2026-03-18)
-
-- Shell: Increase pasted text placeholder thresholds to 1000 characters or 15 lines (previously 300 characters or 3 lines), making voice/typeless workflows less disruptive
-- Core: Plan mode now supports multiple selectable approach options — when the agent's plan contains distinct alternative paths, `ExitPlanMode` can present 2–3 labeled choices for the user to pick which approach to execute; the chosen option is returned to the agent as the selected approach
-- Core: Persist plan session ID and file path across process restarts — the plan session identifier and file slug are saved to `SessionState`, so restarting Kimo Code mid-plan resumes the same plan file in `~/.kimo/plans/` instead of creating a new one
-- Core: Plan mode now supports incremental plan edits — the agent can use `StrReplaceFile` to surgically update sections of the plan file instead of rewriting the entire file with `WriteFile`, and non-plan file edits are now hard-blocked rather than requiring approval
-- Core: Defer MCP startup and surface loading progress — MCP servers now initialize asynchronously after the shell UI starts, with live progress indicators showing connection status; Shell displays connecting and ready states in the status area, Web shows server connection status
-- Core: Optimize lightweight startup paths — implement lazy-loading for CLI subcommands and version metadata, significantly reducing startup time for common commands like `--version` and `--help`
-- Build: Fix Nix `FileCollisionError` for `bin/kimo` — remove duplicate entry point from `kimi-code` package so `kimo-cli` owns `bin/kimo` exclusively
-- Shell: Preserve unsubmitted input across agent turns — text typed in the prompt while the agent is running is no longer lost when the turn ends; the user can press Enter to submit the draft as the next message
-- Shell: Fix Ctrl-C and Ctrl-D not working correctly after an agent run completes — keyboard interrupts and EOF were silently swallowed instead of showing the tip or exiting the shell
-
-## 1.23.0 (2026-03-17)
-
-- Shell: Add background bash — the `Shell` tool now accepts `run_in_background=true` to launch long-running commands (builds, tests, servers) as background tasks, freeing the agent to continue working; new `TaskList`, `TaskOutput`, and `TaskStop` tools manage task lifecycle, and the system automatically notifies the agent when tasks reach a terminal state
-- Shell: Add `/task` slash command with interactive task browser — a three-column TUI to view, monitor, and manage background tasks with real-time refresh, output preview, and keyboard-driven stopping
-- Web: Fix global config not refreshing on other tabs when model is changed — when the model is changed in one tab, other tabs now detect the config update and automatically refresh their global config
-
-## 1.22.0 (2026-03-13)
-
-- Shell: Collapse long pasted text into `[Pasted text #n]` placeholders — text pasted via `Ctrl-V` or bracketed paste that exceeds 300 characters or 3 lines is displayed as a compact placeholder token in the prompt buffer while the full content is sent to the model; the external editor (`Ctrl-O`) expands placeholders for editing and re-folds them on save
-- Shell: Cache pasted images as attachment placeholders — images pasted from the clipboard are stored on disk and shown as `[image:…]` tokens in the prompt, keeping the input buffer readable
-- Shell: Fix UTF-16 surrogate characters in pasted text causing serialization errors — lone surrogates from Windows clipboard data are now sanitized before storage, preventing `UnicodeEncodeError` in history writes and JSON serialization
-- Shell: Redesign slash command completion menu — replace the default completion popup with a full-width custom menu that shows command names and multi-line descriptions, with highlight and scroll support
-- Shell: Fix cancelled shell commands not properly terminating child processes — when a running command is cancelled, the subprocess is now explicitly killed to prevent orphaned processes
-
-## 1.21.0 (2026-03-12)
-
-- Shell: Add inline running prompt with steer input — agent output is now rendered inside the prompt area while the model is running, and users can type and send follow-up messages (steers) without waiting for the turn to finish; approval requests and question panels are handled inline with keyboard navigation
-- Core: Change steer injection from synthetic tool calls to regular user messages — steer content is now appended as a standard user message instead of a fake `_steer` tool-call/tool-result pair, improving compatibility with context serialization and visualization
-- Wire: Add `SteerInput` event — a new Wire protocol event emitted when the user sends a follow-up steer message during a running turn
-- Shell: Echo user input after submission in agent mode — the prompt symbol and entered text are printed back to the terminal for a clearer conversation transcript
-- Shell: Improve session replay with steer inputs — replay now correctly reconstructs and displays steer messages alongside regular turns, and filters out internal system-reminder messages
-- Shell: Fix upgrade command in toast notifications — the upgrade command text is now sourced from a single `UPGRADE_COMMAND` constant for consistency
-- Core: Persist system prompt in `context.jsonl` — the system prompt is now written as the first record of the context file and frozen per session, so visualization tools can read the full conversation context and session restores reuse the original prompt instead of regenerating it
-- Vis: Add session directory shortcuts in `kimo vis` — open the current session folder directly from the session page, copy the raw session directory path with `Copy DIR`, and support opening directories on both macOS and Windows
-- Shell: Improve API key login UX — show a spinner during key verification, display a helpful hint when a 401 error suggests the wrong platform was selected, show a setup summary on success, and default thinking mode to "on"
-
-## 1.20.0 (2026-03-11)
-
-- Web: Add plan mode toggle in web UI — switch control in the input toolbar with a dashed blue border on the composer when plan mode is active, and support setting plan mode via the `set_plan_mode` Wire protocol method
-- Core: Persist plan mode state across session restarts — `plan_mode` is saved to `SessionState` and restored when a session resumes
-- Core: Fix StatusUpdate not reflecting plan mode changes triggered by tools — send a corrected `StatusUpdate` after `EnterPlanMode`/`ExitPlanMode` tool execution so the client sees the up-to-date state
-- Core: Fix HTTP header values containing trailing whitespace/newlines on certain Linux systems (e.g. kernel 6.8.0-101) causing connection errors — strip whitespace from ASCII header values before sending
-- Core: Fix OpenAI Responses provider sending implicit `reasoning.effort=null` which breaks Responses-compatible endpoints that require reasoning — reasoning parameters are now omitted unless explicitly set
-- Vis: Add session download, import, export and delete — one-click ZIP download from session explorer and detail page, ZIP import into a dedicated `~/.kimo/imported_sessions/` directory with "Imported" filter toggle, `kimo export <session_id>` CLI command, and delete support for imported sessions with AlertDialog confirmation
-- Core: Fix context compaction failing when conversation contains media parts (images, audio, video) — switch from blacklist filtering (exclude `ThinkPart`) to whitelist filtering (only keep `TextPart`) to prevent unsupported content types from being sent to the compaction API
-- Web: Fix `@` file mention index not refreshing after switching sessions or when workspace files change — reset index on session switch, auto-refresh after 30s staleness, and support path-prefix search beyond the 500-file limit
-
-## 1.19.0 (2026-03-10)
-
-- Core: Add plan mode — the agent can enter a planning phase (`EnterPlanMode`) where only read-only tools (Glob, Grep, ReadFile) are available, write a structured plan to a file, and present it for user approval (`ExitPlanMode`) before executing; toggle manually via `/plan` slash command or `Shift-Tab` keyboard shortcut
-- Vis: Add `kimo vis` command for launching an interactive visualization dashboard to inspect session traces — includes wire event timeline, context viewer, session explorer, and usage statistics
-- Web: Fix session stream state management — guard against null reference errors during state resets and preserve slash commands across session switches to avoid a brief empty gap
-
-## 1.18.0 (2026-03-09)
-
-- ACP: Support embedded resource content in ACP mode so that Zed's `@` file references correctly include file contents
-- Core: Use `parameters_json_schema` instead of `parameters` in Google GenAI provider to bypass Pydantic validation that rejects standard JSON Schema metadata fields in MCP tools
-- Shell: Enhance `Ctrl-V` clipboard paste to support video files in addition to images — video file paths are inserted as text, and a crash when clipboard data is `None` is fixed
-- Core: Pass session ID as `user_id` metadata to Anthropic API
-- Web: Preserve slash commands on WebSocket reconnect and add automatic retry logic for session initialization
-
-## 1.17.0 (2026-03-03)
-
-- Core: Add `/export` command to export current session context (messages, metadata) to a Markdown file, and `/import` command to import context from a file or another session ID into the current session
-- Shell: Show token counts (used/total) alongside context usage percentage in the status bar (e.g., `context: 42.0% (4.2k/10.0k)`)
-- Shell: Rotate keyboard shortcut tips in the toolbar — tips cycle through available shortcuts on each prompt submission to save horizontal space
-- MCP: Add loading indicators for MCP server connections — Shell displays a "Connecting to MCP servers..." spinner and Web shows a status message while MCP tools are being loaded
-- Web: Fix scrollable file list overflow in the toolbar changes panel
-- Core: Add `compaction_trigger_ratio` config option (default `0.85`) to control when auto-compaction triggers — compaction now fires when context usage reaches the configured ratio or when remaining space falls below `reserved_context_size`, whichever comes first
-- Core: Support custom instructions in `/compact` command (e.g., `/compact keep database discussions`) to guide what the compaction preserves
-- Web: Add URL action parameters (`?action=create` to open create-session dialog, `?action=create-in-dir&workDir=xxx` to create a session directly) for external integrations, and support Cmd/Ctrl+Click on new-session buttons to open session creation in a new browser tab
-- Web: Add todo list display in prompt toolbar — shows task progress with expandable panel when the `SetTodoList` tool is active
-- ACP: Add authentication check for session operations with `AUTH_REQUIRED` error responses for terminal-based login flow
-
-## 1.16.0 (2026-02-27)
-
-- Web: Update ASCII logo banner to a new styled design
-- Core: Add `--add-dir` CLI option and `/add-dir` slash command to expand the workspace scope with additional directories — added directories are accessible to all file tools (read, write, glob, replace), persisted across sessions, and shown in the system prompt
-- Shell: Add `Ctrl-O` keyboard shortcut to open the current input in an external editor (`$VISUAL`/`$EDITOR`), with auto-detection fallback to VS Code, Vim, Vi, or Nano
-- Shell: Add `/editor` slash command to configure and switch the default external editor, with interactive selection and persistent config storage
-- Shell: Add `/new` slash command to create and switch to a new session without restarting Kimo Code CLI
-- Wire: Auto-hide `AskUserQuestion` tool when the client does not support the `supports_question` capability, preventing the LLM from invoking unsupported interactions
-- Core: Estimate context token count after compaction so context usage percentage is not reported as 0%
-- Web: Show context usage percentage with one decimal place for better precision
-
-## 1.15.0 (2026-02-27)
-
-- Shell: Simplify input prompt by removing username prefix for a cleaner appearance
-- Shell: Add horizontal separator line and expanded keyboard shortcut hints to the toolbar
-- Shell: Add number key shortcuts (1–5) for quick option selection in question and approval panels, with redesigned bordered panel UI and keyboard hints
-- Shell: Add tab-style navigation for multi-question panels — use Left/Right arrows or Tab to switch between questions, with visual indicators for answered, current, and pending states, and automatic state restoration when revisiting a question
-- Shell: Allow Space key to submit single-select questions in the question panel
-- Web: Add tab-style navigation for multi-question dialogs with clickable tab bar, keyboard navigation, and state restoration when revisiting a question
-- Core: Set process title to "Kimo Code" (visible in `ps` / Activity Monitor / terminal tab title) and label web worker subprocesses as "kimi-code-worker"
-
-## 1.14.0 (2026-02-26)
-
-- Shell: Make FetchURL tool's URL parameter a clickable hyperlink in the terminal
-- Tool: Add `AskUserQuestion` tool for presenting structured questions with predefined options during execution, supporting single-select, multi-select, and custom text input
-- Wire: Add `QuestionRequest` / `QuestionResponse` message types and capability negotiation for structured question interactions
-- Shell: Add interactive question panel for `AskUserQuestion` with keyboard-driven option selection
-- Web: Add `QuestionDialog` component for answering structured questions inline, replacing the prompt composer when a question is pending
-- Core: Persist session state across sessions — approval decisions (YOLO mode, auto-approved actions) and dynamic subagents are now saved and restored when resuming a session
-- Core: Use atomic JSON writes for metadata and session state files to prevent data corruption on crash
-- Wire: Add `steer` request to inject user messages into an active agent turn (protocol version 1.4)
-- Web: Allow Cmd/Ctrl+Click on FetchURL tool's URL parameter to open the link in a new browser tab, with platform-appropriate tooltip hint
-
-## 1.13.0 (2026-02-24)
-
-- Core: Add automatic connection recovery that recreates the HTTP client on connection and timeout errors before retrying, improving resilience against transient network failures
-
-## 1.12.0 (2026-02-11)
-
-- Web: Add subagent activity rendering to display subagent steps (thinking, tool calls, text) inside Task tool messages
-- Web: Add Think tool rendering as a lightweight reasoning-style block
-- Web: Replace emoji status indicators with Lucide icons for tool states and add category-specific icons for tool names
-- Web: Enhance Reasoning component with improved thinking labels and status icons
-- Web: Enhance Todo component with status icons and improved styling
-- Web: Implement WebSocket reconnection with automatic request resending and stale connection watchdog
-- Web: Enhance session creation dialog with command value handling
-- Web: Support tilde (`~`) expansion in session work directory paths
-- Web: Fix assistant message content overflow clipping
-- Wire: Fix deadlock when multiple subagents run concurrently by not blocking the UI loop on approval and tool-call requests
-- Wire: Clean up stale pending requests after agent turn ends
-- Web: Show placeholder text in prompt input with hints for slash commands and file mentions
-- Web: Fix Ctrl+C not working in uvicorn web server by restoring default SIGINT handler and terminal state after shell mode exits
-- Web: Improve session stop handling with proper async cleanup and timeout
-- ACP: Add protocol version negotiation framework for client-server compatibility
-- ACP: Add session resume method to restore session state (experimental)
-
-## 1.11.0 (2026-02-10)
-
-- Web: Move context usage indicator from workspace header to prompt toolbar with a hover card showing detailed token usage breakdown
-- Web: Add folder indicator with work directory path to the bottom of the file changes panel
-- Web: Fix stderr not being restored when switching to web mode, which could suppress web server error output
-- Web: Fix port availability check by setting SO_REUSEADDR on the test socket
-
-## 1.10.0 (2026-02-09)
-
-- Web: Add copy and fork action buttons to assistant messages for quick content copying and session forking
-- Web: Add keyboard shortcuts for approval actions — press `1` to approve, `2` to approve for session, `3` to decline
-- Web: Add message queueing — queue follow-up messages while the AI is processing; queued messages are sent automatically when the response completes
-- Web: Replace Git diff status bar with unified prompt toolbar showing activity status, message queue, and file changes in collapsible tabs
-- Web: Load global MCP configuration in web worker so web sessions can use MCP tools
-- Web: Improve mobile prompt input UX — reduce textarea min-height, add `autoComplete="off"`, and disable focus ring on small screens
-- Web: Handle models that stream text before thinking by ensuring thinking messages always appear before text in the message list
-- Web: Show more specific status messages during session connection ("Loading history...", "Starting environment..." instead of generic "Connecting...")
-- Web: Send error status when session environment initialization fails instead of leaving UI in a waiting state
-- Web: Auto-reconnect when no session status received within 15 seconds after history replay completes
-- Web: Use non-blocking file I/O in session streaming to avoid blocking the event loop during history replay
-
-## 1.9.0 (2026-02-06)
-
-- Config: Add `default_yolo` config option to enable YOLO (auto-approve) mode by default
-- Config: Accept both `max_steps_per_turn` and `max_steps_per_run` as aliases for the loop control setting
-- Wire: Add `replay` request to stream recorded Wire events (protocol version 1.3)
-- Web: Add session fork feature to branch off a new session from any assistant response
-- Web: Add session archive feature with auto-archive for sessions older than 15 days
-- Web: Add multi-select mode for bulk archive, unarchive, and delete operations
-- Web: Add media preview for tool results (images/videos from ReadMediaFile) with clickable thumbnails
-- Web: Add shell command and todo list display components for tool outputs
-- Web: Add activity status indicator showing agent state (processing, waiting for approval, etc.)
-- Web: Add error fallback UI when images fail to load
-- Web: Redesign tool input UI with expandable parameters and syntax highlighting for long values
-- Web: Show compaction indicator when context is being compacted
-- Web: Improve auto-scroll behavior in chat for smoother following of new content
-- Web: Update `last_session_id` for work directory when session stream starts
-- Shell: Remove `Ctrl-/` keyboard shortcut that triggered `/help` command
-- Rust: Move the Rust implementation to `MoonshotAI/kimi-agent-rs` with independent releases; binary renamed to `kimi-agent`
-- Core: Preserve session id when reloading configuration so the session resumes correctly
-- Shell: Fix session replay showing messages that were cleared by `/clear` or `/reset`
-- Web: Fix approval request states not updating when session is interrupted or cancelled
-- Web: Fix IME composition issue when selecting slash commands
-- Web: Fix UI not clearing messages after `/clear`, `/reset`, or `/compact` commands
-
-## 1.8.0 (2026-02-05)
-
-- CLI: Fix startup errors (e.g. invalid config files) being silently swallowed instead of displayed
-
-## 1.7.0 (2026-02-05)
-
-- Rust: Add `kagent`, the Rust implementation of Kimo agent kernel with wire-mode support (experimental)
-- Auth: Fix OAuth token refresh conflicts when running multiple sessions simultaneously
-- Web: Add file mention menu (`@`) to reference uploaded attachments and workspace files with autocomplete
-- Web: Add slash command menu in chat input with autocomplete, keyboard navigation, and alias support
-- Web: Prompt to create directory when specified path doesn't exist during session creation
-- Web: Fix authentication token persistence by switching from sessionStorage to localStorage with 24-hour expiry
-- Web: Add server-side pagination for session list with virtualized scrolling for better performance
-- Web: Improve session and work directories loading with smarter caching and invalidation
-- Web: Fix WebSocket errors during history replay by checking connection state before sending
-- Web: Git diff status bar now shows untracked files (new files not yet added to git)
-- Web: Restrict sensitive APIs only in public mode; update origin enforcement logic
-
-## 1.6 (2026-02-03)
-
-- Web: Add token-based authentication and access control for network mode (`--network`, `--lan-only`, `--public`)
-- Web: Add security options: `--auth-token`, `--allowed-origins`, `--restrict-sensitive-apis`, `--dangerously-omit-auth`
-- Web: Change `--host` option to bind to specific IP address; add automatic network address detection
-- Web: Fix WebSocket disconnect when creating new sessions
-- Web: Increase maximum image dimension from 1024 to 4096 pixels
-- Web: Improve UI responsiveness with enhanced hover effects and better layout handling
-- Wire: Add `TurnEnd` event to signal the completion of an agent turn (protocol version 1.2)
-- Core: Fix custom agent prompt files containing `$` causing silent startup failure
-
-## 1.5 (2026-01-30)
-
-- Web: Add Git diff status bar showing uncommitted changes in session working directory
-- Web: Add "Open in" menu for opening files/directories in Terminal, VS Code, Cursor, or other local applications
-- Web: Add search functionality to filter sessions by title or working directory
-- Web: Improve session title display with proper overflow handling
-
-## 1.4 (2026-01-30)
-
-- Shell: Merge `/login` and `/setup` commands; `/setup` is now an alias for `/login`
-- Shell: `/usage` now shows remaining quota percentage; add `/status` alias
-- Config: Add `KIMO_SHARE_DIR` environment variable to customize the share directory path (default: `~/.kimo`)
-- Web: Add new Web UI for browser-based interaction
-- CLI: Add `kimo web` subcommand to launch the Web UI server
-- Auth: Fix encoding error when device name or OS version contains non-ASCII characters
-- Auth: OAuth credentials are now stored in files instead of keyring; existing tokens are automatically migrated on startup
-- Auth: Fix authorization failure after the system sleeps or hibernates
-
-## 1.3 (2026-01-28)
-
-- Auth: Fix authentication issue during agent turns
-- Tool: Wrap media content with descriptive tags in `ReadMediaFile` for better path traceability
-
-## 1.2 (2026-01-27)
-
-- UI: Show description for `kimi-for-coding` model
-
-## 1.1 (2026-01-27)
-
-- LLM: Fix `kimi-for-coding` model's capabilities
-
-## 1.0 (2026-01-27)
-
-- Shell: Add `/login` and `/logout` slash commands for login and logout
-- CLI: Add `kimo login` and `kimo logout` subcommands
-- Core: Fix subagent approval request handling
-
-## 0.88 (2026-01-26)
-
-- MCP: Remove `Mcp-Session-Id` header when connecting to MCP servers to fix compatibility
-
-## 0.87 (2026-01-25)
-
-- Shell: Fix Markdown rendering error when HTML blocks appear outside any element
-- Skills: Add more user-level and project-level skills directory candidates
-- Core: Improve system prompt guidance for media file generation and processing tasks
-- Shell: Fix image pasting from clipboard on macOS
-
-## 0.86 (2026-01-24)
-
-- Build: Fix binary builds
-
-## 0.85 (2026-01-24)
-
-- Shell: Cache pasted images to disk for persistence across sessions
-- Shell: Deduplicate cached attachments based on content hash
-- Shell: Fix display of image/audio/video attachments in message history
-- Tool: Use file path as media identifier in `ReadMediaFile` for better traceability
-- Tool: Fix some MP4 files not being recognized as videos
-- Shell: Handle Ctrl-C during slash command execution
-- Shell: Fix shlex parsing error in shell mode when input contains invalid shell syntax
-- Shell: Fix stderr output from MCP servers and third-party libraries polluting shell UI
-- Wire: Graceful shutdown with proper cleanup of pending requests when connection closes or Ctrl-C is received
-
-## 0.84 (2026-01-22)
-
-- Build: Add cross-platform standalone binary builds for Windows, macOS (with code signing and notarization), and Linux (x86_64 and ARM64)
-- Shell: Fix slash command autocomplete showing suggestions for exact command/alias matches
-- Tool: Treat SVG files as text instead of images
-- Flow: Support D2 markdown block strings (`|md` syntax) for multiline node labels in flow skills
-- Core: Fix possible "event loop is closed" error after running `/reload`, `/setup`, or `/clear`
-- Core: Fix panic when `/clear` is used in a continued session
-
-## 0.83 (2026-01-21)
-
-- Tool: Add `ReadMediaFile` tool for reading image/video files; `ReadFile` now focuses on text files only
-- Skills: Flow skills now also register as `/skill:<skill-name>` commands (in addition to `/flow:<skill-name>`)
-
-## 0.82 (2026-01-21)
-
-- Tool: Allow `WriteFile` and `StrReplaceFile` tools to edit/write files outside the working directory when using absolute paths
-- Tool: Upload videos to Kimo files API when using Kimo provider, replacing inline data URLs with `ms://` references
-- Config: Add `reserved_context_size` setting to customize auto-compaction trigger threshold (default: 50000 tokens)
-
-## 0.81 (2026-01-21)
-
-- Skills: Add flow skill type with embedded Agent Flow (Mermaid/D2) in SKILL.md, invoked via `/flow:<skill-name>` commands
-- CLI: Remove `--prompt-flow` option; use flow skills instead
-- Core: Replace `/begin` command with `/flow:<skill-name>` commands for flow skills
-
-## 0.80 (2026-01-20)
-
-- Wire: Add `initialize` method for exchanging client/server info, external tools registration and slash commands advertisement
-- Wire: Support external tool calls via Wire protocol
-- Wire: Rename `ApprovalRequestResolved` to `ApprovalResponse` (backwards-compatible)
-
-## 0.79 (2026-01-19)
-
-- Skills: Add project-level skills support, discovered from `.agents/skills/` (or `.kimo/skills/`, `.claude/skills/`)
-- Skills: Unified skills discovery with layered loading (builtin → user → project); user-level skills now prefer `~/.config/agents/skills/`
-- Shell: Support fuzzy matching for slash command autocomplete
-- Shell: Enhanced approval request preview with shell command and diff content display, use `Ctrl-E` to expand full content
-- Wire: Add `ShellDisplayBlock` type for shell command display in approval requests
-- Shell: Reorder `/help` to show keyboard shortcuts before slash commands
-- Wire: Return proper JSON-RPC 2.0 error responses for invalid requests
-
-## 0.78 (2026-01-16)
-
-- CLI: Add D2 flowchart format support for Prompt Flow (`.d2` extension)
-
-## 0.77 (2026-01-15)
-
-- Shell: Fix line breaking in `/help` and `/changelog` fullscreen pager display
-- Shell: Use `/model` to toggle thinking mode instead of Tab key
-- Config: Add `default_thinking` config option (need to run `/model` to select thinking mode after upgrade)
-- LLM: Add `always_thinking` capability for models that always use thinking mode
-- CLI: Rename `--command`/`-c` to `--prompt`/`-p`, keep `--command`/`-c` as alias, remove `--query`/`-q`
-- Wire: Fix approval requests not responding properly in Wire mode
-- CLI: Add `--prompt-flow` option to load a Mermaid flowchart file as a Prompt Flow
-- Core: Add `/begin` slash command if a Prompt Flow is loaded to start the flow
-- Core: Replace Ralph Loop with Prompt Flow-based implementation
-
-## 0.76 (2026-01-12)
-
-- Tool: Make `ReadFile` tool description reflect model capabilities for image/video support
-- Tool: Fix TypeScript files (`.ts`, `.tsx`, `.mts`, `.cts`) being misidentified as video files
-- Shell: Allow slash commands (`/help`, `/exit`, `/version`, `/changelog`, `/feedback`) in shell mode
-- Shell: Improve `/help` with fullscreen pager, showing slash commands, skills, and keyboard shortcuts
-- Shell: Improve `/changelog` and `/mcp` display with consistent bullet-style formatting
-- Shell: Show current model name in the bottom status bar
-- Shell: Add `Ctrl-/` shortcut to show help
-
-## 0.75 (2026-01-09)
-
-- Tool: Improve `ReadFile` tool description
-- Skills: Add built-in `kimo-cli-help` skill to answer Kimo Code CLI usage and configuration questions
-
-## 0.74 (2026-01-09)
-
-- ACP: Allow ACP clients to select and switch models (with thinking variants)
-- ACP: Add `terminal-auth` authentication method for setup flow
-- CLI: Deprecate `--acp` option in favor of `kimo acp` subcommand
-- Tool: Support reading image and video files in `ReadFile` tool
-
-## 0.73 (2026-01-09)
-
-- Skills: Add built-in skill-creator skill shipped with the package
-- Tool: Expand `~` to the home directory in `ReadFile` paths
-- MCP: Ensure MCP tools finish loading before starting the agent loop
-- Wire: Fix Wire mode failing to accept valid `cancel` requests
-- Setup: Allow `/model` to switch between all available models for the selected provider
-- Lib: Re-export all Wire message types from `kimo_cli.wire.types`, as a replacement of `kimo_cli.wire.message`
-- Loop: Add `max_ralph_iterations` loop control config to limit extra Ralph iterations
-- Config: Rename `max_steps_per_run` to `max_steps_per_turn` in loop control config (backward-compatible)
-- CLI: Add `--max-steps-per-turn`, `--max-retries-per-step` and `--max-ralph-iterations` options to override loop control config
-- SlashCmd: Make `/yolo` toggle auto-approve mode
-- UI: Show a YOLO badge in the shell prompt
-
-## 0.72 (2026-01-04)
-
-- Python: Fix installation on Python 3.14.
-
-## 0.71 (2026-01-04)
-
-- ACP: Route file reads/writes and shell commands through ACP clients for synced edits/output
-- Shell: Add `/model` slash command to switch default models and reload when using the default config
-- Skills: Add `/skill:<name>` slash commands to load `SKILL.md` instructions on demand
-- CLI: Add `kimo info` subcommand for version/protocol details (supports `--json`)
-- CLI: Add `kimo term` to launch the Toad terminal UI
-- Python: Bump the default tooling/CI version to 3.14
-
-## 0.70 (2025-12-31)
-
-- CLI: Add `--final-message-only` (and `--quiet` alias) to only output the final assistant message in print UI
-- LLM: Add `video_in` model capability and support video inputs
-
-## 0.69 (2025-12-29)
-
-- Core: Support discovering skills in `~/.kimo/skills` or `~/.claude/skills`
-- Python: Lower the minimum required Python version to 3.12
-- Nix: Add flake packaging; install with `nix profile install .#kimo-cli` or run `nix run .#kimo-cli`
-- CLI: Add `kimo-cli` script alias for invoking the CLI; can be run via `uvx kimo-cli`
-- Lib: Move LLM config validation into `create_llm` and return `None` when missing config
-
-## 0.68 (2025-12-24)
-
-- CLI: Add `--config` and `--config-file` options to pass in config JSON/TOML
-- Core: Allow `Config` in addition to `Path` for the `config` parameter of `KimoCLI.create`
-- Tool: Include diff display blocks in `WriteFile` and `StrReplaceFile` approvals/results
-- Wire: Add display blocks to approval requests (including diffs) with backward-compatible defaults
-- ACP: Show file diff previews in tool results and approval prompts
-- ACP: Connect to MCP servers managed by ACP clients
-- ACP: Run shell commands in ACP client terminal if supported
-- Lib: Add `KimoToolset.find` method to find tools by class or name
-- Lib: Add `ToolResultBuilder.display` method to append display blocks to tool results
-- MCP: Add `kimo mcp auth` and related subcommands to manage MCP authorization
-
-## 0.67 (2025-12-22)
-
-- ACP: Advertise slash commands in single-session ACP mode (`kimo --acp`)
-- MCP: Add `mcp.client` config section to configure MCP tool call timeout and other future options
-- Core: Improve default system prompt and `ReadFile` tool
-- UI: Fix Ctrl-C not working in some rare cases
-
-## 0.66 (2025-12-19)
-
-- Lib: Provide `token_usage` and `message_id` in `StatusUpdate` Wire message
-- Lib: Add `KimoToolset.load_tools` method to load tools with dependency injection
-- Lib: Add `KimoToolset.load_mcp_tools` method to load MCP tools
-- Lib: Move `MCPTool` from `kimo_cli.tools.mcp` to `kimo_cli.soul.toolset`
-- Lib: Add `InvalidToolError`, `MCPConfigError` and `MCPRuntimeError`
-- Lib: Make the detailed Kimo Code CLI exception classes extend `ValueError` or `RuntimeError`
-- Lib: Allow passing validated `list[fastmcp.mcp_config.MCPConfig]` as `mcp_configs` for `KimoCLI.create` and `load_agent`
-- Lib: Fix exception raising for `KimoCLI.create`, `load_agent`, `KimoToolset.load_tools` and `KimoToolset.load_mcp_tools`
-- LLM: Add provider type `vertexai` to support Vertex AI
-- LLM: Rename Gemini Developer API provider type from `google_genai` to `gemini`
-- Config: Migrate config file from JSON to TOML
-- MCP: Connect to MCP servers in background and parallel to reduce startup time
-- MCP: Add `mcp-session-id` HTTP header when connecting to MCP servers
-- Lib: Split slash commands (prev "meta commands") into two groups: Shell-level and KimoSoul-level
-- Lib: Add `available_slash_commands` property to `Soul` protocol
-- ACP: Advertise slash commands `/init`, `/compact` and `/yolo` to ACP clients
-- SlashCmd: Add `/mcp` slash command to display MCP server and tool status
-
-## 0.65 (2025-12-16)
-
-- Lib: Support creating named sessions via `Session.create(work_dir, session_id)`
-- CLI: Automatically create new session when specified session ID is not found
-- CLI: Delete empty sessions on exit and ignore sessions whose context file is empty when listing
-- UI: Improve session replaying
-- Lib: Add `model_config: LLMModel | None` and `provider_config: LLMProvider | None` properties to `LLM` class
-- MetaCmd: Add `/usage` meta command to show API usage for Kimo Code users
-
-## 0.64 (2025-12-15)
-
-- UI: Fix UTF-16 surrogate characters input on Windows
-- Core: Add `/sessions` meta command to list existing sessions and switch to a selected one
-- CLI: Add `--session/-S` option to specify session ID to resume
-- MCP: Add `kimo mcp` subcommand group to manage global MCP config file `~/.kimo/mcp.json`
-
-## 0.63 (2025-12-12)
-
-- Tool: Fix `FetchURL` tool incorrect output when fetching via service fails
-- Tool: Use `bash` instead of `sh` in `Shell` tool for better compatibility
-- Tool: Fix `Grep` tool unicode decoding error on Windows
-- ACP: Support ACP session continuation (list/load sessions) with `kimo acp` subcommand
-- Lib: Add `Session.find` and `Session.list` static methods to find and list sessions
-- ACP: Update agent plans on the client side when `SetTodoList` tool is called
-- UI: Prevent normal messages starting with `/` from being treated as meta commands
-
-## 0.62 (2025-12-08)
-
-- ACP: Fix tool results (including Shell tool output) not being displayed in ACP clients like Zed
-- ACP: Fix compatibility with the latest version of Zed IDE (0.215.3)
-- Tool: Use PowerShell instead of CMD on Windows for better usability
-- Core: Fix startup crash when there is broken symbolic link in the working directory
-- Core: Add builtin `okabe` agent file with `SendDMail` tool enabled
-- CLI: Add `--agent` option to specify builtin agents like `default` and `okabe`
-- Core: Improve compaction logic to better preserve relevant information
-
-## 0.61 (2025-12-04)
-
-- Lib: Fix logging when used as a library
-- Tool: Harden file path check to protect against shared-prefix escape
-- LLM: Improve compatibility with some third-party OpenAI Responses and Anthropic API providers
-
-## 0.60 (2025-12-01)
-
-- LLM: Fix interleaved thinking for Kimo and OpenAI-compatible providers
-
-## 0.59 (2025-11-28)
-
-- Core: Move context file location to `.kimo/sessions/{workdir_md5}/{session_id}/context.jsonl`
-- Lib: Move `WireMessage` type alias to `kimo_cli.wire.message`
-- Lib: Add `kimo_cli.wire.message.Request` type alias request messages (which currently only includes `ApprovalRequest`)
-- Lib: Add `kimo_cli.wire.message.is_event`, `is_request` and `is_wire_message` utility functions to check the type of wire messages
-- Lib: Add `kimo_cli.wire.serde` module for serialization and deserialization of wire messages
-- Lib: Change `StatusUpdate` Wire message to not using `kimo_cli.soul.StatusSnapshot`
-- Core: Record Wire messages to a JSONL file in session directory
-- Core: Introduce `TurnBegin` Wire message to mark the beginning of each agent turn
-- UI: Print user input again with a panel in shell mode
-- Lib: Add `Session.dir` property to get the session directory path
-- UI: Improve "Approve for session" experience when there are multiple parallel subagents
-- Wire: Reimplement Wire server mode (which is enabled with `--wire` option)
-- Lib: Rename `ShellApp` to `Shell`, `PrintApp` to `Print`, `ACPServer` to `ACP` and `WireServer` to `WireOverStdio` for better consistency
-- Lib: Rename `KimoCLI.run_shell_mode` to `run_shell`, `run_print_mode` to `run_print`, `run_acp_server` to `run_acp`, and `run_wire_server` to `run_wire_stdio` for better consistency
-- Lib: Add `KimoCLI.run` method to run a turn with given user input and yield Wire messages
-- Print: Fix stream-json print mode not flushing output properly
-- LLM: Improve compatibility with some OpenAI and Anthropic API providers
-- Core: Fix chat provider error after compaction when using Anthropic API
-
-## 0.58 (2025-11-21)
-
-- Core: Fix field inheritance of agent spec files when using `extend`
-- Core: Support using MCP tools in subagents
-- Tool: Add `CreateSubagent` tool to create subagents dynamically (not enabled in default agent)
-- Tool: Use MoonshotFetch service in `FetchURL` tool for Kimo Code plan
-- Tool: Truncate Grep tool output to avoid exceeding token limit
-
-## 0.57 (2025-11-20)
-
-- LLM: Fix Google GenAI provider when thinking toggle is not on
-- UI: Improve approval request wordings
-- Tool: Remove `PatchFile` tool
-- Tool: Rename `Bash`/`CMD` tool to `Shell` tool
-- Tool: Move `Task` tool to `kimo_cli.tools.multiagent` module
-
-## 0.56 (2025-11-19)
-
-- LLM: Add support for Google GenAI provider
-
-## 0.55 (2025-11-18)
-
-- Lib: Add `kimo_cli.app.enable_logging` function to enable logging when directly using `KimoCLI` class
-- Core: Fix relative path resolution in agent spec files
-- Core: Prevent from panic when LLM API connection failed
-- Tool: Optimize `FetchURL` tool for better content extraction
-- Tool: Increase MCP tool call timeout to 60 seconds
-- Tool: Provide better error message in `Glob` tool when pattern is `**`
-- ACP: Fix thinking content not displayed properly
-- UI: Minor UI improvements in shell mode
-
-## 0.54 (2025-11-13)
-
-- Lib: Move `WireMessage` from `kimo_cli.wire.message` to `kimo_cli.wire`
-- Print: Fix `stream-json` output format missing the last assistant message
-- UI: Add warning when API key is overridden by `KIMI_API_KEY` environment variable
-- UI: Make a bell sound when there's an approval request
-- Core: Fix context compaction and clearing on Windows
-
-## 0.53 (2025-11-12)
-
-- UI: Remove unnecessary trailing spaces in console output
-- Core: Throw error when there are unsupported message parts
-- MetaCmd: Add `/yolo` meta command to enable YOLO mode after startup
-- Tool: Add approval request for MCP tools
-- Tool: Disable `Think` tool in default agent
-- CLI: Restore thinking mode from last time when `--thinking` is not specified
-- CLI: Fix `/reload` not working in binary packed by PyInstaller
-
-## 0.52 (2025-11-10)
-
-- CLI: Remove `--ui` option in favor of `--print`, `--acp`, and `--wire` flags (shell is still the default)
-- CLI: More intuitive session continuation behavior
-- Core: Add retry for LLM empty responses
-- Tool: Change `Bash` tool to `CMD` tool on Windows
-- UI: Fix completion after backspacing
-- UI: Fix code block rendering issues on light background colors
-
-## 0.51 (2025-11-08)
-
-- Lib: Rename `Soul.model` to `Soul.model_name`
-- Lib: Rename `LLMModelCapability` to `ModelCapability` and move to `kimo_cli.llm`
-- Lib: Add `"thinking"` to `ModelCapability`
-- Lib: Remove `LLM.supports_image_in` property
-- Lib: Add required `Soul.model_capabilities` property
-- Lib: Rename `KimoSoul.set_thinking_mode` to `KimoSoul.set_thinking`
-- Lib: Add `KimoSoul.thinking` property
-- UI: Better checks and notices for LLM model capabilities
-- UI: Clear the screen for `/clear` meta command
-- Tool: Support auto-downloading ripgrep on Windows
-- CLI: Add `--thinking` option to start in thinking mode
-- ACP: Support thinking content in ACP mode
-
-## 0.50 (2025-11-07)
-
-- Improve UI look and feel
-- Improve Task tool observability
-
-## 0.49 (2025-11-06)
-
-- Minor UX improvements
-
-## 0.48 (2025-11-06)
-
-- Support Kimo K2 thinking mode
-
-## 0.47 (2025-11-05)
-
-- Fix Ctrl-W not working in some environments
-- Do not load SearchWeb tool when the search service is not configured
-
-## 0.46 (2025-11-03)
-
-- Introduce Wire over stdio for local IPC (experimental, subject to change)
-- Support Anthropic provider type
-
-- Fix binary packed by PyInstaller not working due to wrong entrypoint
-
-## 0.45 (2025-10-31)
-
-- Allow `KIMO_MODEL_CAPABILITIES` environment variable to override model capabilities
-- Add `--no-markdown` option to disable markdown rendering
-- Support `openai_responses` LLM provider type
-
-- Fix crash when continuing a session
-
-## 0.44 (2025-10-30)
-
-- Improve startup time
-
-- Fix potential invalid bytes in user input
-
-## 0.43 (2025-10-30)
-
-- Basic Windows support (experimental)
-- Display warnings when base URL or API key is overridden in environment variables
-- Support image input if the LLM model supports it
-- Replay recent context history when continuing a session
-
-- Ensure new line after executing shell commands
-
-## 0.42 (2025-10-28)
-
-- Support Ctrl-J or Alt-Enter to insert a new line
-
-- Change mode switch shortcut from Ctrl-K to Ctrl-X
-- Improve overall robustness
-
-- Fix ACP server `no attribute` error
-
-## 0.41 (2025-10-26)
-
-- Fix a bug for Glob tool when no matching files are found
-- Ensure reading files with UTF-8 encoding
-
-- Disable reading command/query from stdin in shell mode
-- Clarify the API platform selection in `/setup` meta command
-
-## 0.40 (2025-10-24)
-
-- Support `ESC` key to interrupt the agent loop
-
-- Fix SSL certificate verification error in some rare cases
-- Fix possible decoding error in Bash tool
-
-## 0.39 (2025-10-24)
-
-- Fix context compaction threshold check
-- Fix panic when SOCKS proxy is set in the shell session
-
-## 0.38 (2025-10-24)
-
-- Minor UX improvements
-
-## 0.37 (2025-10-24)
-
-- Fix update checking
-
-## 0.36 (2025-10-24)
-
-- Add `/debug` meta command to debug the context
-- Add auto context compaction
-- Add approval request mechanism
-- Add `--yolo` option to automatically approve all actions
-- Render markdown content for better readability
-
-- Fix "unknown error" message when interrupting a meta command
-
-## 0.35 (2025-10-22)
-
-- Minor UI improvements
-- Auto download ripgrep if not found in the system
-- Always approve tool calls in `--print` mode
-- Add `/feedback` meta command
-
-## 0.34 (2025-10-21)
-
-- Add `/update` meta command to check for updates and auto-update in background
-- Support running interactive shell commands in raw shell mode
-- Add `/setup` meta command to setup LLM provider and model
-- Add `/reload` meta command to reload configuration
-
-## 0.33 (2025-10-18)
-
-- Add `/version` meta command
-- Add raw shell mode, which can be switched to by Ctrl-K
-- Show shortcuts in bottom status line
-
-- Fix logging redirection
-- Merge duplicated input histories
-
-## 0.32 (2025-10-16)
-
-- Add bottom status line
-- Support file path auto-completion (`@filepath`)
-
-- Do not auto-complete meta command in the middle of user input
-
-## 0.31 (2025-10-14)
-
-- Fix step interrupting by Ctrl-C, for real
-
-## 0.30 (2025-10-14)
-
-- Add `/compact` meta command to allow manually compacting context
-
-- Fix `/clear` meta command when context is empty
-
-## 0.29 (2025-10-14)
-
-- Support Enter key to accept completion in shell mode
-- Remember user input history across sessions in shell mode
-- Add `/reset` meta command as an alias for `/clear`
-
-- Fix step interrupting by Ctrl-C
-
-- Disable `SendDMail` tool in Kimo Koder agent
-
-## 0.28 (2025-10-13)
-
-- Add `/init` meta command to analyze the codebase and generate an `AGENTS.md` file
-- Add `/clear` meta command to clear the context
-
-- Fix `ReadFile` output
-
-## 0.27 (2025-10-11)
-
-- Add `--mcp-config-file` and `--mcp-config` options to load MCP configs
-
-- Rename `--agent` option to `--agent-file`
-
-## 0.26 (2025-10-11)
-
-- Fix possible encoding error in `--output-format stream-json` mode
+- **新开会话的「最近使用 / 当前目录」不再混入自进化目录**：自进化验证子进程的内部运行目录（`evolution/verify_runs/...`）不再被记进最近工作目录列表，也不会被当作新会话的当前目录；此前已被污染的历史条目一并隐藏。
+- **一批并发与崩溃一致性修复**：自进化库（generations / proposals）、MCP 状态、通知、任务记录等文件写入改为带文件锁的原子写，避免多进程/多会话同时写导致损坏；会话 worker 崩溃阶段能正确归因到工具；后台任务丢失判定不再误杀仍存活的任务。
+- **防御加固**：服务端请求伪造（SSRF）、路径穿越、命令注入类边界做了更严校验。
 
-## 0.25 (2025-10-11)
+## v0.4.8 (2026-10-21)
 
-- Rename package name `ensoul` to `kimo-cli`
-- Rename `ENSOUL_*` builtin system prompt arguments to `KIMO_*`
-- Further decouple `App` with `Soul`
-- Split `Soul` protocol and `KimoSoul` implementation for better modularity
+- **自进化（Admin 面板新「自进化」页）**：agent 的每次任务现在自动记录执行证据（步数、token 消耗、完成状态），在 Admin 面板可一键完成「分析证据 → 提出改进 → 双跑验证 → 采纳」整条链，采纳的改进（提示词追加段与技能）自动应用到后续新会话。进化按「代」做版本管理，任何一代都可一键回退/前进，单个改进可单独停用，全部操作留审计日志。证据收集永远免费，消耗 token 的进化操作由一个总开关统一授权。
 
-## 0.24 (2025-10-10)
+- **回复里的安装包路径点不开**：`.dmg`/`.zip`/`.pkg` 及反引号、《书名号》包裹的多段路径（如 `` `dist/app.dmg` ``）现在都能直接点击打开，章节号（`6.4.1/6.2.11`）和链接仍保持不可点击。
 
-- Fix ACP `cancel` method
+## v0.4.5 (2026-10-10)
 
-## 0.23 (2025-10-09)
+- **取消的回合不再留下"假在跑"的工具**。用户停止或出错结束时，agent 会为已发出但没返回结果的工具调用补一条"已取消"结果，网页端不会再出现"Agent 一直在工作"的悬挂状态（重新打开会话也一样干净）。
+- **回合结束原因可见**。回合因取消/出错/步数用尽而中断时，网页端能区分"卡住了"和"已结束"：被取消回合留下的待办清单会标记为遗留内容，不再当作进行中的任务钉住。
+- **服务端吞思考的步骤会被标记**。部分接口（如 Kimo-for-Coding）偶发跳过推理输出，网页端现在会说明思考块为空是服务端行为，不像客户端出了 bug。
+- **设置窗口里的 API Key 显示尾 4 位**（macOS 与 Windows 均生效）。纯密码框下两个长 Key 长得一样没法分辨，现在显示为「••••••••1234」，密钥本体不可读。
 
-- Add `extend` field to agent file to support agent file extension
-- Add `exclude_tools` field to agent file to support excluding tools
-- Add `subagents` field to agent file to support defining subagents
+- **切换会话偶发"历史缺失且不再恢复"**。历史回放读到一半出错时会被静默吞掉并宣告"加载完成"，客户端此时已清空消息列表，缺口就成了永久视图；现在回放失败不再宣告完成，由上层决定重试或报错。
+- **推理内容提取兼容多种字段名**。openai_legacy / Kimo 通道从一组候选字段（reasoning_content、reasoning 等）提取思考内容，不再依赖单一配置键；Kimo 用量里的 reasoning_tokens 会正确映射到推理输出统计。
+- **Wiki 编辑负载传成 JSON 字符串不再报"不是合法字典"**。模型层自动把能解析成对象的 JSON 字符串解包为结构化负载；解析不出对象或标量仍按原校验报错。
 
-## 0.22 (2025-10-09)
+## v0.4.4 (2026-10-07)
 
-- Improve `SearchWeb` and `FetchURL` tool call visualization
-- Improve search result output format
+- **长任务等待时会话突然"出错了"、工具一片"已取消/已中断"**。"等后台任务时可以直接插话"功能会把"agent 卡在任务等待中"的状态变化直接发到 stdout，但没按通信协议包装，网页端一解析到这条消息整个会话就读取中断——第一次真正长时间等待后台任务（任务还在跑、不是秒回）必触发。现在按协议正确包装；同时网页端对解析不了的消息改为记日志跳过，单条坏消息不再终结整个会话。
+- **偶发的"同一条回复显示两份"（切走再回来会自愈）**：网页端加了重复投递/重复渲染检测日志，命中时输出到开发者工具控制台，用于定位该合并竞态（数据层已验证无重复，重建回放始终正确）。
 
-## 0.21 (2025-10-09)
+## v0.4.3 (2026-10-07)
 
-- Add `--print` option as a shortcut for `--ui print`, `--acp` option as a shortcut for `--ui acp`
-- Support `--output-format stream-json` to print output in JSON format
-- Add `SearchWeb` tool with `services.moonshot_search` configuration. You need to configure it with `"services": {"moonshot_search": {"api_key": "your-search-api-key"}}` in your config file.
-- Add `FetchURL` tool
-- Add `Think` tool
-- Add `PatchFile` tool, not enabled in Kimo Koder agent
-- Enable `SendDMail` and `Task` tool in Kimo Koder agent with better tool prompts
-- Add `ENSOUL_NOW` builtin system prompt argument
+- **后台任务被误判“丢失”（lost）导致长任务作废**。心跳写盘不再每次强制刷盘（磁盘抖动或杀毒软件扫描文件不会再卡死任务进程）；判定丢失前会先确认任务进程真的已退出——进程还活着只是心跳慢的任务不再被误杀；崩溃的任务进程也会被及时回收，不会变僵尸进程。
+- **管道命令的失败被完全掩盖**：bash 命令（前台和后台任务）默认开启 pipefail，`python x.py | tail` 这类命令现在记录的是真实退出码，不再恒为 0。
+- **会话进程异常退出后“出错了”一直不消除**：worker 崩溃后会自动重启恢复（启动即崩的和短时间内反复崩溃的不会进入重启循环），恢复后错误标记自动清除；崩溃回合里未完成的工具显示“工具执行已中断（会话进程异常退出）”，不再误显示为“工具执行已取消”。
 
-- Better-looking `/release-notes`
-- Improve tool descriptions
-- Improve tool output truncation
+## v0.4.2 (2026-10-06)
 
-## 0.20 (2025-09-30)
+- **等后台任务时可以直接插话**。agent 只卡在后台任务等待中（没有实质工作）时，新输入不再排队空等，而是立即打断等待、用新输入开新一轮；后台任务不受影响，完成后仍会主动汇报。会话列表也给有后台任务在跑的会话显示「后台任务 ×N」徽标，任务被中断且还没看到时显示红色提醒。
+- **切换会话后输入框直接可打字**。切到另一个会话后光标自动落在输入框，不用再点一下；子 agent 集结动画恢复全尺寸；思考和子 agent 动画只跟随当前会话，切走后立即消失，不再看到别的会话的动画。
 
-- Add `--ui acp` option to start Agent Client Protocol (ACP) server
+- **流式输出时会话历史页疯狂抖动**。用滚动条拖拽往上读历史不再被每个新输出拽回底部；人为滑上去之后任何距离都不吸附，自己回到底部才恢复跟随；流式期间只有正在更新的那条消息重渲染，长会话明显更稳更流畅。
+- **弱模型把 JSON 参数写成字符串导致工具调用失败**（如把待办列表数组双重编码成 JSON 文本）：工具层在校验失败后按参数 schema 自动修复，正常的字符串字段不受影响。
+- **浏览器兜底打不开反爬页面时报错无法定位**：报错现在直接给出运行时实际的浏览器目录设置、寻找位置和按可能性排序的原因。
+- **Wiki 写入被拒才知道内容政策**（本机绝对路径、密钥等会被拒）：工具说明提前写明，组装内容时即可先自查。
+- **Windows 安装包更可靠**：安装完成时校验运行文件是否复制完整（不完整当场提示重装）；打包时浏览器组件下载失败直接构建失败，不再产出缺件的安装包；应用启动时也会提示浏览器组件缺失。
 
-## 0.19 (2025-09-29)
+## v0.4.1 (2026-09-30)
 
-- Support piped stdin for print UI
-- Support `--input-format=stream-json` for piped JSON input
+- **后台任务完成后，ACP（编辑器）会话也会主动汇报结果**。网页和交互式会话里，后台任务完成会自己开一轮把结果说出来；ACP 客户端以前只在你发消息时才运行，后台任务的结果要等你下次提问才看得到。现在 ACP 也一样主动汇报。
 
-- Do not include `CHECKPOINT` messages in the context when `SendDMail` is not enabled
+- **图标统一改为圆角**。Mac 的应用图标（程序坞、访达）、Windows 的程序和安装包图标及托盘图标、网页的 logo 和浏览器标签页图标，都换成了同一个圆角图标。Mac 的应用图标按系统规范四周留边，在程序坞里和别的应用一样大。Mac 菜单栏仍是跟随系统颜色的单色图标。已安装的版本升级后会自动换成新图标，在管理面板里自定义过的不受影响。
+- **Agent 工作时的动画不再遮住整个页面**。以前思考动画带一层铺满页面的深灰底色，而且每一段思考都会弹一次，思考频繁时整页在灰白之间来回闪。现在只剩动画本身，叠在页面中间，每轮回复只播一次。
 
-## 0.18 (2025-09-29)
+- **模型只输出空白时不再出现空白气泡**。模型在调用工具前常只输出一个换行占位，页面会渲染出一个空正文气泡，看起来像「思考完成 → 一片空白 → 工具行」。现在这种空白占位不再生成正文气泡，思考标签的结束时机不变；会话历史重放时同样生效。
+- **断线重连后已关闭的提问不再复活**。一轮对话中途退出（退出应用、worker 重启）时，它发出的提问再也无法在服务端关闭，每次重连都会把对话框弹回来。现在用户关掉（「停止运行」）的提问会按会话记住，重放历史也不会再弹出。
+- **Wiki 把没有路径的页面当成含本机路径而拒绝写入**。「位置（章节号）/问题/建议」这类用斜杠分隔字段的写法，括号后的斜杠被当成了路径开头，报错又不说是哪段文字，只能猜着改。现在括号、引号后的斜杠不再算路径，报错也会引出被拒的原文。
+- **Wiki 暂存点照提示操作后仍被判「不稳定」**。依据只有命令输出的暂存点，提示说「先读一下依据的文件」，照做后用它保存仍被拒，暂存点也作废了。其实读文件换来的是回复结束时的一个新暂存点，提示现在照实说明。
 
-- Support `max_context_size` in LLM model configurations to configure the maximum context size (in tokens)
+## v0.4.0 (2026-09-26)
 
-- Improve `ReadFile` tool description
+- **网页的中英文切换覆盖全部界面**。以前切到中文后，管理面板（技能、MCP、插件、Wiki、品牌、用户）、登录页、工具输出、上传提示等大量文字仍是英文，切到英文时又有几处是中文。现在这些文字都跟随所选语言，日期也按所选语言的格式显示，而不再跟随浏览器。新增的测试会在有人把文字写死在界面里时直接失败。
+- **SKILL.md 里的 `category:` 可以写中文分类名**。在中文界面看到「数据与分析」、写 `category: 数据与分析` 的技能，以前会被放进一个同名的新分组；现在归入内置分类，「数据」「运维」这样的简称也认。`category:` 这个字段名本身仍须是英文。
+- **编辑后的检查结果能回到模型**。`PostToolUse` 钩子以前在后台运行、输出被丢掉；现在它退出码为 2（stderr）、返回 `{"decision": "block", "reason": …}` 或 `additionalContext` 时，内容会附在那次工具调用的结果里给模型看，例如每次改完代码跑一遍 lint。每轮最多反馈 3 个 step，避免一个一直失败的检查让它改个没完。钩子文档里的示例原来读的是不存在的 `file_path` 字段（「保护 .env」的示例因此从未拦住过任何东西），已改为 `path`。
+- **旧的工具输出会从请求中成批清除**。长会话里大部分上下文是工具输出，以前只能等整段压缩才会减少。现在最近 40k token 之外的旧输出攒到 20k 就整批换成一行说明，完整内容仍留在历史记录里；成批清除是为了让两批之间的请求前缀不变，服务端缓存继续命中。可在 `loop_control` 里关闭或调整（`prune_tool_outputs`、`prune_protect_tokens`、`prune_minimum_tokens`）。
 
-## 0.17 (2025-09-29)
+- **压缩保留的最近历史按 token 预算决定**。以前固定保留最后 2 条消息，要么把刚做的几步都压掉，要么留下一个巨大的工具输出；现在保留窗口 25% 以内（2k–15k token）的最近消息，且不会把工具调用和它的结果拆开。
+- **压缩摘要会带上读过、改过的文件和最后一个未完成的请求**。这几项由程序从工具调用里统计，跨多次压缩合并，不靠模型记；提示词也要求把上一次的摘要合并进来，不再在下一次压缩时丢掉。
+- **子 agent 最后要交一份固定格式的报告**：结论、依据、待决问题。需要你拍板的事列在待决问题里，由主 agent 来问，而不是子 agent 替你决定。格式完整的报告再短也接受。
+- **兜圈子的循环会被停下**。以前只能拦住连续重复同一个调用；A、B 交替，或同一个失败命令夹在别的调用之间反复执行，会一直跑到步数上限。现在同样的调用拿到同样的结果、在 12 步内分成 6 段出现，就结束这一轮。结果在变化（有进展）的不算，轮询后台任务也不算。
+- **Mac 菜单栏图标改为单色**，随浅色、深色菜单栏自动变色，和系统图标一致；浏览器标签页图标改为圆形。已安装的版本升级后也会换成新的标签页图标，在管理面板里自定义过的图标不受影响。
 
-- Fix step count in error message when exceeded max steps
-- Fix history file assertion error in `kimo_run`
-- Fix error handling in print mode and single command shell mode
-- Add retry for LLM API connection errors and timeout errors
+- **回答被输出长度上限截断时被当成已完成**。服务商返回的停止原因以前没人看，半截回答直接成了这一轮的结果，参数被截断的工具调用也照样执行。现在截断的回答会自动续写（最多连续 3 次），参数不完整的工具调用不执行，并提示模型重新发出。
+- **同一条回复里两处修改同一个文件，只留下一处**。多个工具调用同时开始，两次编辑都读到旧内容，后写的覆盖先写的；需要审批时，这个窗口就是你确认的那段时间。现在会改动东西的调用按顺序执行，只读的调用仍然并行。
+- **压缩失败会结束整轮对话**，界面还会一直显示「压缩中」。现在压缩失败时跳过这次压缩继续执行，确实超长时再由原有的超长处理接手。
+- **上下文窗口未知的模型没法用**。窗口配成 0 时每一步都会触发压缩，第一次状态更新还会报除零错误。现在窗口未知时只按请求体大小判断是否压缩。
+- **进程在写入一步的中途被杀，恢复会话后请求被服务商拒绝（400）**。现在一步的记录一次写完；发给服务商前也会把缺失的工具结果补上、多余的去掉，历史文件本身不改动。
+- **Windows 上左键点托盘图标会新开一个网页**，每点一次开一个。现在左键和右键一样弹出菜单，打开网页在菜单里选。
+- **Windows 上从托盘退出后，后台还留着几个 Python 进程**，升级安装时因此提示文件被占用，而且无法自动关闭。退出时现在会连同各会话的进程一起结束。安装和卸载程序也会先检查 OpenKimo 是否还在运行，在运行就提示后替你关掉，不再列出几个看不懂的「Python」。
 
-- Increase default max-steps-per-run to 100
+## v0.3.1 (2026-09-26)
 
-## 0.16.0 (2025-09-26)
+- **使用统计默认关闭**。这些统计会连同设备 id、登录时的 Kimo 账号令牌一起发给 Moonshot AI 的 Kimo Code 服务，对 OpenKimo 没有用处。现在默认不发，想发可以在配置里打开。已经保存过配置的安装里写着 `telemetry = true`，会保持原样，需要的话手动改成 `false`。
+- **产品名统一为 OpenKimo**。命令行帮助和欢迎语、网页标题、会话导出等处原来写的是 Kimo Code CLI，现在都是 OpenKimo。新增 `openkimo` 命令，`kimo` 照常可用；`/feedback` 指向 OpenKimo 的问题反馈页。Kimo 账号、Kimo Code 平台这些指 Moonshot 服务的名字不变。
 
-- Add `SendDMail` tool (disabled in Kimo Koder, can be enabled in custom agent)
+- **发送、停止按钮有了悬停说明**：分别显示「发送（Enter）」和「停止生成」。输入框为空、发送按钮不可点时也能看到。
 
-- Session history file can be specified via `_history_file` parameter when creating a new session
+- **改了配置之后，很久没动的会话都被标成「需要你处理」**。保存模型服务商等配置会重启所有空闲会话让改动生效，每个会话重启完回到空闲，都被当成刚完成了一轮。现在重启不会改变提醒状态。
+- **排队的消息在连接断开后丢失**。切换过会话之后，当前会话的连接再断一次会被当成主动关闭，不再重连，队列就把下一条消息发给了还在忙的会话，被拒绝后消息既不在队列里、也没发给模型。现在断开总会重连，排队的消息等会话真正空闲才发出，被以忙为由拒绝的会放回队首。
+- **第一次往上翻会话记录时画面乱跳**。还没渲染的消息按 160px 预估高度占位，而大多数行是折叠后约 30px 的工具调用，每渲染一段列表就缩短几百像素。现在预估改为 32px，并在同一帧里用上实测高度，最大跳动从 617px 降到 27px。
 
-## 0.15.0 (2025-09-26)
+- **离开页面再回来，看不到这段时间的新内容**。电脑睡眠或断网时连接会断，页面重试几秒就放弃了，之后再也不会重连，于是一直显示离开时的样子——会话其实还在干活，却让人以为卡住了、去输入「继续」。现在回到页面或网络恢复时会立即重连；页面在后台超过 30 秒，回来时也会重连一次，把期间的进度补上。重连时先保留当前内容，不会闪也不会跳。
+- **先登录再用时，完成提醒不工作**。提醒的数据流在登录页就连上了，被拒绝后浏览器不会重试，要刷新页面才恢复。现在登录后才连接，被拒绝时会自动重连。
+- **会话标题显示粘贴内容或文件的原文**。带长文本粘贴或上传文件的会话，标题会变成 `…<pasted_text index="1">order_id,…` 或 `<uploaded_files> 1. /Users/…`，AI 标题生成失败时一直如此。现在粘贴内容显示为 `⟦…⟧`，文件显示为文件名。已经存下的旧标题不会自动改。
 
-- Improve tool robustness
+## v0.3.0 (2026-09-24)
 
-## 0.14.0 (2025-09-25)
+- **版本号改为 OpenKimo 自己的 0.3.0**。上游 kimo-cli 停在 1.49/1.50，已经转去做 Kimo Code；OpenKimo 在它之上有自己的改动，于是从 0.3.0 起单独编号，安装包、应用和网页左上角显示的都是这个版本。发给 Kimo 接口和登录服务的身份仍固定为 `KimoCLI/1.49.0`，接口那边看到的和以前完全一样。
+- **网页端遇到限流或服务端故障会一直重试，直到你点停止**。以前重试固定次数后就放弃这一轮回复。重试提示会写明原因、第几次、已经持续多久、下次什么时候；页面关闭超过 3 分钟没人看，这一轮会自动停止，不会白白一直重试。子 agent 同样会重试。
 
-- Add `StrReplaceFile` tool
+- **长文本粘贴显示为占位符**。粘贴大段文字不再把输入框撑满，发送时模型收到的仍是全文。粘贴或添加的文件也可以放在句子中你想放的位置，不再一律排在文字前面。
+- **其他会话完成或需要你处理时会提醒**。浏览器标签页标题显示还没查看的会话数量，侧边栏会话列表里对应的会话带一个小圆点，打开后消失。
+- **在 Admin → Skills 里安装上传 skill 的依赖**。上传的 skill 压缩包带不了 `node_modules`，脚本需要 npm 包的 skill（比如 email-manager）上传后跑不起来。现在面板会标出缺依赖的 skill，点「Install dependencies」就装进这个 skill 自己的目录，有 lock 文件时用 `npm ci` 按锁定版本装。
+- **Admin 面板多了 Wiki 页签，可以直接查看和修改全局 Wiki**。此前 Wiki 只能由模型通过 `Wiki` 工具读写：写错的页面只能等模型哪天自己改掉，也没有地方看 Wiki 里到底有什么。现在可以按分类浏览、全文搜索，查看页面的标签、来源和互相引用的链接，新建、编辑、删除页面，还能看健康检查结果和每一次变更的历史。人工修改和模型写入走同一个事务，索引、变更日志和版本号跟着一起更新；如果打开页面之后它已被别人改过，保存会被拒绝并提示重新加载，而不是悄悄覆盖。人工编辑不经过模型的准入判断，但页面规则照旧：密钥、本机绝对路径、`file://` 链接一律拒绝。
 
-- Emphasize the use of the same language as the user
+- **从访达或 Dock 启动的应用找不到 node、npm**。图形界面启动的应用只拿到系统最基本的 PATH，Homebrew、nvm 装的工具都不在上面，所以 skill 执行 `node …` 在应用里报「command not found」，在终端里却正常。现在应用启动时会向你的登录 shell 要一次它设置的 PATH。
+- **Wiki 写入的小错误会白白用掉 checkpoint**。更新已有页面时没带版本号，或者 `ingest` 忘了带 `source`，以前都会把这次 checkpoint 作废，模型改正后重试时只能收到「checkpoint 已关闭」，内容就丢了。现在报错会说明该补什么，checkpoint 保留，用同一个 id 重发即可。请求格式有误时，报错也会说出具体原因，而不是一句「检查请求后重试」。
+- **会话列表里看不出当前打开的是哪个会话**。选中的底色几乎和背景一样，也和鼠标悬停时的颜色相同。现在选中的会话底色更深，左侧有一条蓝色竖线。
+- **重试提示在这一轮结束后还留着**。点了停止、会话重启或者强制退出应用之后，重新打开会话仍会看到「第 N 次重试」。现在只要会话实际没在运行，这行提示就会清掉。
+- **切换会话或回到页面时，对话框会跳到底部**，即使本来就在底部。
+- **一个会话的报错提示会出现在所有会话里**。现在只在出错的那个会话里显示。
+- **没有声明任何 beta 特性时，Anthropic 请求带了一个空的 `anthropic-beta` 请求头**，部分后端会因此拒绝请求。现在不再发送。
+- **健康检查不再把手写页面报成「缺少来源」**。模型写入的页面必定带来源，这条检查是用来找没人担保的页面的；在 Admin 里手写的页面由写的人担保，变更日志记得是谁最后写的。绕过 Wiki 直接改磁盘、又没有来源的页面仍然会报。
 
-## 0.13.0 (2025-09-25)
+- **上游的自动更新和「迁移到 Kimo Code」提示**：启动时去上游检查版本、后台自动下载安装、欢迎界面的新版本提示和迁移卡片、退出时的迁移提示，以及会执行 Kimo Code 安装脚本的 `/upgrade` 命令。
+- **Memory 页签里的 Knowledge 子页签**。它需要先选中一个会话才能工作，而 Admin 面板里根本没有会话，所以只会显示「Select a session first」。项目知识库仍在 Admin → Knowledge 里编辑。
 
-- Add `SetTodoList` tool
-- Add `User-Agent` in LLM API calls
+## v0.2.3 (2026-09-23)
 
-- Better system prompt and tool description
-- Better error messages for LLM
+- **会话重启后就再也问不了问题了**。重启会换掉 worker 进程，但浏览器的 WebSocket 不断开，而浏览器只在建立连接时发一次 `initialize`——新 worker 因此一无所知，退回默认值：AskUserQuestion 在这个会话剩下的时间里一律返回「连接的客户端不支持交互式提问」，Plan 模式不可用，客户端注册过的外部工具和 hook 也全丢了。设置会话模型就会触发重启，包括新建会话时选模型——worker 刚起来两秒就被换掉，握手随之丢失，而界面上看不出任何异常。现在新 worker 在报告自己空闲之前，会先收到重放的 `initialize`。
 
-## 0.12.0 (2025-09-24)
+- **历史记录里的上传文件分不清是哪个**。以前每个文件都是同一个回形针方块，文件名只在悬停提示里。现在按文件类型显示图标，并直接显示文件名和扩展名。
 
-- Add `print` UI mode, which can be used via `--ui print` option
-- Add logging and `--debug` option
+## v0.2.2 (2026-09-21)
 
-- Catch EOF error for better experience
+- **在管理面板里管理 MCP 服务器**。以前添加 MCP 服务器只能在宿主机上跑 `kimo mcp add`，Web 用户未必有 shell，界面上也从来看不到 `mcp.json`。管理面板新增 MCP 页签：列出、添加、编辑、删除服务器，测试连接并列出它提供的工具，表单覆盖不到的字段可以直接编辑原始 JSON。读写的就是 CLI 那份 `~/.kimo/mcp.json`，写入是原子的。凭据显示为掩码，原样提交掩码表示保留原值。保存后重启空闲会话，并点名跳过的忙碌会话。
 
-## 0.11.1 (2025-09-22)
+  stdio 条目是宿主机要执行的命令，所以 Web 端只在桌面版或设置了 `KIMO_WEB_ALLOW_STDIO_MCP=1` 时接受；开启 `KIMO_WEB_RESTRICT_SENSITIVE_APIS` 的部署拒绝全部 MCP 接口。发布前审查修掉了几处问题：原始 JSON 去掉 `mcpServers` 这层包装就能绕过 stdio 限制（fastmcp 会把顶层对象当成服务器照样启动）；清空原始 JSON 保存会写出一个 CLI 解析不了的文件，连 `kimo` 都起不来；用表单编辑一个服务器会把带空格的路径和参数拆碎，还会丢掉表单没显示的 `cwd`、`timeout` 等字段；对未授权的 OAuth 服务器点「测试」会在服务器主机上发起登录。
 
-- Rename `max_retry_per_step` to `max_retries_per_step`
+- **MCP 服务器没连上时会说出来**。会话以前显示「Connecting to MCP servers…」然后直接消失，不管是全部连上还是一个都没连上——某个服务器失败或需要授权时，它的工具在整个会话里都悄悄缺失。现在这条占位消息会变成一行说明，点名失败或需要授权的服务器，并给出对应的 `kimo mcp auth <name>`；全部连上时不出声。
 
-## 0.11.0 (2025-09-22)
+- **LLM 请求的临时失败按服务器的节奏重试**。可重试的状态码以前是手写的五个，529 过载、408、409，以及 Cloudflare 后面源站不可达时返回的 520–527 都会在第一次失败时直接结束这一轮。现在整个 5xx 除 501/505 外都重试，另加 408/409/429 和传输层错误。限流时遵守 `Retry-After`（最长 1 分钟），否则从 0.5 秒退避到 30 秒；`max_retries_per_step` 默认从 3 改为 5。请求因超出上下文窗口被拒时，会压缩一次再重试——识别的报错文案覆盖 Kimo、Anthropic、Gemini 和 OpenAI 两种接口，而不只是 OpenAI chat completions 一家。
 
-- Add `/release-notes` command
-- Add retry for LLM API errors
-- Add loop control configuration, e.g. `{"loop_control": {"max_steps_per_run": 50, "max_retry_per_step": 3}}`
+- **不再读取其他 agent 的 skills 目录**。自动发现以前按固定顺序遍历 `.kimo/skills`、`.claude/skills`、`.codex/skills`（用户级与项目级各一遍），并且全部合并——没有 `~/.kimo/skills` 的用户，整套 Claude Code 或 Codex 的 skill 目录会被塞进每一次请求。实际观察到一个项目只有 3 个 skill，却发现了 22 个，另外 19 个从未被调用，每轮白白占用上下文。`skip_skill_dirs` 解决不了：它只能减掉用户点名的绝对路径，覆盖不到别人仓库里自带的 `.claude/skills`。现在读哪些由 `skill_brands` 决定，默认只有 `["kimo"]`。顺带修了一个旧 bug：会话中途刷新 skill 列表时，用户配置的 `skip_skill_dirs` 会被悄悄丢掉。
 
-- Better extreme cases handling in `read_file` tool
-- Prevent Ctrl-C from exiting the CLI, force the use of Ctrl-D or `exit` instead
+- **用户在消息里点名的文件夹和文件成为可信的 Wiki 证据来源**。以前只有会话工作目录算可信工作区，用户指向别处的仓库（「看一下 /Users/me/acls 里的 v2 loss」）读了也不留证据，相关 checkpoint 只剩 shell 输出作依据，被当成不稳定丢弃。现在用户消息里写出的路径在本会话内可信：文件夹连同其下所有内容，文件单独一个。根目录、home 及其上级、不存在的路径和敏感文件被忽略，符号链接逃逸仍然拒绝。
 
-## 0.10.1 (2025-09-18)
+- **只填了 `ANTHROPIC_API_KEY` 时每个请求都 404**。预设的 `claude-3-5-sonnet-20241022` 已经下线，两个桌面设置界面也带着同一个失效值。现在是 `claude-sonnet-5`，上下文窗口按它实际的 1M 填写（原来写的 200000）。
 
-- Make slash commands look slightly better
-- Improve `glob` tool
+- **Memory 工具约一半调用报 Invalid arguments**。它只接受 `{"operation": {"op": ...}}`，描述里却写成 `add(kind, scope, content)`，于是 agent 发来的 `{"operation": "search", "query": ...}` 或扁平的 `{"op": ...}` 全部失败。两种形状现在都会被整理成严格格式，描述里给的是真实 JSON。Wiki 页面路径缺 `.md` 时自动补全，错误信息说明实际的路径规则，不再只回显路径或吞成「Wiki operation failed」。
 
-## 0.10.0 (2025-09-17)
+- **基于命令结果的 Wiki checkpoint 永远无法保存**。Shell 结果记为对话来源，runtime 在模型不填 sources 时会附上它；但授权前的预检只接受来自用户本轮输入的对话来源，于是每次都拒绝 runtime 自己附上的 provenance——任何跑过命令的 subagent 结论都存不进去，模型只能 discard。现在 checkpoint 自身证据记录过的对话来源也能通过校验。
 
-- Add `read_file` tool
-- Add `write_file` tool
-- Add `glob` tool
-- Add `task` tool
+- **会话列表的「最后更新时间」在打开会话时就变**。侧栏读的是 context 文件的 mtime，而打开会话会刷新系统提示里的 Wiki 块、重写这个文件——几天没动的会话显示「刚刚更新」。改用只在真正有活动时才变的 wire 文件 mtime。
 
-- Improve tool call visualization
-- Improve session management
-- Restore context usage when `--continue` a session
+- **Plan 的修改意见在对话里看不到**。反馈藏在工具结果里，界面只显示「Plan revision requested」。现在和审批反馈、问题回答一样，作为用户消息显示和回放。
 
-## 0.9.0 (2025-09-15)
+- **Cmd+Enter / Ctrl+Enter 既不发送也不换行**。输入框提示说组合键会插入换行，实际只是跳过了发送，而浏览器对 textarea 里的这两个组合键什么也不做。现在 macOS 上 Cmd+Enter、其他平台 Ctrl+Enter 在光标处插入换行（撤销可用）；Enter 仍然发送，Shift+Enter 不变。
 
-- Remove `--session` and `--continue` options
+- Release 的构建改到公开仓库 `goldenxingxing/OpenKimo-releases` 里运行：私有仓库的 Actions 额度已经用完（macOS runner 在私有仓库按 10 倍计费），公开仓库的标准 runner 不计费。源码仍然只在临时 runner 上 checkout，不会公开。
 
-## 0.8.1 (2025-09-14)
+## v0.2.1 (2026-09-08)
 
-- Fix config model dumping
+又一轮全项目审查后的修复集，覆盖上一次没读到的地方：Web 鉴权层、桌面打包、以及两个此前从未被审查过的一方包 `kosong` / `kaos`。方法同 v0.1.41——OpenCodeReview 与内置 code review 各扫一遍取交叉命中，逐条复现后再修，每个修复都配一条在旧代码上会失败的测试。
 
-## 0.8.0 (2025-09-14)
+- **一个 cookie 只要存在就被当成已登录**。中间件从 cookie 取到值就放行，不检查它是否对应一个真实且未过期的 session。现在必须解析到 session 才算通过，DB 查询移出事件循环。
 
-- Add `shell` tool and basic system prompt
-- Add tool call visualization
-- Add context usage count
-- Support interrupting the agent loop
-- Support project-level `AGENTS.md`
-- Support custom agent defined with YAML
-- Support oneshot task via `kimo -c`
+- **session id 被当成授权凭证**。知道（或猜到）一个 session id 就能读它的内容——HTTP 和 WebSocket 两条路径各写了一份不一致的检查。现在共用同一个 `may_access_session`，且属主过滤发生在分页**之前**：原先先分页再过滤，非属主翻页时会看到空页却拿到正确的总数。
+
+- **SPA fallback 可以读到静态目录之外的文件**。路径未做包含性校验，`../` 能穿出去。
+
+- **`open_in` 的命令注入**。macOS 侧把用户路径裸插进 AppleScript 字符串，Windows 侧交给 `cmd`——`&`、`|`、`^`、`<`、`>`、`"`、`%`、`!` 都能改写命令。两侧分别做了转义与元字符拒绝。
+
+- **密码哈希的回退路径就是生产路径**。passlib 缺席时代码静默降级，而实测环境里 passlib 根本不存在（修复后新加的告警在服务器日志里第一时间就打出来了）。现在 PBKDF2 回退迭代次数有下限、scheme 按 hash 前缀判定而非猜测，改密码会吊销该用户全部 session。
+
+- **配置接口对任何登录用户开放**。`/api/config` 改为 admin-only；`default_model` 的可写性单独判定；配置热重载不得把服务器的绑定范围放宽。
+
+- **Wiki `remember` 每次都失败**。真实会话 `be26b428` 里开了 6 个 checkpoint，6 次全被拒，一条都没写进去，每次都是「文件在读取后被修改了」。而那 6 次调用模型一个 source 都没填——这正是工具自己要求的行为（`WikiCandidate.sources` 写着「留空，runtime 会附上它真正观察到的 provenance」）。于是 runtime 填上自己记录的 source，再重读文件、要求字节完全一致，然后**拒绝了自己刚填进去的东西**——因为这个会话一直在改那些文件，那就是它的工作内容。错误提示让模型「重新读一次以开新 checkpoint」，但 checkpoint 由 runtime 的 trigger 机制开，模型没有这个操作，只能 discard。
+
+  两处重复实现的字节比对都去掉了，保留 `registry.resolve`：source 必须仍是注册工作区内一个可读的文件。鉴权不受影响——`reserve_grant` 依然要求每个 source 都是 runtime 自己 evidence 记录过的（含 hash），伪造的 ref 一样过不去。漂移也没有丢：page 存的是**当初观察到的** hash，`wiki.lint` 会报成 `stale_provenance`。
+
+- **`kosong` 十项**，这个包此前没有被任何一轮审查覆盖过：
+  - Anthropic 流里 `server_tool_use` / `web_search_tool_result` 的 block **start** 被跳过，但它们的 `input_json_delta` 照常到达，而 delta 分支只看类型不看 index——一次 web search 的 query 会被拼到某个真实 tool call 的 arguments 后面，两边都坏。
+  - `deref_json_schema` 遇到自引用 schema 直接爆栈，连带把工具注册干掉。
+  - 未注册的 content part type 以裸 `KeyError` 逃出 `Message.model_validate`；pydantic 只转换 `ValueError`，而 history restore 和 print UI 都只 catch `ValidationError`。
+  - `step()` 只对 `ChatProviderError`/`CancelledError` 清理 tool tasks，其他异常会把任务连同 Bash 子进程留在后台没人 await。
+  - OpenAI 系的流是裸迭代的，取消生成后 HTTP 连接一直挂到 GC。`generate` 现在在 finally 里关流。
+  - Gemini 的 tool_call_id 回退用左 split，`get_weather_12345` 解析成名字 `get`，回传的 FunctionResponse 匹配不上任何调用。
+  - Gemini 用同步 `httpx.get` 在事件循环上下载图片/音频，无超时无大小上限。
+  - `arguments=None` 的 tool call 序列化后整个 key 消失，OpenAI 兼容后端 400。
+  - Responses 流报 output item id、非流式报 response id，`GenerateResult.id` 含义随 `stream=` 而变。
+  - `MockChatProvider` 每次发同一批 part 对象而 `generate` 原地 merge；`ChaosChatProvider.with_thinking` 共享 client 导致注入率复利上升（0.3 → 0.51 → 0.66）。
+
+- **`kaos` SSH 后端三项**，全部因为测试需要真机而从未被覆盖：`readlines` 没有 `keepends`，每行丢了换行符，而 Read 工具用 `"".join()` 拼回去——SSH 后端读文件整个塌成一行；`mkdir(exist_ok=True)` 对已存在目录跳过 raise 却继续调 `sftp.mkdir`，把 no-op 变成 SFTPFailure；`create` 在 `asyncssh.connect` 之后任何一步失败都漏掉连接，而 `cwd` 不存在是最常见的一种。另外 `KaosPath` 只定义了 `__eq__`，`__hash__` 因此变成 `None`，`set[KaosPath]` 直接 TypeError。
+
+- **overlay 装的包服务器 import 不到**。`PYTHONUSERBASE` 只解决了一半：CLI 和「Install Package…」用 **runtime** 解释器安装（认 user-site），服务器跑的是 **app 层**解释器（venv 建时 `ENABLE_USER_SITE = False`）。于是 `openkimo pip install requests` 报成功、`openkimo python -c "import requests"` 能用，服务器里的 agent 照样 ModuleNotFoundError。这个只有装完真机跑才暴露得出来。
+
+- **Thinking 块折叠后对话跳回旧内容**。展开 Thinking、滚动、再折叠，视图会跳到之前的位置。折叠前在捕获阶段记下锚点元素，折叠后按它复位；Radix 的 `useControllableState` 从 `useEffect` 派发 `onChange`（commit 之后），所以测量必须发生在 click 的捕获阶段而不是回调里。
+
+- 另有若干：Windows 设置窗口对 `LLM_PROVIDERS = ""` 走 `json.loads("")` 抛异常；kernel server 的异步互斥；browser guard 与 jupyter kernel 的等待逻辑；`_run_xdotool` 有超时但仍在协程里同步执行。
+
+- **AskUserQuestion 的选择会留在对话记录里**。以前只回显手输的文本，选中的选项不留痕，事后无从追溯自己选了什么。现在问题与答案一并作为用户消息进入 transcript，两种答案都覆盖。
+
+两处需要产品判断、本轮刻意没有动的：
+
+1. `create_session` 接受任意 `work_dir`，已登录的非 admin 用户可借此读取宿主机任意路径。
+2. 中间件鉴权整体挂在 `session_token` 上，纯 cookie 的多用户部署等于没有中间件鉴权。建议的修法是 `run_web_server` 在非 loopback 绑定且未配置 token 时直接拒绝启动——但这会让部分现有部署起不来，需要先确认。
+
+另：Thinking 折叠锚点的修复有单元测试覆盖，但**未在真实浏览器里验证过**（本机 Chrome 扩展未连接）。SSH 后端的三项修复由离线 stub 测试覆盖，未接真实 SSH 主机。
+
+## v0.2.0 (2026-09-05)
+
+- **改配置不再重启服务，也不再打断正在工作的会话。** 以前 LLM 设置只有在 worker
+  重启时才会生效，所以桌面版 Settings 里有一条规则：只要任何一个 LLM 键变了，就把
+  普通的 Save 悄悄升级成 Save & Restart。代价是**新增一个 provider**——一个正在跑的
+  会话根本引用不到的东西——会重启整个服务，把 mid-turn 的对话直接杀掉，Web 端同时弹出
+  「暂时无法连接本地服务，服务可能正在重启」。那句提示是准确的，只是毫无帮助。
+
+  现在服务端自己应用改动，规则只有一条：**绝不打断繁忙会话**。
+
+  - 桌面端把一个请求文件放在服务端会去看的位置；`OPENKIMO_ENV_FILE` 告诉服务端该重读
+    哪个文件——它自己的环境在 spawn 时就冻住了。
+  - 服务进程重读 env。这一步是**删除 provider 能真正删掉**的前提：
+    `_build_global_config` 每个请求都会把「环境里有、config.toml 里没有」的 provider
+    补回文件，而每个 worker 又继承 `os.environ`。只刷新白名单内的键；端口刻意不在内。
+  - 空闲会话的 worker 立即重启，繁忙的记账，在它下一次 busy → idle 时结清。以前只是
+    「跳过」，于是一个没人重启的会话会永远停在旧配置上。
+  - 令牌和 LAN Only 改成每请求读 `app.state`，因此也无需重启即可生效。
+
+- **Settings 收敛成单个 Save 按钮。** 回车键从「Save & Restart Server」挪到「Save」——
+  重启是这个窗口里唯一会打断会话的动作，不该挂在人不看就按的键上。什么都没改的保存
+  现在什么都不做，而不是把所有空闲 worker 重启一遍。
+
+  端口是唯一一个 reload 送不到的设置（socket 已经 bind）。改端口会**询问**是否重启，
+  并说明其他改动都已生效、重启会中断正在工作的会话——只提供，不代做。
+
+  Windows 托盘版同步：`settings.html` 单个 Save，去掉 LLM 键 diff，退出码 4 现在会请求
+  一次 reload 而不是什么都不做。
+
+- **对话消息区频繁闪烁。** 建立连接时会先清空消息列表，而 `ChatConversation` 在
+  `messages` 为空且状态为 submitted 时会把整个列表换成一个 spinner。对切换会话来说这是
+  对的，但**重连**走的是同一段代码：读者眼看着对话消失、转圈、再随历史重放整个重建。
+  于是任何一次抖动都会重绘整个消息区——而重连并不罕见（异常关闭会重试、流式静默 45 秒
+  触发 watchdog、`history_complete` 后 15 秒内没等到 `session_status` 会定时重连）。
+
+  现在清空推迟到替代内容真正开始到达时，与追加发生在同一个 tick，React 批处理，空列表
+  那一帧永远不会被画出来；历史确实为空的会话由 `history_complete` 负责清空。
+
+  这不改变重连的**频率**，只改变一次重连对读者的代价——那才是它可见的原因。
+
+- **未发送的输入会跟着人跑到别的会话里。** 输入框的文本和附件由 session 切换之上的
+  单个 provider 持有，所以是全局一份：在 A 会话里写半句，切到 B，那半句就出现在一个
+  它从不属于的对话里。现在按 session 分别保存；切换时的交接在 render 阶段完成，
+  不会闪过上一个会话的草稿，附件的 object URL 也是移交而非 revoke。
+
+  排队消息以前是切换时**直接丢弃**（为了避免发错会话）。现在同样按 session 存放，
+  切走的队列留在原地等你回来，删除会话时才连同队列一起忘掉。
+
+- **Wiki 写入几乎必然失败。** checkpoint-backed 的 remember 要求模型自己写出 `sources`，
+  而一条 `SourceRef` 需要 `workspace_id` 和精确的 sha256——模型算不出哈希。于是每一次
+  诚实的尝试都会拿到同一句无信息量的「not admissible」，只能再猜一遍。有个 session 为此
+  连试六次、耗掉四分钟，最后把刚产出的结论丢弃了。
+
+  现在 provenance 由 runtime 提供，`sources` 变成可选，工具描述、checkpoint block、系统
+  提示词都明确要求**不要**自己写。拒绝信息按五种原因分开，each 说清下一步。此外：
+  `explicit_user_durable` 类型的 checkpoint 以前**无解**（唯一凭据是本轮对话文本的哈希），
+  现在由 runtime 交回；中文里的 `O(1)/点` 被绝对路径检测误判为 POSIX 路径而整页被拒的
+  问题也修了。
+
+- **macOS 打包偶发产出无法迁移的 bundle。** 一次构建的两个 venv layer 的
+  `pyvenv.cfg` / `sitecustomize.py` 回到了绝对路径形式，指向构建机。成因未定位（追踪过
+  一次完整构建，顺序完全正确、未能复现），但这个不变量重述一次的代价是毫秒级：现在在
+  校验前再跑一次幂等的 relocatable 处理，任何迟到的写入者都不可能再让这样的包通过。
+  校验失败时会一并打出每个文件的写入时刻。
+
+## v0.1.42 (2026-09-02)
+
+- **macOS 12.3 以下的机器装上后服务器起不来**。表现是托盘一直 CRASHED，日志里：
+
+  ```
+  readlink: illegal option -- f
+  usage: readlink [-n] [file ...]
+  Invalid wrapper script path: /Users/<user>/Library/Application Support/OpenKimo/python
+  ```
+
+  venvstacks 为每个 layer 生成一个 `bin/python` wrapper，它自己的注释就写明了这个前提：
+
+  ```sh
+  # Note: `readlink -f` ... is available on macOS 12.3 and later
+  script_dir="$(cd "$(dirname "$(readlink -f "$0")")" 1> /dev/null 2>&1 && pwd)"
+  ```
+
+  12.3 以下的 BSD `readlink` 没有 `-f`：stderr 打一行 illegal option、stdout 为空，于是 `dirname ""` 得 `.`，`cd` 落到**进程的 cwd**，两行之后的 `test -f "$script_dir/python"` 失败。而 `app_main/server.py` 正是以 `cwd=~/Library/Application Support/<App>` 启动 uvicorn 的——这正是报错里那个路径。wrapper exit 1，服务器从未启动。
+
+  **不是架构问题，是系统版本问题。** 它看起来只发生在 Intel 机器上，只因为那些机器才是还停在 12.3 以下的；一台还在 11.x 的 Apple Silicon 同样会中。而这与应用自己的承诺冲突：`brand.toml` 写着 `min_macos_version = 11.0`，`tests/test_macos_deployment_target.py` 特意把这个下限压低并注明「要求更高会把停在 Monterey 的 Intel 机器全部挡在门外」——于是应用装得上，服务器却起不来。
+
+  构建新增 `make_wrappers_portable()`，把那一行换成 `cli-wrapper.sh.template` 里本来就在用的符号链接解析循环。已用真实产物加一个模拟 12.3 之前行为的 `readlink` 三向验证：修补前复现原报错，修补后在新旧两种 `readlink` 下都正常启动。回归测试会执行改写后的 wrapper，所以 venvstacks 升级重新引入 `readlink -f` 时会在 CI 就失败，而不是在用户机器上。
+
+  **影响 v0.1.41 及更早的所有 macOS 版本**；如果你的 macOS 在 12.3 以下，请升级到本版。
+
+
+## v0.1.41 (2026-09-02)
+
+一次全项目审查后的修复集。60 个首方文件、约 14.3k 行，由三条互相独立的路径各审一遍（内置 code review、OpenCodeReview、以及一批无上下文的独立 agent），取交叉命中和逐条复现后的结果。
+
+- **一个 sandbox 可以在另一个 sandbox 的会话里执行任意代码**。`JupyterKernel` 用 `KernelManager(ip=get_host_ip())` 把 kernel 的五个 ZMQ socket 绑到了容器的可路由桥接 IP 上——而那个函数的兜底是 `except: return "0.0.0.0"`，即绑所有网卡。jupyter_client 的默认是 loopback，它自己的文档就在这个参数上写了警告。
+
+  单独看这还只是暴露面。真正成链的是另一端：kernel 管理服务监听 `0.0.0.0:8888`，而 `/kernel/connection` **无鉴权**返回完整的 connection file，**包含 HMAC 签名 key**。于是同一个 `kimi-agent-network` 上的 sandbox A 可以读到 B 的 key 和端口，签一个 `execute_request` 发到 B 的 shell 通道，在**另一个用户的会话里**跑代码。
+
+  现在 kernel 和管理服务都绑回环，`/kernel/connection` 打码签名 key，`/kernel/debug`（docstring 一直写着"开发用"却无条件注册）改为 `KERNEL_SERVER_DEBUG=1` 才启用，CORS 去掉 `allow_credentials`——它配着通配符 origin 本来就被浏览器拒绝，开着只是让一个无鉴权 API 看起来更开放。
+
+- **打包脚本对 bundled CPython 不做校验**。busybox 有 `BUSYBOX_SHA256` 且强制比对，而 python-build-standalone 的 tarball 只是算出 SHA256 打印出来、**不与任何值比较**，然后无过滤 `tar.extractall()`。同时 `release.yml` 缓存 `packaging/.cache`，而 GitHub Actions 的缓存对该仓库**任意分支**的 workflow 可写。现在钉住校验和，不匹配即报错并删除缓存副本，解包改用 `filter="data"`。
+
+- **生成的 shell 垫片未转义安装路径**。`userenv` 把 `PYTHONUSERBASE` 等路径用裸双引号插进 `#!/bin/sh` 脚本，路径里的反引号或 `$(...)` 会在用户每次调用 `python`/`pip` 时被执行。改用 `shlex.quote`。
+
+- **Windows 安装包缺少 carryover，启动即崩**。`carryover` 曾是 `src/kimo_cli/` 里的 vendored 副本，随源码复制进 runtime；成为 uv workspace 成员后它只存在于工作区、从未发布到 PyPI，于是只看到 kimo-cli wheel 的那次 pip resolve 会去 PyPI 找它、拿到 404、什么都不装——而构建**只打了一行 warning**。装好的应用在 `kimo_cli/utils/string.py` 第 7 行抛 `ModuleNotFoundError: No module named 'carryover'`。
+
+  现在从声明它们的文件读出全部 workspace 成员、逐个构建 wheel，并与 `requirements-windows.txt` 合进**同一次 pip resolve**。必须同一次：只有作为直接需求，本地的 carryover wheel 才能满足 kimo-cli 的依赖。`requirements-windows.txt` 一起进来则是反过来的道理——作为第二次 `--upgrade` 安装打进同一个 `--target`，它的 `Pillow>=10.0` 会悄悄覆盖 kimo-cli 钉住的 `pillow==12.2.0`。
+
+- **Docker 部署路径三处独立断裂**。compose 指向 `ghcr.io/j0x7c4/*` 而 release 实际发布的是 `ghcr.io/goldenxingxing/*`；`deploy.sh` 往 `.env` 写的 sandbox 镜像是裸本地 tag，而 compose 只定义 gateway 一个服务、CI 只构建 gateway，`Dockerfile.sandbox` 全仓库只在 `release.yml` 出现一次，所以那个镜像**没有任何人构建或拉取**，每个会话都以 `No such image` 失败；`KIMO_SESSION_DATA_DIR` 默认相对路径，而 gateway 把它原样交给 `docker run -v`，docker CLI 按**客户端 cwd** 解析——也就是 gateway 容器内的 `/app`，于是每个 sandbox 挂到的是宿主机上另一个空目录，worker 看不见会话数据且不报错。
+
+- **首次安装既不弹设置窗口也不启动服务器**。`_startup()` 跑在工作线程上，而 `rumps.Timer.start()` 把 NSTimer 挂到该线程的 run loop——那个 loop 从不运行，随守护线程一起消失。同一文件的 `_on_state_change` 早就用主队列并写了注释说明这个坑，首次安装这条路径没用上。
+
+- **服务器监管的三处竞态**：崩溃退避期间点「Stop Server」，两秒后看门狗仍会拉起新进程；重启时旧进程迟到的退出码会清掉对**新**进程的引用，监管器随后重复 spawn、发现端口被自己刚遗弃的进程占用、报 CRASHED，而那个无人监管的服务器还在跑；`_spawn_locked` 抛异常会直接打死看门狗线程，菜单栏永远停在「Running」而服务器并不存在。
+
+- **Settings 保存会毁掉 config.toml**。默认模型名被小写化后当作精确 TOML key 写回，导致 `prune` 删掉 `[models.MyLocal]` 并写下 `default_model = "mylocal"`，此后每次 `load_config` 都抛 `Default model mylocal not found in models`，服务器起不来。
+
+- **CDP 命令按固定 id 配对**。每条请求都写死 `"id": 1`，超时命令的回复不排空、连接继续复用，于是迟到的回复被当成**下一条**命令的结果。已用真实 Chromium 复现并验证修复。
+
+- 另有二十余项：`packaging/__init__.py` 在没有 PyPI `packaging` 的解释器上抛 `NameError` 导致 Windows launcher 无法 import；`launcher.c` 定义了 `CPYTHON_PREFIX` 却四处硬编码 `3.12`；macOS 构建的 wheel 排序对 `pykaos` 永远失效（它的目录名是 `kaos`），使依赖排在依赖者之后；`verify_min_macos` 按后缀过滤，从未检查过 bundled 解释器本身；`.env` 未加引号而 `start.sh` 会 `source` 它；kernel 执行循环里一个永远不成立的字符串比较使每次超时都重启 kernel、清掉用户状态。
+
+- **发布流水线**：四个 job 竞相创建同一个 Release（其一会拿到 HTTP 422），改为单独一个 `create-release` job 由其余四个依赖；第三方 action 从 `@main` 移动分支钉到具体 commit（该 job 持有 `packages: write` 和 `RELEASES_TOKEN`）；补齐 `permissions` 与 `timeout-minutes`。
+- **CI 新增一步 lint**，覆盖 `app/`、`packaging/`、本仓库 `tests/` ——此前 ruff 只跑 kimo-cli 子模块的 `src tests benchmarks`，这些目录从未被检查。`packaging/app_main/settings_window.py` 有 1500 行且没有任何测试 import 它（全部引用都是读文本做匹配），一个未定义名字整套测试照样全绿。
+- **`deploy.sh` 不再询问不生效的限额**：`SANDBOX_DISK_LIMIT`、`MAX_SESSION_CONTAINERS`、`SANDBOX_TIMEOUT_SECONDS` 在代码里没有任何消费者，`container.py` 只施加 `--cpus`/`--memory`/`--pids-limit`。问了却不生效比不问危险。
+
+macOS 安装包已本地构建并验证。Windows 打包、Docker 部署、以及重构后的 `release.yml` 本身，均以本次发布为首次真实执行。多架构（arm64）镜像仍未提供。
+
+
+## v0.1.40 (2026-09-01)
+
+- **全局默认模型重新可以设置了**。v0.1.39 加入会话级模型时，把原来的全局切换**顶掉了**而不是并存：输入框那个选择器过去写的是 `config.defaultModel`，会重启空闲会话让它们用上新模型、报告跳过的忙碌会话、并提供「强制重启」；改动之后它只写会话级覆盖。
+
+  别处也补不上——Admin → Models 只显示一个 `Default` 徽章，**背后没有任何动作**，而且全仓库没有任何组件再调用全局配置的 update。于是 v0.1.39 发出去的版本里，**界面上根本改不了默认模型**。
+
+  成因是那个会话级功能的提交写于一个月前，针对的是这个组件的旧版本并把它整体重写了，所以是"取代"而非"合并"；而且取代发生在**不冲突的代码块**里，没有任何冲突标记提示有东西被删掉。
+
+  现在：选模型仍然绑定当前会话；把它设为全局默认是选择器底部一个**独立的动作**——影响面是所有没有自己模型的会话，值得单独一步。重启汇报和「强制重启忙碌会话」按钮一并回来。选择器的文案原先通篇写着"全局"而已名不副实，现在改为「模型」。
+
+  **仅影响 v0.1.39**，该版本已标记下架。
+
+## v0.1.39 (2026-09-01)
+
+- **一个会话可以自己选模型**。此前模型是全局的——`config` 里一个 `default_model`，改了对所有会话生效。想在某一条线上试更便宜或更强的模型，就得把整个工作区切过去，事后还要记得切回来。
+
+  现在会话可以带自己的模型，存在该会话的 `session_config.json` 里。这个文件**本来就在放会话级覆盖**（`thinking`、agent spec 路径），所以是顺着已有形状走的，没有新开一处地方。worker 通过 `read_session_overrides()` 读整张覆盖表，缺什么就回落到全局配置——没有覆盖的会话行为不变，包括全局默认之后被改动时仍然跟随。
+
+  `Session` 和 `UpdateSessionRequest` 各加一个可空的 `model`：`null` 表示"跟随全局默认"而不是"没有模型"，这正是让一个被钉住的会话能交还给默认值的原因。
+
+  选择器和 plan / YOLO 控件放在一起，显示会话自己的模型，没有则显示全局默认。**生成过程中拒绝切换**并给出提示——模型是在一轮开始时读取的，中途切换会静默不生效。尚未创建会话的输入框会把选择暂存为草稿，创建时再应用。
+
+  测试见 `kimo-cli/tests/web/test_session_model_override.py`。
+
+## v0.1.38 (2026-09-01)
+
+- **一个不读数据的浏览器 tab 不再能把整个 session 冻住**。症状是 session 看着还停在半路，刷新一下才发现它早就把活干完、输出也结束了（复现于 session `30255445-d66c-44c9-be27-46074a7ea917`：worker 在 16:22:29 写完 `TurnEnd`，页面直到 16:40 手动刷新才看到）。
+
+  根因在 `web/runner/process.py`：`_broadcast()` 是在**读 worker stdout 的那个 task 里**逐个 `await ws.send_text()` 的。于是一条链路串起来了——某个客户端停止读它那条 socket（后台 tab、渲染线程卡住、机器睡眠、半死的连接）→ 该 socket 的 `send_text` 永远不返回 → `_broadcast` 卡住 → 读 stdout 的循环停止排空 → worker 的 stdout 管道（64KB）写满 → worker 的 `_write_loop` 卡在 `drain()`。
+
+  关键是 **agent 本身没有停**：`run_soul` 往 `wire.jsonl` 写文件走的是另一条路，完全不受影响。所以文件里一切齐全，而实时画面停在最后一条挤进管道的消息上——**刷新之所以能"修好"，正是因为刷新关掉了那条卡死的 socket，把阻塞的 `send_text` 释放了**。日志里的旁证：8/31 三次自动重连（15:45:53 / 15:49:03 / 15:51:53）之间隔着约 3 分钟，正好是"重放完整个 wire.jsonl 追上进度 → 再次卡住 → 前端 45 秒看门狗超时"的周期。
+
+  现在每条连接有自己的发送队列和写任务，`_broadcast` 只入队、从不阻塞；背压被关在它该待的那一条连接里。掉队太多（8192 条 / 64MB）或单帧 60 秒发不出去的客户端会被摘掉并以 1011 关闭，前端照常重连并从 `wire.jsonl` 重放——也就是说**过去要靠人手刷新的那一下，现在服务端在 60 秒内自己做了**。关闭握手本身也可能卡在同样的原因上，所以它是甩到后台带超时跑的，绝不让调用方等。
+
+  回归测试见 `kimo-cli/tests/web/test_websocket_backpressure.py`（修复前 5 条里挂 3 条）。
+
+- **装好的 app 不再依赖打包它的那棵仓库树**。venvstacks 的 `postinstall.py` 是在构建目录里跑的，它把当时的绝对路径写进了每层的 `pyvenv.cfg` 和 `sitecustomize.py`；`.app` 拖进 `/Applications` 之后，这些路径**还指着仓库里的 `dist/`**。证据是装好的应用自己的 `sys.path`：
+
+      /Applications/OpenKimo.app/.../app-app-openkimo/lib/python3.12/site-packages
+      /Users/…/OpenKimo/dist/OpenKimo.app/.../framework-framework-kimo/…      ← 指回仓库
+      /Users/…/OpenKimo/dist/OpenKimo.app/.../cpython-3.12/…/lib-dynload      ← 也是
+
+  只要仓库被移走、清理，或者下一次构建把 `dist/` 删掉重建，装好的应用就再也起不来（`No module named 'acp'`，框架层看不见了）。它之所以一直没被发现，是因为**只要构建目录还在，一切看起来都正常**。
+
+  全包里只有 4 个文件带着这些路径，每层两个。现在两个都改成相对自身位置：`pyvenv.cfg` 的 `home` / `executable` 用相对路径（CPython 是相对 venv 目录解析的，不是相对 cwd，已在三个不同 cwd 下验证），`sitecustomize.py` 重新生成成从 `__file__` 推算同级层，目录清单读 venvstacks 自己那份层元数据。匹配用 `runtimes/` 作锚点而不是直接 relpath：记录的路径若不属于这棵树就不动它，让下面那道检查把构建拦住，而不是生成一串指向未知位置的 `../../..`。
+
+  **代价说清楚**：相对 `home` 会让解释器每次启动往 stderr 打一行 `Could not find platform dependent libraries <exec_prefix>` —— 发出这行的探测跑在相对路径被解析之前，之后三层依然全部正确落到 `sys.path`（ssl / sqlite3 / socket / select / zlib 均验证可导入）。另一条路是按 venvstacks 的设计在安装后重跑 `postinstall.py`，没有这行警告，代价是往已签名的 bundle 里写文件，毁掉 DMG 带的那份签名。
+
+- **构建期检查 `verify_relocatable`，在签名前跑**。扫 `runtimes/` 下的文本文件，只要还出现 bundle 自身路径或仓库根目录就让构建失败。第一次跑它就抓到了东西——不过抓的是 `*.dist-info/direct_url.json`，那是 PEP 610 的安装来源记录，按定义就是构建机路径，且 import 时无人读取。已排除：**因为一份无害的元数据而让构建红掉，只会教会大家跳过这道检查**。
+
+- **不会再每天早上被踢回登录页**。会话过期是从登录那一刻钉死的 24 小时窗口（`web/api/auth_user.py` 里的 `_SESSION_MAX_AGE = 86400`），中间用得再频繁也不续期；而前端只在挂载时校验一次身份，`getMe()` 之后再没人问过服务器。两件事叠起来的症状很具体：**过一天回来，页面看着还在，实际已经死了，手动刷新才弹登录页**。
+
+  现在窗口会滑动：带着有效 cookie 的请求，在窗口剩余不足一半时把 `expires_at` 往后推并重发 cookie。做成 ASGI 中间件而不是依赖，有两个理由——只有中间件还能在响应出门前加 header，而且一个没碰到鉴权路由的请求同样说明"人还在"。静态资源跳过：它们占了请求的大头，且不代表任何人在场。
+
+  代价说清楚：带 cookie 的请求多一次主键 SELECT，UPDATE 和 `Set-Cookie` 只在窗口过半后发生。**续期不是无限的**——`KIMO_WEB_SESSION_ABSOLUTE_MAX_AGE`（默认 30 天，从登录时刻算，永不延长）是硬顶，一个被偷走的 cookie 到线就死，哪怕它每分钟都在用。
+
+- **过期时界面自己回登录页**。此前 HTTP 401 只写一行 `console.error`，WebSocket 4401 报的是"reload the page to sign in again"——把重新加载这件事交给了读者去猜。现在两条路都汇到同一个信号：清掉缓存的用户，`App` 据此渲染登录页，工作区随之卸载，登录后重新挂载并重连 socket。标签页重新可见时还会重新校验一次（30 秒内不重复问）。
+
+- **`KIMO_WEB_SESSION_MAX_AGE`**（空闲窗口，秒，默认 86400）和 **`KIMO_WEB_SESSION_ABSOLUTE_MAX_AGE`**（从登录起算的上限，默认 30 天）。桌面版在 `_build_env` 里默认给 30 天：本机 loopback、单人使用，24 小时那道门槛换不到多少安全，代价却是每天一次登录。这行设在用户 `.env` 之前，所以不同意的人可以自己覆盖。
+
+## v0.1.37 (2026-08-24)
+
+- **桌面版的会话结束时不再什么都不留**。`archive_on_session_end` 只挂在命令行那条路的 `finally` 里，而桌面版走的是 worker，它的关闭处只有 `close()`。后果是：**一个没触发压缩的会话，既不写摘要也不产生提案**。真实库里的证据很干净——17 天里 9 条会话摘要，**触发方式全部是 compaction，session_end 一条都没有**。现在 worker 用和命令行相同的形状归档：失败不抛、限时 10 秒、在 `close()` 之前跑（soul 还持有历史）。代价说清楚：**每个 ≥4 条消息的会话结束时多一次摘要请求**，这笔钱命令行一直在付，现在两条路一样。
+
+- **待批准的提案不再只在"相关时"被提起**。开场注入里那句 "raise one with the user when it is relevant" 是有意的默认（记忆系统不该骚扰你），但代价是话题撞不上的提案会一直躺到过期。这一版起，临近过期时措辞会变成"最老的还剩 N 天，本轮结束前提一次"。**这件事是测过的**：在一个完全不涉及队列主题的任务上，四轮各 30 次，原措辞的提出率是 **1%**（0–3%），升级后是 **25%**（20–40%）。25% 是改进，不是保证——所以界面那条路同样重要（见下）。
+
+  子模块此前钉在这个改动之前的提交上，也就是说前一版装的 carryover 停在 1% 那一档。
+
+- **Admin Panel 多了 Memory 页签，待批准条数直接显示在页签上**。此前记忆面板是**死代码**——自它被写出来那天起没有任何地方引用它，打包器把它摇掉了，所以 Suggested 页签、hook 和后端端点全都够不着。现在它在 admin 页面里，和 Skills、Knowledge 并排。三个端点走 `CandidateFile`：列出、保留、丢弃；**先写入后出队**（反过来会在写失败时静默丢掉提案，有测试盯着这个顺序）。
+
+- **搜索时发整句，不要发关键词**。工具描述此前写着 "a distinctive fragment works better than a sentence"，而 carryover 自己的召回基准说的正相反：整句 63.0%，最有辨识度的单个词 28.4%。扫描本身按逆文档频率加权，常见词早就不计分，没有噪音可剥。
+
+
+## v0.1.36 (2026-08-23)
+
+- **待批准的记忆现在能在界面里处理**。carryover 的闸门是"抽取只提议，人来批准"，这套东西每一块都在——开场注入里列着待批准项连同 id 和 promote 操作，Memory 工具十二个动词也含 promote/dismiss——**唯独缺了人动手的那个入口**。开场注入的措辞是"相关时再向用户提起"，这是对的默认（记忆系统不该骚扰你），代价是话题撞不上的提案就一直躺着，两周后静默过期。发现时正好有 5 条躺了两天，讲的是一个那两天没被提起的项目，而它们的主人**没有任何办法看见它们**：Web API 对已入库条目有增删改查，对队列一个端点都没有。现在记忆面板多了 `Suggested` 页签，**条数角标在面板层计算**，所以你开着别的页签时那个数字也在——一个没人告诉你它存在的队列，问题从来不是不能处理。
+
+  两处语义是照工具路径来的：**先写入、后出队**（反过来会在写失败时静默丢掉提案，有测试盯着这个顺序）；**这条路径不再加确认**，因为按钮就是决定，闸门要挡的是"没有决定就进了记忆"，不是让主人对自己的数据点两次。
+
+- **跨平台 CI，以及它当场抓到的三个问题**。此前所有 job 都跑在 ubuntu，而 OpenKimo 是发 Windows 版的——`src/` 下二十三处 `win32` 分支从没被执行过。加上矩阵后：`msvcrt.locking` 按**进程**加锁，同进程第二个线程去锁同一段字节会被直接拒绝而不是等待（`fcntl.flock` 会排队），`skill/manager.py` 与 `wiki/workspaces.py` 两处阻塞锁都带着这个缺陷；`test_export_help_is_leaf_command` 断言的是带 ANSI 的帮助文本，CI 设了 `FORCE_COLOR` 就断在转义序列上，而输出对人眼完全一样；`tests/acp` 在 Windows 上不是失败而是**停住**——29 分半只跑完两个测试。Windows 那一档设为报告不阻断，首次诚实结果是 91 failed / 3608 passed，那个数字就是欠账。
+
+- **构建会检查发出去的和源码一不一致**。此前两次打包故障都是无声的：pip 见版本号相同就跳过安装，发出的 `.app` 里是旧代码；venvstacks 的层只装不卸，改名后 amem 和 carryover 一起进了包，死的那个还能 import。现在签名前逐字节比对每个 workspace 包，反向用 `direct_url.json` 认出"本地装过但这次不再构建"的包。
+
+- **测试不再写进开发者自己的目录**。`get_share_dir()` 回落到 `~/.kimo` 并且 mkdir，278 个测试文件里只有 17 个重定向了它，跑一遍套件会动到真实目录。
+
+
+## v0.1.35 (2026-08-23)
+
+- **记忆包改名 Carryover**。`Amem` 与 `A-MEM: Agentic Memory for LLM Agents` 撞名——NeurIPS 2025 的论文，两个实现各约一千星，同样两个音节、同一个领域。而这个包的 README 恰恰是一份跟其他记忆系统的对比，被读成那篇论文的实现两个方向都吃亏，副标题救不回一个读者已经认成别的东西的名字。`import carryover`、`python -m carryover check`，没有旧名兼容层：没发过 PyPI、没打过 tag，此刻没人在 import 它，为一个只存在一周的问题留一个永久答案不划算。
+
+  改名时顺带修掉一处**不只是措辞**的地方：抽取提示词写着 `project — a durable fact about a repository`，这句话在告诉模型什么算数，于是一段没有仓库的对话等于关掉了四个 kind 之一。现在是领域中立的说法。**已公布的对比数字是旧措辞下测的。**
+
+- **删掉 Wiki 的每轮自动检索**。`retrieve on demand instead of on every prompt` 那次已经拿掉了调用点，实现留了下来；此后它的每个公开符号在模块外都是 0 引用，只被自己的测试供养着，还有另一条测试专门守着这个调用点不许回来。跑不了的代码不会因此就不用读——每个打开它的人都得先判断一次它是死是活。同去的还有它的专属测试、六个驱动它的可观测性测试、两个只服务于它的 UTF-8 边界测试，以及三个没有别处发出的遥测事件名。
+
+- **vis 的会话列表看不见任何新会话**。会话搬进工作目录的 `session-data/` 之后，列表和统计接口仍然只扫 `share_dir/sessions/`——**那之后写入的每一个会话在界面上都不存在**。页面照常渲染，只是历史变短了，这比报错更难发现。两处现在走同一个枚举器，新旧位置都读，正是 `legacy_sessions_dir` 那句"retained for reads"的本意。统计接口此前**一个测试都没有**，这就是它能一直错着的原因。
+
+- **测试套件会破坏运行它的那个仓库**。四个测试模块用 `cwd=` 临时目录调 git，以为这就决定了操作哪个仓库——不是，`GIT_DIR` 和 `GIT_WORK_TREE` 优先级更高，而 git 会把它们导出给自己执行的每一个钩子。从 pre-push 钩子里跑套件时，临时目录里的 `git init` 重新初始化了**真实仓库**（`core.bare=true`，此后那个检出里任何 git 命令都不工作），同一个 fixture 的 `git config user.email t@t.com` 落进了开发者的配置，**下一个提交就会用这个身份**。三十九个测试的失败是它们自己造成的破坏的副作用。
+
+- **四十四个失败的测试**。这个套件没人跑：CI 跑的是外层仓库的测试，而 kimo-cli 自己的 workflow 不是这里的门禁。除上面两条外，其余是测试落后于代码——假 session 对象缺 `work_dir`、mock 缺 `max_request_bytes`、进度条助手把 rich 画的底槽也算成已填充、e2e 的 mock 服务器把会话结束的记忆归档请求当成 tool-call 续写而报 500 导致重试被计成对话轮次。
+
+- **构建规范不再入库**。`packaging/venvstacks.resolved.toml` 由 `build.py` 每次构建生成，带着生成它那台机器的绝对路径。它不只是躺着——两处 release 缓存键都在对它求哈希，于是决定构建要不要复用缓存的是一份过期产物，而且依赖真的变了它也不会变。缓存键改为 `venvstacks.toml` 和 `kimo-cli/uv.lock`。
+
+- **检查跑在会真正执行的地方**。CI 在这个账号上起不了任何 job（每次运行三秒内因计费失败），所以 `.githooks` 下装了 pre-commit（ruff，不到一秒）和 pre-push（不含 e2e 的 3773 个测试，约两分半）。两者都可以 `--no-verify` 跳过，这是有意的：一个跳不过去的钩子会被卸载掉。CI 的配置同时接上了 kimo-cli 的套件，计费恢复即生效。
+
+
+## v0.1.34 (2026-08-20)
+
+- **跨会话记忆：agent 现在记得住上次说过的事，而且记什么由你点头**。此前持久记忆里只有 agent 当场想起来要记的东西——也就是说，你纠正它一次、约定一个路径、定下一条规矩，它记不记全看它那一刻有没有想到。现在每次会话结束抽取一次（跑在本来就要生成摘要的地方，所以是一次调用而不是每轮开销），把值得带进以后对话的事实**排进队列**，等你批准才入库。`suggest()` 入队、`keep()` 提交是两个分开的调用，好让这个区别没法被一个开关抹掉；你直接说出来的事实走 `add()`，因为没什么可批准的。抽取提示词有一处是拿零和五的差距换来的：**正文必须嵌在提示词里，不能追加在后面**——放在最后，模型会把自己的最后一轮当成待续的那轮然后接着写下去，六个真实会话实测**每次产出的可用提案都是零**；把正文用标签围起来、任务说明放在它之后，同样六个会话每个产出四到五条。
+
+- **记忆分两类，到达方式不同**。`user`/`feedback` 是**行为类**——它们改变 agent 怎么工作，而且从来不会成为提问的对象（"对外文档里不许出现函数名"是靠**不做某件事**来遵守的，没人会输入一个能检索到它的查询），所以每次对话**全文注入**，不管当下用不用得上。`project`/`reference` 是**查阅类**，只在索引里占一行，需要时按需取全文——把它们全都随身带着，比偶尔去取一次正确答案更贵。在一位用户的真实工作记录上测了 243 条发言：**89% 是指令**，那些场景里根本没有检索发生，能帮上忙的只有不请自来的那半。
+
+- **记忆能被检索，而且中文真的能搜到**。SQLite FTS5 的默认分词器按非字母数字切分，而中文不带空格——一整句会变成一个 token，任何针对句中短语的查询都会落空。改用 `trigram` 分词器加一条按**逆文档频率**加权的子串扫描：英文有停用词表挡住"是什么"这类语法词，中文没有，而为每种语言维护一张表是打不赢的仗；改成看每个词在**这个库里**能把范围缩小多少，语法很常见于是不再计分，主题很罕见于是决定顺序。仅这一处，中文召回@8 从 47.7% 到 58.9%。两条路按查询的文字系统逐条选择，所以中文这条提升而英文那条一点不受损。两万条时一次中文查询 9.8ms、写一条再搜索 50ms（此前 66ms / 756ms）。
+
+- **记忆会告诉你它满了、旧了、重复了——但一件都不自己动手**。行为类记忆总共约八千字符，超过之后最老的就不再到场，而**一条不再到场的长期指令，就是一条不再被遵守的指令**，并且没有任何迹象表明它消失了。所以有三个只提建议的机制：**取代**（新记录替换旧的，靠序列相似度、主题词重合，以及"改用…不再维护…"这类**自我宣告**——宣告比前两个分数都更有力）、**休眠**（主题几个月没出现的条目；注意它**不**测量"这条规则有没有被用过"，因为规则是靠不做某件事来遵守的，按使用打分会最先淘汰禁令）、**压力**（预算占用到 75% 就提，超过 80% 改成"本轮结束前必须提一次"——温和的措辞实测在一个 83% 的真实库上放了几个星期，清单每次会话都在，一次都没被提起）。答复有两种：`retire` 或 `affirm`，**后者更常是对的**——后来的指令通常是在旧的之上补充而不是替代，它没写到的部分仍然是要求；一个真实的库上，第三代规则丢掉了前两代带着的三项要求，照建议退役会把它们无声抹掉。要合并就用 `consolidate`，它先写合并条、后退役其余的。
+
+- **事实自带日期**。写"2026-05-06 用户把估计方式改成了 EWMA"，而不是"用 EWMA"。条目本身有 `created_at`，但那回答的是另一个问题——它**被写下来**的时间，不是它**成立**的时间。十二个会话、六条事实中途被修订的测量里，让每个回答都是当前值的不是去重（一次都没触发，按设计也不该触发），而是两个版本都留在库里、各自带着日期。
+
+- **技能默认全部关闭，直到你打开它**。每一个被发现的技能都在**每次请求**上花掉几百字符的上下文，不管它是否被用到；而发现会走到你可能都不记得有的目录——另一个 agent 的目录、一个项目检出、某个装了技能的插件。此前状态记的是"哪些被关掉了"，于是**"开着"成了所有没人回答过的问题的答案**，包括昨天才出现的技能。现在状态记的是哪些开着。三种情形，中间那种是这不是一行改动的原因：全新安装没有状态文件，什么都不带；**已有状态文件没有 `enabled` 键的，按旧规则读——升级不是清空别人整理好的目录的时刻**，否则第一个迹象会是 agent 突然不会做它上周做过的事；状态文件损坏按全新安装处理，因为一个读不出来的文件不能算作"有人选择了带上全部技能"。另外，管理规则拒绝的名字（`写作助手/`、前导符号、空格）此前被答为"开着"，反过来之后会变成"永远关着且打不开"——那是一次没人执行过的删除，所以开关和检查现在都退回发现本身用的规范化，面板因此能寻址一个它本来管不了的技能。
+
+- **记忆实现搬到 Carryover，本仓库只是普通调用方**。[Carryover](https://github.com/goldenxingxing/carryover) 0.1.0 作为 workspace 成员引入，2891 行里约 2800 行的重复副本删除。留在这里的是真正属于本应用的部分：kosong 消息转文本、compaction 与关闭钩子、文件位置、批准与展示。这么做是因为副本已经付过一次代价——手工搬运的 `fold_text` 丢了三个归一化轴里的两个，而它同时撑着 Wiki 的意图哈希（一个授权边界），在写出测试之前没有任何东西发现。现在两边共用同一个实现。顺带拿到 Carryover 侧的修复：**SQLite 低于 3.34 时英文搜索此前静默返回空**（FTS5 的 trigram 分词器要 3.34+，而失败被读成"没匹配上"），现在退回扫描，结果与正常环境一致。
+
+- **打包时装的是旧代码**。`pip` 看到版本号一样就跳过安装，而 workspace 成员每次本地构建版本号都不变——于是源码改了、wheel 是对的、`.app` 里还是旧的，而且完全无声。这次是一个新增常量抛了 `ImportError` 才暴露；**任何不抛异常的改动——改个阈值、改个提示词、修个 bug——都会安安静静地没进包**。构建前删掉本地 wheel 的 dist-info，让 pip 当它没装过。
+
+- **`.app` 里装了两份 kimo_cli**，DMG 因此多出 134MB。移除影子副本时必须保留 dist-info，否则 `importlib.metadata.version` 找不到发行版，server 起不来——这一条是靠实际启动 server 打 `/healthz` 才发现的，测试套接不住。
+
+- **打包的 workspace 成员名单不再手抄一份**。加一个成员要在两个仓库改两处，而构建只会在解析阶段报"PyPI 上找不到这个包"，看起来像网络问题。现在从 `pyproject.toml` 的 workspace 声明读，wheel 的安装顺序也从同一处推导——手抄的顺序里漏掉一个成员，它会排到最后、在它的依赖方之后安装。
+
+
+## v0.1.33 (2026-08-17)
+
+- **后台任务干完了会主动告诉你，不用再等你开口**。一个在前台会话结束之后才完成的任务，此前没有任何办法把结果说出来：通知发布了、`llm` sink 一直 pending，直到你恰好因为别的事情再发一条消息，它才被读到。所以"后台还在跑"的会话永远不会主动回来给结论。交互式终端一直是有这个能力的——任务完成会唤醒它的循环、重新进 soul 让模型读通知并汇报；而 wire server（所有 Web 和桌面客户端）根本没有这个循环，只有客户端发 `prompt` 才跑一轮。现在两边用**同一个信号**（`background_tasks.completion_event`）行为一致。护栏照搬终端踩过的坑：**首轮之后才武装**（否则重开一个有历史通知的会话，它会自己开口讲旧事）、**只在空闲时触发**（正在跑的那轮本来就会读到）、**合并 1.5 秒**（五个 subagent 前后脚结束是一次汇报而不是五轮）、**连续失败三次就停**（不在 provider 挂掉时每次完成都重试）。默认开启，与终端一致，`background.auto_followup` 可关——代价要说清楚：它会在你没开口的情况下花 token。唤醒的那一轮输入是 system-reminder，界面不再为"输入完全是 reminder"的轮次画用户气泡，那不是你说的话。
+- **审批和提问里你手输的内容，会作为你的消息出现在对话历史里**。拒绝审批时填的理由、AskUserQuestion 里手打的回答，此前只经由工具结果抵达模型，对话读起来就是 agent 自问自答，你说的那句话在记录里不存在。现在由 soul 发一条 `UserReply` 事件承载——之所以是 soul 发而不是前端自己画，是因为只有前者会被写进 wire 文件并被回放；响应帧本身不落盘，刷新一次就没了。只回显**手输**的内容：选一个列出的选项是"选择"而不是"你说的话"，判定规则是答案不在该问题的选项列表里。
+- **Skill 分类可折叠**。十几个分类几百个 skill，全展开意味着要滑过一切才能够到任何东西。分区默认折叠，标题成为一张带数量的目录，点开一个是一次点击而不是一段滚动；展开状态跨会话记住（你常用的分类不会天天变），并提供 Expand/Collapse all。存储不可读、不可写或不存在时一律按"全部折叠"处理，不会因此让页面渲染失败。
+
+- **拒绝一次顺手的记录，不再把整个任务一起中断**。root agent 只要收到一个不带反馈的拒绝就会结束当前 turn。对"agent 被要求做的事"这是对的——否决 `rm -rf` 意味着方案错了，继续下去就是撇开用户往前走。但 memory 和 wiki 是 agent 在干别的事情时**自己顺手**发起的副动作，拒绝它的含义是"别存这条"，被当成了"停下"，于是你真正要的任务被丢在半路，而你对那件事什么都没说过。`ToolRejectedError` 增加 `stops_turn`（默认 True，其余所有工具行为不变），turn 结束的判断只统计声明会中断的那些；memory 与 wiki 显式退出，并换掉提示语——默认那句是"停下来等用户告诉你怎么做"，正好和该发生的事相反。
+- **Plan 模式的说明不再因为鼠标路过就弹出来**。共享 Tooltip 的悬停延迟是 0，而 Plan 恰好位于 YOLO 开关和会话列表之间——从 YOLO 回到会话列表必然扫过它，扫过即弹。是新增的 YOLO 开关让 Plan 第一次变成"路过必经之地"，所以症状是从打开 YOLO 之后开始的。两个开关现在都要求有意悬停（500ms）。无头浏览器实测：快速路过不再弹，停 800ms 仍然弹。
+
+## v0.1.32 (2026-08-13)
+
+- **Windows 上"打开会话就 lost connection"，其实是两件事**。第一件：一台机器上跑起了两个实例，后启动的那个永远抢不到端口，守护进程每 2 秒重启一次 uvicorn，一份日志里转了 **947 次、一个半小时**，界面上只表现为会话掉线。撑住这个循环的是三个各自独立的缺陷。**健康检查从来没有在检查任何东西**——它探的是 `/health`，而这个路由根本不存在：SPA 兜底路由对任何 GET 都返回 index.html 和 200，于是任何端口都是"健康"的，包括被别人占着的那个；刚死于 10048 的子进程因此被判为 RUNNING，重启计数器被清零，`MAX_AUTO_RESTARTS = 3` 形同虚设。现在探 `/healthz`，要求 JSON 且 `status == "ok"`，并把响应里的 `pid` 和自己 spawn 的子进程比对——一个 HTML 页面配 200 不是健康检查。**没有任何东西清理残留监听者**：`_reap_orphan_listener` 调的是 `lsof` 和 `ps`，Windows 上两个命令都不存在，整个函数被异常吞掉，于是托盘被强杀后遗留的 uvicorn 能一直占着端口；Windows 分支改用 `netstat -ano` 定位、PowerShell 读命令行，只杀命令行包含 `kimo_cli.web.app` 的进程，绝不按端口盲杀。**没有任何东西阻止开第二个实例**：现在用命名内核 mutex（进程被强杀时系统自动释放句柄，pidfile 做不到这点），第二次启动会把已有实例的页面打开再退出，而不是静默消失——一个点了没反应的图标本身就是故障。端口确实被占用时（不管占用者是不是我们），守护进程不再 spawn，托盘直接显示 `Port 5494 in use — close the other copy`，而不是让用户去看一份他打不开的日志。顺带把 `uvicorn-log.json` 改成原子写：两个实例并发读写同一个文件，会让其中一个死在解析自己的日志配置上（日志里那两次 `JSONDecodeError`）。
+- **配置了 Session Token 之后，登录了也连不上会话**。第二件事：HTTP 和 WebSocket 的鉴权条件不一致。`AuthMiddleware` 在设置了 session token 时接受**两种**凭据——session token，**或**有效的 `kimo_session` 登录 cookie（这个 fallback 是特意写的）；而 WebSocket 端点只认 `?token=`。于是"在设置里填了 Session Token + 用账号密码登录"这个组合会精确地落进：**每个 HTTP 请求 200，每个 WebSocket 握手被拒**（服务端日志里是 403）。界面无从表达这件事——close code 被丢掉，5 次重试花在一个重试不可能改变的拒绝上，最后报成 "lost connection to the session and could not reconnect"，读起来像网络故障，把人引向完全错误的方向。现在凭据规则由 `user_from_connection` 共用：它接受 `HTTPConnection`，而一次握手和一个请求一样都是；两条路径走同一条规则。客户端也不再丢弃原因：4401/4403 归入终态 close code，各自给出服务端真正说的那句话（"未登录"／"服务器拒绝了这个连接"），而不是赖在连接上。
+- **切换会话时，聊天记录有时停在最顶部**。两层原因。滚动状态活过了它所描述的会话：只有内层虚拟列表带 key，组件本身和它的 catch-up 标记不会随切换重建，于是在任何一个会话里往上滚过一次，下一个会话就继承了"不要跟随"，最终停在哪里取决于历史消息恰好在哪个时刻到达。更根本的一层是：`followOutput` 滚到最后一条时，刚加进去的条目还在用 `defaultItemHeight`（160px）估算高度，真实消息远比这高，等它们被测量出来内容底部就往下跑了，而条目数已不再变化，`followOutput` 不会被第二次问到——**估算错多少，就停在离底部多远的地方**（实测差 21,006px）。现在 catch-up 期间同时跟随总高度，滚动到某个 index 本身不改变高度所以会收敛；读者第一次滚轮/触摸/按键即解除，位置仍然归他自己。
+
+- **审核弹窗顶部给出一行提炼**。原来那段内容本身就是 `JSON.stringify(display_block)`——一次编辑会把前后全文当 JSON 摊在屏幕上，而这是知道自己在批准什么*之后*才需要读的东西。现在最上面一行直接说清楚：`执行命令 · git push origin main`、`修改文件 · src/a.ts · 3 → 5 行 · 共 2 个文件`。它取自结构化的 display block 而不是散文，所以给的是命令和路径本身，而不是把动作词重复一遍；原始 JSON 收进折叠区。
+- **Plan 右侧新增 YOLO 开关**，悬停有说明，等同于 `/yolo` 命令。刻意做成"设置为某个值"而不是"翻转"——终端里的 `/yolo` 和第二个客户端都会动这个状态，翻转只会把客户端最后看到的值取反；`/yolo` 现在也广播状态，所以在哪一边切换，另一边都会跟着动。`initialize` 会汇报当前值，因为 `--yolo` 可以在任何 wire 消息之前就打开，而它不像 plan mode 那样能靠 replay 重建。开启时标签变琥珀色：自动放行是唯一一个代价完全静默的开关。
+
+## v0.1.31 (2026-08-10)
+
+- **安装包自带一个便携 shell，Windows 不装 Git 也能执行命令**：Shell 工具走的是 bash 而不是 PowerShell，所以一台没装 Git for Windows 的机器等于**一个 shell 都没有**。安装包现在附带一份钉死版本、校验过 sha256 的 busybox-w32（`FRP-6075`，x86_64 取 **w64u** 这个 Unicode 变体——不带 Unicode 的构建会把非 ASCII 路径和输出弄乱，对中文用户不是可选项），找不到 git-bash 时自动退到它。二进制不进仓库（`deps/bin` 是 ignore 的），由构建脚本按校验和拉取；拉不到也只是告警，不会让整个安装包构建失败。它被安装成 `sh.exe` 而非 `busybox.exe` 是刻意的：shell 的调用形式是 `<path> -c <command>`，而 busybox 按 argv[0] 分发，仍叫 busybox.exe 会去找一个名为 `-c` 的 applet。用户侧还有两条逃生口：`KIMO_CLI_SHELL_PATH` 可以指向任意 POSIX shell（全平台有效），或者把便携 shell 放到 `%USERPROFILE%\.kimo\bin\sh.exe`——后者不需要重装就能给已有安装补上。注意提示词里报告的 shell 名按文件名判定，busybox 的 ash 会如实报成 `sh` 而不是 `bash`，避免模型写出它跑不了的 bashism。
+- **Skill 使用统计**：管理面板新增用量视图——按天的调用曲线、Top skills、会话数与显式 `/skill:` 调用占比，以及每张卡片上的近 14 天迷你柱状图和最近一次使用时间。数据由会话 wire log 重建，不新增任何埋点；扫描有时间预算，触顶时会标注 "Partial" 而不是悄悄给一个偏小的数。已经不在安装列表里、但历史上被调用过的 skill 单独归入 "Used but not installed"，方便发现改名和误删。
+- **Skill 按分类分组，并可整类启停/删除**：386 个内置 skill 平铺成一张卡片墙，找东西只能靠肉眼。排序新增 "Category"，每个分类一个带标题和数量的分区，分区内仍按调用次数排。分类的来源是"能声明就声明，声明不了才猜"：SKILL.md 的 frontmatter 里写 `category:`（顶层或 `metadata` 下都认）具有最高优先级，取值可以是分类 id、完整标签或常见别名（`education` → Learning & Career，`ops`/`infra` → DevOps 等），写了库里没有的值也不会被丢掉或塞进 Other，而是自成一个分区；没声明的才按名字、其次描述做关键词判定。分类标题栏上还有整类的 Enable / Disable / Delete，按钮上直接标出会影响多少个，删除有二次确认。批量操作走的是一次性的服务端接口而不是循环调单个接口——一整类四十来个 skill 的状态在一次写入里落盘，不会出现中间态可见、或者失败一半停在半途。整类启用**不会**复活已删除的 skill：被删的内置 skill 不等于"被禁用"，从分类按钮里悄悄恢复太意外，恢复仍走卡片上的 Restore。
+
+- **Windows 上找不到 bash 不再让整个产品打不开**：探测阶段一旦定位不到 `bash.exe` 就抛 `GitBashNotFoundError`，而这个调用发生在建 Runtime 的路上，于是"Shell 工具用不了"被放大成"会话根本起不来"——聊天、读写文件、Web UI、以及绝大多数不碰命令行的 skill 全都被一起拖下水。现在探测不再抛异常，缺少 shell 只是一条数据（连同一段可操作的修复说明一起带着），由真正需要 shell 的那一个工具在被调用时报告；前台和后台两条执行路径都有闸，不会拿一个字符串化的 `None` 去起进程。副作用是 Web 端那条"请安装 Git for Windows"的提示以前只看 git-bash 在不在，一台靠便携 shell 正常跑命令的机器会被一直误报，现在它看的是"到底有没有可用的 shell"。
+
+## v0.1.30 (2026-08-07)
+
+- **Windows 打开会话即 `worker process exited unexpectedly (exit code 1)`（v0.1.29 引入的回归）**：v0.1.29 为修 `.env` 的 GBK 问题给整个进程树设了 `PYTHONUTF8=1`。它不只影响本进程的读写——它还会改掉 `locale.getpreferredencoding()`，而那正是 `subprocess(text=True)` 用来解码子进程输出的编码。中文 Windows 上 `where.exe git` 找不到时会打印 `信息: 用提供的模式无法找到文件。`（GBK，首字节 `0xD0`），于是解码在 subprocess **自己的 reader 线程**里抛 `UnicodeDecodeError: 'utf-8' codec can't decode byte 0xd0 in position 0`——那个位置调用方根本 catch 不到。git 探测因此拿不到任何结果，退化成"没装 git-bash"，`Runtime.create` 抛 `GitBashNotFoundError`，worker 在用户开口之前就退出了。现在**不再设 `PYTHONUTF8`**；`PYTHONIOENCODING=utf-8` 保留——它只管本进程的 std 流（父进程正是用 `.decode("utf-8")` 读 worker 的 stderr），不影响子进程解码。v0.1.29 真正要修的 `.env` 编码问题不依赖 `PYTHONUTF8`，那部分是显式 `encoding="utf-8"`，不受本次回退影响。
+- **git-bash 探测不再会被一行读不懂的输出干掉**：上面那条的第二层原因是探测本身太脆。`where.exe git` 和 `git --exec-path` 的输出现在按 `errors="replace"` 解码——路径乱码是可恢复的，探测器死掉不是。即使今后有人在环境里设了 `PYTHONUTF8`，也不会再连锁到 worker 启动失败。
+
+## v0.1.29 (2026-08-06)
+
+- **Windows 配置 Provider 报 `gbk codec can't encode character '\xb3'`**：`.env` 的读写是整个桌面端唯一没写明编码的文件 IO，取的是系统默认值——macOS 上是 UTF-8 所以看不出来，中文 Windows 上是 cp936，于是配置里只要有一个 GBK 装不下的字符（报错里的 `\xb3` 就是 `³`），保存就直接失败，而 `save_env` 会把写入异常原样包成 `Failed to write .env: {e}` 抛回界面。跟 provider 本身无关，只是那里恰好粘进了这样一个字符。现在一律按 UTF-8 写入；旧版本用 ANSI 代码页写下的 `.env` 仍能读出并在下次保存时归一，不会让老用户升级后配置读空（回退编码写死 `mbcs` 而非 `locale.getpreferredencoding()`，因为下面这条改动会让后者在最需要回退的机器上返回 UTF-8）。同时 launcher 与 uvicorn supervisor 设 `PYTHONUTF8=1` / `PYTHONIOENCODING=utf-8`，整棵进程树不再走 ANSI 代码页——此前一行日志或一段模型输出里出现 GBK 没有的字符，就会在离用户操作很远的地方抛 UnicodeEncodeError，文件工具也在按 GBK 解码工作区文件。
+- **Windows 上传文件后对话历史里没有文件图标**：服务端用宿主机真实路径标识上传文件（`<uploaded_files>` 列表和 image/video/document 标签的 `path=`），Windows 上就是 `C:\...\<session>\uploads\report.pdf`，而前端四处都假定 POSIX 路径——靠开头的 `/` 判断这行是不是文件路径、用 `split("/")` 取文件名、正则里硬编码 `uploads` 两侧的正斜杠。第一条让整行既不生成附件又被当普通文本，第二条把整条路径当成文件名、拼出的地址必然 404。服务端不能改成正斜杠（agent 需要原生路径打开文件），因此在读取侧归一化，Windows 绝对路径、UNC、legacy 相对形式都认，同时把"是不是上传路径"的判断收紧而非放宽——这些行会从用户看到的文本里删掉，误判就是吃掉用户自己写的内容。这也是为什么它在 deepseek 会话里被发现：无 vision 能力的模型走不到 `<image>` 分支，只剩 `<uploaded_files>` 这一条路，而那正是被反斜杠打断的那条。
+- **跨会话记忆在上下文压缩后彻底消失**：快照只在首步注入一次并缓存，而它本身是一条普通历史消息，压缩会把它折进压缩摘要——由于一次性标志仍然置位，此后整个会话再也不会重新注入。`DynamicInjectionProvider` 早就为此留了 `on_context_compacted` 钩子，这个 provider 只是从没覆写。提示词缓存零成本（压缩按定义已作废整个前缀）。这大概也正是模型反复重记同一件事的原因：它在第 1 步看过一次记忆池，等到决定某件事值得留存时，那段快照早已滚出视野。
+
+- **跨会话记忆自动去重**：`persistent.jsonl` 此前无上限、无过期、无去重，且每次会话启动全量注入——一条事实记两遍，之后每次对话都要为它付费；唯一的约束是提示词里一句"别重复记"。现在重述一条已存在的事实会**原地更新**该条目而不是新增一条，存量重复也会被下一次写入顺带折叠。难点在于拒绝合并"看起来像"的两条：`difflib` 量的是字符重合度，而它分不清改写和更正——`"Merge freeze begins 2026-03-05"` 对 `"…begins on 2026-03-05"`（该合并）与对 `"…begins 2026-04-05"`（绝不能合并）**得分完全相同，都是 0.967**。所以合并除了要过阈值，还要过三道与阈值正交的守卫：长度比（合并只丢弃旧文本，危险形状是详细原文被一句敷衍重述覆盖）、数字 token 多重集相等（日期、版本、配额、工单号；比的是多重集而非位置，所以插入一个介词仍能合并）、否定极性一致。阈值与守卫朝不同方向失效，阈值设错也不会单独造成事实丢失。相似但未达标的条目不会被动，而是连同内容一起报告回来。`kind` 是硬分区：同一句话记作 `user` 和记作 `feedback` 含义不同，跨 kind 只提示不合并。合并保留旧 id 与 `created_at`，因此已经拿到 id 的更新/删除不会失效。合并时的确认提示会并列展示新旧两段文本，并使用独立的授权动作——允许 agent **创建**条目不等于允许它**覆盖**已有条目。存量压缩只做精确匹配，绝不模糊：模糊合并只施加于当前这次写入，此时用户在场。
+- **同一个会话在"最近会话"里只占一格**：一个会话此前每次上下文压缩写一条摘要、结束时再写一条，而压缩摘要是累积的（下一次总结的历史开头就是上一次的摘要），所以一个长对话就能占掉二十格里的大半、把别人挤出去。现在同会话的记录收敛为最新一条。升级后首次写入时存量会明显缩短，这是预期效果。
+
+## v0.1.28 (2026-08-05)
+
+- **自动压缩阈值可在 Settings 里调，且不重启就生效**：`compaction_trigger_ratio` 早就在 `config.toml` 里，却没有任何设置入口，而其他全局配置一律靠重启 worker 生效——正在跑的任务会被打断。它不需要如此：KimoSoul 每一步都从 config 对象重新读取该比例，而不是构造时快照，因此原地改写下一步即可读到，轮次中途也算。新增 `set_compaction_ratio` 消息（比照既有的 `set_plan_mode`），由 runner 推给每个在线 worker；`GET /api/config` 暴露该值，`PATCH` 接受它，只改比例的请求不再重启任何东西，响应改为报告哪些在线会话被原地重新调参（改模型或 thinking 模式仍旧重启）。已停止的会话无需消息，下次启动时读持久化值。取值范围在 config 字段、wire 参数、请求模型三处分别校验，越界值到不了运行中的 agent。
+- **Settings 窗口的 Auto-compact 滑杆**：跨度 0.5–0.99，与 kimo-cli 加载时校验的区间一致，任何能拖到的位置都不会产出一个应用随后拒绝启动的配置。它是本窗口唯一属于 `config.toml` 而非 `.env` 的值，因此不走 `_collect_updates`，由 `_save` 经 `configtoml` 直接写入；读回当前值是防御式的——文件缺失、段缺失、值越界、toml 解析失败都退回默认值，而不是让窗口打不开。写入侧同样拒绝区间外的值：kimo-cli 加载 `config.toml` 时校验同一区间，写进去只会把一个坏的滑杆位置变成一次被归咎于配置文件的启动失败，在写入处失败才指得出真正的责任方。
+- **滑杆旁显示当前值**：Temperature 和 Auto-compact 此前都是裸滑杆，拖得动却分不清 0.72 和 0.78，而这两个值要与默认值比较、还要写进配置文件。右侧加定宽读数，拖动过程中经 `setContinuous_` 实时更新。比例以百分比呈现——"auto compact at 80%" 本就是人看它时的语义；temperature 仍是两位小数。初始值与实时更新走同一个格式化函数，打开时看到的和拖动时看到的不会漂移。
+
+- **全局 Wiki 改为按需检索**：使用中的反馈是，同样的事情交给 `AGENTS.md` 很顺——该触发时才触发，而现在每一轮对话都要过一遍 Wiki。差别在于是模型判断这次查询值不值，还是运行时无条件搜索；后者让大多数本不需要它的对话付出了延迟和提示词空间。索引本就在系统提示里，agent 看得见 Wiki 里有什么，需要时自己调 `Wiki(operation="search")`——就是 `AGENTS.md` 的形态与同样的可供性。轮次跟踪、显式意图识别、evidence 采集均不变，去掉的只是那次无条件搜索。此外：检索前先读修订标记，全新安装下的必然落空的全文查询直接跳过（排在既有跳过检查之后，合成提示与斜杠命令仍会报告跳过原因；读标记时任何异常都按"非空"处理，照原路搜索）。
+- **checkpoint 不再让每次对话多付一到两次模型调用**：投递 checkpoint 会追加消息并继续循环，本身就是一次 completion，模型不解决还要再来一次；而只要一轮产生了触发性 evidence 和看起来可复用的结论就会创建 `root_evidence` checkpoint——几乎每一轮读文件的对话都符合。现在只有 `explicit_user_durable`（用户明确要求留存的知识）才打断循环，evidence 类 checkpoint 是机会而非义务，照旧随轮次退休，不走往返。这也让循环重新符合设计本身"不对每个工具结果、日常对话、状态与进度采取行动"的约束。
+
+- **Wiki 写入被模型整体放弃（"工具还是不行"）**：真实会话里 agent 转而去写普通文件。它没撞上 bug，而是撞上了一个不可能满足的要求：checkpoint 块按路径列出来源，持久化要求候选内容携带与运行时观测逐字节一致的 `SourceRef`——正确的 workspace id、正确的内容哈希，而 agent 无从得知任何一个。它在 transcript 里的原话是"计算文件 sha256 很麻烦……这变复杂了"，然后调用了 discard。讽刺的是本就已确立：模型提供的来源哈希对授权毫无贡献，只有运行时自己的 evidence 算数，所以要求模型复述这些哈希是零安全收益的摩擦。改为模型提供内容、运行时从该 checkpoint 自身的 evidence 提供来源。自行列出来源的候选不受影响，仍走完整校验——编造的来源照旧被拒，不含 evidence 的 checkpoint 也贡献不出来源，无来源的候选依然无据可依。
+- **WebSocket 抖动误报，空闲掉线却不重连**：任何 error 事件都弹 toast，而该事件按设计不带细节，于是提示只有一句"WebSocket connection error"，且客户端片刻后已自行恢复它也照弹；`onopen` 会清掉错误状态，但 toast 收不回来，界面就一直在为一条好好的连接报错。底下还藏着一件事：意外关闭根本没有重试，只有 watchdog 会重连且只在流式输出期间——空闲时断掉的 socket 会一直断到页面刷新。只压掉 toast 会把这个问题一并盖住，所以重试与上报在 `connection-policy.ts` 里一起决策：异常关闭按封顶指数退避重试；服务端用来拒绝会话的关闭码（4004、4029）立即上报，因为重试只会重复它；正常关闭或客户端主动关闭则忽略。连续五次失败后读者才会收到提示，且说的是"连接已丢失且无法恢复"，而不是念一个不透明的事件名。十三个测试覆盖该策略，包含引出这次反馈的抖动场景和服务端真的没了的场景。
+
+## v0.1.27 (2026-08-03)
+
+- **Intel Mac 装不上（较低版本 macOS）**：`LSMinimumSystemVersion` 被设为 14.0（Sonoma），而多数 Intel 机型最高只能升到 Monterey 12 / Ventura 13，系统直接拒绝安装。实测捆绑的 CPython 与全部 195 个原生扩展都只要求 macOS 11.0，14.0 完全来自 `brand.toml` 的人为设定（同时喂给 Info.plist 和 launcher 的 `-mmacosx-version-min`）。下调至 11.0，Big Sur 及以上的 Intel Mac 均可安装。构建流程新增 `verify_min_macos()`：装配后、签名前扫描 bundle 内每个 Mach-O，任一二进制要求高于声明值即中断构建并列出具体文件——声称支持却跑不起来，比装不上更难排查。
+- **聊天视图偶发跳到历史最上方**：重连或 worker 重启会清空消息列表并分批回放历史。原有的"追随底部"标志在视口第一次到达底部时就被清除，而回放初期只有寥寥几条消息、视口天然就在底部，于是标志提前失效；随后涌入的数百条消息把内容高度撑过 1500px 容差，跟随规则放弃，视口就停在了巨大列表的开头。改为仅当读者**自己**滚动（wheel / touch / 键盘）时才交还控制权，列表增长永远不会提前结束追随。
+- **Tasks 进度显示滞后且不随新任务重置**：面板此前只在切换会话时清空，同一会话内发起新任务时旧清单继续挂着，若新任务未拆分则残留至会话结束；重开会话时回放会按序应用每个 todo block，导致显示的可能是很早以前那一轮的进度。改为在 `TurnBegin` 清空（实时与回放均生效）。同时明确 SetTodoList 的更新节奏：开始前标 `in_progress`，完成的瞬间在标记下一项的同一次调用里标 `done`，减少轮次内的显示滞后。
+
+- **全局 Wiki 确定性运行时触发**：写入权限不再建立在模型的自我声明上，而是由运行时实际观测推导。运行时观察真实工具返回生成只含哈希的 evidence；evidence 加结论形成 checkpoint（机会而非许可）；root agent 必须对每个 checkpoint 明确 persist 或 discard；persist 需换取一次性 grant，且会重新读取并比对每个来源。模型提供的 `value="high"`、复述的哈希、自编的 checkpoint id 一律不参与授权。子模块可贡献 evidence 但零 Wiki 权限（无 manager／tool context／coordinator，提示词中 Wiki 段落清空，工具本身 root-only 兜底）。含每轮受控检索、单次提醒的解析循环、按事件白名单过滤的隐私安全遥测，以及跨平台与预算约束验证。
+
+## v0.1.26 (2026-07-31)
+
+- **登录页品牌文案**：将登录页副标题中的 “Kimo Code” 更新为 “OpenKimo”。
+
+## v0.1.24 (2026-07-25)
+
+- **Windows worker 启动即崩（InvalidToolError: InstallSkill）**：`skill_install.py` 的 `from __future__ import annotations` 让 `Runtime` 注解变成字符串，依赖注入查找失败，一个工具加载失败杀死整个 worker。kimo-cli 端改用 `inspect.signature(eval_str=True)` 解析注解，且缺依赖的工具降级为"跳过 + 警告"而不再让 worker 崩溃。
+- **mac 端 `Could not find platform dependent libraries <exec_prefix>` 警告**：CI 构建把 runner 的绝对路径烤进各 venvstacks 层的 `pyvenv.cfg` / `sitecustomize.py`，装到用户机器上路径失效，每次启动捆绑 Python 都向 server.log 打警告。app_main 启动时检测失效的 `home` 并原地重跑该层的 postinstall 生成逻辑（跳过字节码预编译）自愈。
+- **Windows 右键 Settings 弹出 python.exe 控制台窗口**：Settings 子进程改用 `pythonw.exe` + `CREATE_NO_WINDOW` 启动。
+- **Windows 卸载报 "cannot call WizardIsTaskSelected"**：该函数在卸载阶段不可用（"同时清除用户数据"选项因此从未生效）。安装完成时把勾选结果落成 marker 文件，卸载时读回执行。
+
+- **会话中的身份跟随品牌**：agent 自我介绍从写死的 "Kimo Code CLI" 改为渲染 `KIMO_AGENT_NAME` 模板变量；桌面端把品牌名（OpenKimo 或白标 `--app-name`）通过环境变量注入。
+- **Windows Settings 页面与 mac 版对齐**：多 Provider 编辑（名称/类型/API Key/Base URL/模型/最大上下文/capabilities/默认项）、Thinking 与 Temperature、Session Token 生成、LAN Only、品牌重置，保存语义（`LLM_PROVIDERS` 写入、legacy 键清理、`config.toml` 同步、LLM 变更自动升级为重启)与 mac 一致，并新增从 mac 源码直接取常量做对比的 parity 测试。
+
+## v0.1.4 (2026-05-16)
+
+本版本以"会话定制 + 配置闭环 + HEIC 兼容性收尾"为主线：新增自定义 Agent 启动会话功能，把 macOS Settings 写入 `.env` 后真正同步到 `config.toml`（之前 base_url/api_key 改了没生效），并补齐 HEIC 上传链路上的两处兜底。
+
+- **自定义 Agent — 启动会话时挂载用户 spec**：可以从 `~/.kimo/agents/` 或 `<work_dir>/.kimo/agents/` 加载 YAML spec，精确控制可用工具、skills、MCP 权限、是否注入知识库、系统提示词。Web 新建会话对话框「高级设置」新增 Agent 下拉框；CLI `--agent <name>` 也走同一发现链。详见 `docs/CUSTOM-AGENTS.md`。
+- **Settings 写盘真正生效**：之前在 macOS Settings 窗口里改 provider 的 `base_url` / `api_key` 只更新 `.env`，但 `config.toml` 中已有的 `[providers.X]` / `[models.X]` 表项被 `_build_global_config` 优先吃掉，导致编辑被"静默吞掉"。这版补齐了 `configtoml.update_providers` / `update_models` / `set_default_model`，保存时按 .env 上 LLM_PROVIDERS 重新 upsert 这些表项，保留手写注释和无关字段。
+
+- **`skills/grounding-dino-seg2`**：基于 Grounding DINO 的图像分割 + 背景替换 skill。
+- **CHANGELOG**：本条目。
+
+- **新建 session dialog 显示的是 app 目录而非配置的工作目录**：`GET /api/work-dirs/startup` 端点返回 `os.getcwd()`，但 macOS .app bundle 启动 uvicorn 时的 CWD 是 `~/Library/Application Support/OpenKimo`，导致 "Current" 那项指向用户根本不认识的路径。改为优先读 `KIMO_DEFAULT_WORK_DIR`（OpenKimo wrapper 已在导出，且 sessions.py/admin.py 早已用它做新会话默认目录），未设置时回落到原 `os.getcwd()` 路径。CLI 直接 `kimo web` 行为不变。
+- **HEIC/HEIF/AVIF 图片导致对话挂掉**：用户上传 HEIC 图片后，前端把 `data:image/heic;base64,...` 直接发给 LLM，主流 vision 模型（Kimo/OpenAI/Anthropic）一律拒收并把消息留在 conversation history，导致**后续每一轮对话都重发同一张图、每一轮都失败**。子模块改动：
+  - 前端 (`web/`)：新增 `lib/heic.ts`，附件入口（drop / paste / picker）统一通过 `heic2any` 把 HEIC/HEIF 转 JPEG 后再进 attachments，缩略图也能正常预览；**转码失败时不再丢文件**，把原 HEIC 透传给服务端 fallback。
+  - 后端 `tools/file/read_media.py`：注册 `pillow-heif` opener，`ReadMediaFile` 工具命中 HEIC/HEIF/AVIF 时主动转 JPEG (q=90)。
+  - 后端 `soul/message.py`：新增 `LLM_SAFE_IMAGE_MIMES` 白名单（jpeg/png/webp/gif）和 `sanitize_image_parts()`，在每次 LLM 调用前清洗一份消息副本，HEIC 转 JPEG 失败则替换为 `[image attachment removed: ...]` 文本占位。**只清洗发出去的副本**，原 history 保留用户上传的原图，UI 不受影响。
+  - 后端 `web/runner/process.py`：上传附件入口同样注册 `pillow_heif` opener（之前只在 `read_media.py` 注册，Web 直传走的是 `process.py` 这条路），并把原先吞掉所有图片编码异常的 bare `except` 改成 `logger.exception`，方便定位失败原因。
+
+## v0.1.3 (2026-05-10)
+
+本版本以"打包稳定性 + 上游同步"为主线：升级 kimo-cli 到 1.41.0，重写 macOS Settings 窗口为单页滚动布局，并把前端 build 接入打包流水线，避免 .app 内 UI 卡在旧版本号。
+
+- **升级到 kimo-cli 1.41.0**：合并 upstream/main 共 21 个上游提交，带来 `afk_mode`、会话遥测、状态栏 agent 计数、headless 剪贴板支持、`/usage` 剩余额度显示修复、OAuth 重连保留 token 等改进。
+- **macOS Settings 窗口完全重写**：改用单页滚动 + 原生 Auto Layout，替换之前 `NSStackView` / `NSGridView` / `NSBox` / toolbar 多层套娃，修复多次迭代仍布局错位的问题。
+- **打包流水线自动跑前端 build**：`packaging/build.py` 加入 `build_frontend()` 步骤，版本号自动跟随 `pyproject.toml`，避免 .app 内 Web UI 卡在旧版本号。
+
+#### macOS App 打包（.dmg，从 Unreleased 转正）
+
+- 新增 `packaging/` 目录，可将 OpenKimo 打成自包含的 `.app`，宿主机零依赖。`python packaging/build.py` 输出 `dist/<AppName>.app` + `dist/<AppName>-<ver>.dmg`，拖拽到 Applications 即可使用。
+  - 菜单栏常驻状态（`● Running` / `◐ Starting` / `○ Stopped` / `✗ Crashed`），提供 Start/Stop/Restart Server、Open Web UI、Open Admin、Install Package、Open Terminal Here、About、Quit。
+  - 原生 PyObjC Settings 窗口（LLM / Web Server / Paths 三个 section）：服务离线时也能改配置，避免"API Key 错 → server 起不来 → 改不了配置"的死循环。
+  - 用户可写的 Python 覆盖层 (`PYTHONUSERBASE`)：bundle 内 Frameworks 仍只读签名，用户 `pip install` 落到 `~/Library/Application Support/<AppName>/python-userbase/`，升级 .app 不丢已装包。
+  - 白标定制：`--app-name` / `--bundle-id` / `--icon` / `--logo` / `--favicon` / `--brand-name` 全部支持，所有派生路径、CLI 命令、SQLite branding 字段按 `--app-name` 推导，可在同一台 Mac 上并存多个品牌。Web UI 的 logo/品牌名在首次启动自动种入 SQLite，后续 admin 改过的不会被升级覆盖。
+  - 文档：`packaging/README.md`、`README.md` / `README.zh.md` 新增 "Option E — macOS App (.dmg)"，`docs/LOCAL-MODE.md` 末尾追加 macOS App 章节。
+- CI：新增 `.github/workflows/release.yml`，tag push 时在 macOS runner 上自动构建 `.dmg` 并发布到 GitHub Releases。
+
+#### kimo-cli 1.41.0 升级
+
+- 子模块从原 SHA bump 到 `bc32f372`（合并 upstream/main 之后的 merge commit），吸收社区 21 个 commit，主要内容：
+  - `feat(telemetry)`: 会话追踪与 telemetry server，`app_name` / `build_sha` 写入 context provenance。
+  - `fix(yolo)`: 解锁 `AskUserQuestion`；新增正交的 `afk_mode`（详见下方 Changed）。
+  - `fix(clipboard)`: 在 SSH 接入的 headless Linux 上启用粘贴板。
+  - `fix(shell)`: `/usage` 剩余额度显示修复；`/btw` slash command 注册；workflow slash 输入回显。
+  - `fix(chat-provider)`: 连接恢复时保留刷新过的 OAuth token。
+  - `fix(soul)`: LLM step 重试时清掉残留的 partial UI 输出；上下文 compaction 后重新注入 yolo reminder。
+  - `fix(approval)`: pending 请求作用域收敛到 turn 生命周期。
+  - `refactor(windows)`: Shell 后端从 PowerShell 切到 git-bash。
+- WIP：`LLM_PROVIDERS` 环境变量多 provider 合并 + admin Models tab（`packaging/app_main/configtoml.py`）。
+
+#### 开发工具
+
+- 新增 `scripts/screenshot-settings.py`：Settings 窗口的可视化验证 harness（`--env-fixture` 加载样例配置 + `--out` 输出 PNG），用于截图比对回归。
+- 新增 `.claude/agents/kimo-cli-merger.md`：Claude Code 项目级 subagent 定义，专门负责 kimo-cli 子模块与 upstream 的 merge 工作。
+- `CLAUDE.md` 加入 task dispatcher 工作模式说明（说明何时把多步任务分派给 subagent）。
+
+#### Settings 窗口（完全重写）
+
+- 改用 `NSScrollView` + 纯 `NSView` / Auto Layout，删除原 `NSStackView` / `NSGridView` / `NSBox` / toolbar 套娃实现。
+- 单页滚动布局：3 个 section（LLM / Web Server / Paths）+ sticky 底部按钮栏。
+- Provider 行用 leading 3pt accent bar 表示分组，移除 `NSBox` 边框。
+
+#### Build pipeline（`packaging/build.py`）
+
+- 加入 `build_frontend(cfg)` 步骤：smart `npm install`（仅在 `package-lock.json` / `node_modules` 过期时跑）+ `npm run build`。
+- 新增 `--skip-frontend` flag，便于本地迭代。
+- 静态资源选择反转：fresh `web/dist/` 优先于 committed `src/.../web/static/`，避免 .app 内 UI 版本号与 `pyproject.toml` 不同步。
+
+#### kimo-cli 行为变更（来自上游 1.41.0）
+
+- ⚠️ **Breaking**：`yolo_mode` 重命名为 `afk_mode`。`skip_yolo_prompt_injection` → `skip_afk_prompt_injection`，`dynamic_injections/yolo_mode.py` → `afk_mode.py`。下游集成需相应改名。
+- `max_steps_per_turn` 默认值由 500 提升到 1000。
+- approval 请求不再有 5 分钟超时，转为按 turn 生命周期收敛 pending 集合。
+
+- `.gitignore`：补 `.agents/`，避免大体积第三方 skill bundle（`app/.agents/skills.zip`，~67 MB）误入 git 历史。
+
+## v0.1.1 (2026-04-30)
+
+post-v0.1.0 patch — README + lint fixes only, no behavior change.
+
+- README "Option D" 介绍统一启动脚本 `scripts/start.sh`：自动探测 Docker / 本地模式，支持 `--mode`、`--port`、`--host` 参数。
+
+- `web/api/memory.py` 适配 `session.work_dir: str | None`，并对 `json.loads` 的解析结果显式 `cast` 为 `dict[str, Any]`，消除 pyright 报错。
+- `memory-panel.tsx` 移除 `void refresh()` 的 `noVoid` 违规，按 biome 建议简化逻辑表达式。
+- `sessions.tsx` 给 `MemoryStatusDot` 的 `<span>` 加 `role="img"`，使 `aria-label` 在该角色下合法。
+
+## v0.1.0 (2026-04-30)
+
+跨会话记忆系统首次上线，是本次发布的最大亮点。同时优化了本地启动体验和镜像分发链路。
+
+- **跨会话记忆系统**：用户首次拥有持久化的"记忆"层，让 LLM 在不同会话之间保留偏好、项目上下文、调研结论。4 类记忆 (`user` / `feedback` / `project` / `reference`) × 3 种触发 (`manual` / `compaction` / `session_end`)。
+- **共享知识库 (Knowledge Base)**：项目级、人工策划的 `.kimo/memory/knowledge/index.md` 自动注入系统提示，详细内容放 `wiki/` 子目录由 LLM 按需 `ReadFile`；管理员可在 Admin 面板里直接编辑索引。
+- **会话归档异步化 + SSE 实时推送**：原同步的归档（5–30 s 阻塞）改为后台任务，HTTP 立即返回 202，结果通过 Server-Sent Events 实时推到前端，多 Tab 自动同步。
+- **侧栏归档状态点**：会话行新增 5 态颜色点（gray / blue 脉冲 / green / yellow / red），让用户能一眼看到哪些会话已归档、哪些有新内容、哪些归档失败。
+- **本地模式启动**：新增 `scripts/start.sh --mode=local`，无 Docker 也能直接在宿主机跑。
+
+#### 跨会话记忆 (Memory System)
+
+- 新增 `kimo_cli.memory` 模块：`MemoryEntry`、`SessionSummary`、文件锁存储；三层结构：
+  - **Session 级**：`SessionState.session_memory`，仅当前会话可见。
+  - **Persistent**：`<user_dir>/memory/persistent.jsonl`，跨会话，写入需用户审批。
+  - **Recent**：`<user_dir>/memory/recent.jsonl`，归档时自动追加，下次会话注入提示。
+- 新增 `Memory` 工具（LLM 可 `add` / `list` / `update` / `delete`）。
+- 新增 `CrossSessionMemoryInjectionProvider` / `SessionMemoryInjectionProvider` 把记忆拼进 system prompt。
+- Web API：`/api/memory/{knowledge,persistent,recent,sessions/{id}/archive,events}`。
+
+#### 共享知识库 (Knowledge Base)
+
+- 新增 `kimo_cli.memory.knowledge`：从 `<work_dir>/.kimo/memory/knowledge/index.md` 加载索引（32 KiB 上限），缺失或为空时安静返回 `None`。
+- 默认 agent 系统提示加入 `{% if KIMO_KNOWLEDGE_BASE %}` 模板段，把索引拼进 system prompt 并明确告知 LLM：详细内容在 `wiki/`，按需 `ReadFile`，不要擅自改动 `.kimo/memory/knowledge/`。
+- 新增 Admin API：`GET/PUT /api/admin/knowledge/index`，由 `KIMO_DEFAULT_WORK_DIR`（缺省时为 `~`）解析共享目录。
+- 前端新增 `AdminKnowledgePanel`（`web/src/features/admin/admin-knowledge-panel.tsx`）：Textarea 编辑器 + 路径展示 + 脏检查 + 保存提示。
+
+#### 异步归档 + SSE
+
+- `POST /api/memory/sessions/{id}/archive` 改返 `202 Accepted`，LLM 摘要在 `asyncio.create_task` 后台跑。
+- 新增 `MemoryEventBus`（per-user pub/sub）+ `GET /api/memory/events` SSE 通道。
+- SSE 鉴权支持 `?token=` 查询参数（绕过 EventSource 不能发自定义 header 的限制）。
+- 多 Tab 同账户实时同步。
+
+#### 前端
+
+- `<MemoryStatusDot>` 在 list / grouped / archived 三处渲染，附 Tooltip 说明状态。
+- "Record memory" 菜单项按状态门禁（绿 / 蓝时禁用并弹 `<AlertDialog>` 解释原因）。
+- 新增 hooks：`useMemoryEvents`、`useRecentSummaries`、`usePersistentMemory`、`useKnowledgeBase`。
+- 60 s 轮询 + `visibilitychange` 监听：让 worker 进程触发的归档 ≤60 s 内被前端感知。
+- 90 s 安全超时：服务端崩溃时 in-flight 状态自动转 red。
+- 新增 Memory 管理面板（`web/src/features/memory/`）和 Admin 知识库面板。
+
+#### 启动体验
+
+- `scripts/start.sh`：自动检测 Docker；不可用时切到本地模式（`python -m kimo_cli web`）。
+- 支持 `--mode=local|docker`、`--port=`、`--host=` 参数。
+- 新增 `docs/LOCAL-MODE.md` 详细启动指南。
+- `KIMO_OUTPUT_DIR`、`KIMO_DEFAULT_WORK_DIR` 环境变量支持。
+- 默认通过 `ghcr.io/j0x7c4/kimi-agent-{gateway,sandbox}` 分发镜像，普通用户不再需要本地构建。
+- 新增 `docs/MEMORY-ARCHIVE-FEATURE.md`：记录本次记忆系统的设计、技术路线、踩坑、待优化项。
+
+- `docker-compose.yml`：默认 `pull_policy: if_not_present`，避免本地开发误从 registry 拉取覆盖本地构建。
+- `Runtime` 增加 `user_memory_dir` 字段，所有读写记忆的代码统一走这里。
+- 默认 agent 系统提示要求"始终把输出落到 `/app/output`"。
+
+- 文件面板：长文件名不再把下载按钮挤出可视区。
+- 上传文件：服务端重启后不再重发已上传文件（`_sent_files` 持久化到磁盘）。
+- `SubagentAnimation` 与 cluster 动画重叠时正确 dismiss；后台 sequential agent 的 cluster 检测；minion 与 hero bot 的 z-index。
+- 多个 biome 前端 lint 错误。
+
+- **跨工作目录的记忆注入未做过滤**：本地 CLI（如 `~/.openkimo`）和容器（`/app`）共享同一份 `recent.jsonl`，可能在容器会话提示里看到本机 work_dir 的旧调研。详见 `docs/MEMORY-ARCHIVE-FEATURE.md` §5.8。
+- **worker 触发的自动归档** 需要 ≤60 s 的轮询窗口或切焦点才会在前端可见（gateway 与 worker 是两个进程，未走 SSE 推送，详见 §5.1）。
+- **SSE 失败事件不持久化**：服务器重启 / 用户没开 Tab 时归档失败提示会丢，详见 §5.2。
+
+从 v0.0.1 升级时：
+
+1. **拉取或重建镜像**：
+   ```bash
+   docker compose pull          # 用 ghcr.io 上的新版镜像
+   # 或者本地构建：
+   docker compose build
+   docker build -f Dockerfile.sandbox -t ghcr.io/j0x7c4/kimi-agent-sandbox:latest .
+   ```
+   ⚠️ 若 `.env` 自定义了 `SANDBOX_IMAGE`（比如 `kimi-agent-sandbox:latest` 而非 ghcr 全名），记得给新镜像打对应 tag：
+   ```bash
+   docker tag ghcr.io/j0x7c4/kimi-agent-sandbox:latest kimi-agent-sandbox:latest
+   ```
+2. **重启已有 session 容器**：旧容器仍跑旧镜像，删掉重建即可使用新代码。
+3. **持久化记忆目录**：`KIMO_SHARE_DIR/users/<owner_id>/memory/{persistent,recent}.jsonl` 自动创建，无需手动迁移。
+
+---
+
+## [v0.0.1]
+
+首个版本：基础容器化 agent runtime。
+
+- Docker Compose 一键部署。
+- Web UI 会话管理、Multi-LLM (Kimo / OpenAI / Anthropic) 支持。
+- 强制 Docker sandbox 隔离每个 session。
+- Jupyter Kernel + 无头 Chromium + Shell 工具集。
+- 资源限额（CPU / 内存 / 磁盘 / PID cgroups）。
+- 危险命令拦截。
+
+[v0.1.3]: https://github.com/j0x7c4/OpenKimo/releases/tag/v0.1.3
+[v0.1.1]: https://github.com/j0x7c4/OpenKimo/releases/tag/v0.1.1
+[v0.1.0]: https://github.com/j0x7c4/OpenKimo/releases/tag/v0.1.0
+[v0.0.1]: https://github.com/j0x7c4/OpenKimo/releases/tag/v0.0.1

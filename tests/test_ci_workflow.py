@@ -45,6 +45,8 @@ def test_kimo_clis_own_suite_runs() -> None:
 def test_outer_tests_run_from_the_outer_repository_root() -> None:
     workflow = _workflow_text()
 
-    assert "run: .venv/bin/python -m pytest tests -v --tb=short --inline-snapshot=disable" in workflow
+    assert (
+        "run: .venv/bin/python -m pytest tests -v --tb=short --inline-snapshot=disable" in workflow
+    )
     assert "working-directory: ." in workflow
     assert "uv run pytest ../tests/" not in workflow

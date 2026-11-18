@@ -67,8 +67,9 @@ check: check-kimo-cli check-kosong check-pykaos check-web ## Run linting and typ
 
 check-kimo-cli: ## Run linting and type checks for Kimo Code CLI.
 	@echo "==> Checking Kimo Code CLI (ruff blocking; pyright + ty non-blocking)"
-	@uv run ruff check
-	@uv run ruff format --check
+	@uv run ruff check src tests benchmarks
+	@uv run ruff format --check src tests benchmarks
+	@uv run ruff check --select E9,F63,F7,F82 app packaging scripts .github/scripts
 	@uv run pyright || true
 	@uv run ty check || true
 
@@ -100,8 +101,8 @@ test: test-kimo-cli test-kosong test-pykaos ## Run all test suites.
 
 test-kimo-cli: ## Run Kimo Code CLI tests.
 	@echo "==> Running Kimo Code CLI tests"
-	@uv run pytest tests -vv
-	@uv run pytest tests_e2e -vv
+	@uv run pytest tests -vv --inline-snapshot=disable
+	@uv run pytest tests_e2e -vv --inline-snapshot=disable
 
 test-kosong: ## Run kosong tests (including doctests).
 	@echo "==> Running kosong tests"

@@ -14,6 +14,10 @@ export default withMermaid(defineConfig({
   title: 'Kimo Code CLI Docs',
   description: 'Kimo Code CLI Documentation',
 
+  // Repo-file links (../packaging/README.md, ../.env.example) are valid on
+  // GitHub but live outside the docs site, so vitepress flags them dead.
+  ignoreDeadLinks: [/\.\.\/packaging\//, /\.\.\/\.env\.example/],
+
   locales: {
     zh: {
       label: '简体中文',

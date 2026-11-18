@@ -251,7 +251,7 @@ compaction / session_end 的跨会话自动归档已关闭，此优化项随之�
 | `kimo-cli/src/kimo_cli/web/api/memory.py` | `MemoryEventBus`、`_run_archive_in_background`、`POST /archive` (202)、`GET /events` SSE |
 | `kimo-cli/src/kimo_cli/web/user_auth.py` | `get_current_user_sse` / `require_current_user_sse`（`?token=` 兜底） |
 | `kimo-cli/src/kimo_cli/memory/recent.py` | `SessionSummary` schema、`append_summary` 文件锁与 trim |
-| `kimo-cli/web/src/hooks/useMemory.ts` | `archiveSessionMemory` (Promise<ArchiveAccepted>)、`useMemoryEvents` |
+| `kimo-cli/web/src/hooks/useMemory.ts` | `archiveSessionMemory` (`Promise<ArchiveAccepted>`)、`useMemoryEvents` |
 | `kimo-cli/web/src/App.tsx` | in-flight set、errors map、90 s 安全超时、`deriveArchiveState` |
 | `kimo-cli/web/src/features/sessions/sessions.tsx` | `MemoryStatusDot`、菜单门禁、`<AlertDialog>` 拦截 |
 
