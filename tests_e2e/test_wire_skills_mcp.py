@@ -26,12 +26,14 @@ def _session_dir(home_dir: Path, work_dir: Path, session_id: str) -> Path:
     return work_dir / "session-data" / session_id
 
 
-def _enable_skills(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, *names: str) -> None:
+def _enable_skills(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, *names: str) -> dict[str, str]:
     """Make the wire subprocess see the given skills as enabled.
 
     Skills default to OFF on a fresh install (no skill-state.json means an
     empty enabled list), and the e2e home is fresh by construction — so
-    without a seeded state file every /skill:* command is unknown.
+    without a seeded state file every /skill:* command is unknown. Returns
+    the env overrides to pass to ``start_wire`` (make_env strips ambient
+    app-shell exports, so a monkeypatched env var would be dropped).
     """
     managed = tmp_path / "managed-skill"
     managed.mkdir(parents=True)
@@ -41,7 +43,7 @@ def _enable_skills(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, *names: str)
         ),
         encoding="utf-8",
     )
-    monkeypatch.setenv("OPENKIMO_SKILL_DIR", str(managed))
+    return {"OPENKIMO_SKILL_DIR": str(managed)}
 
 
 def _read_user_texts(context_file: Path) -> list[str]:
@@ -71,7 +73,7 @@ def _normalize_newlines(text: str) -> str:
 
 
 def test_skill_prompt_injects_skill_text(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    _enable_skills(monkeypatch, tmp_path, "test")
+    skills_env = _enable_skills(monkeypatch, tmp_path, "test")
     skill_dir = tmp_path / "skills"
     skill_path = skill_dir / "test-skill"
     skill_path.mkdir(parents=True)
@@ -100,6 +102,7 @@ def test_skill_prompt_injects_skill_text(tmp_path: Path, monkeypatch: pytest.Mon
         skills_dirs=[skill_dir],
         extra_args=["--session", session_id],
         yolo=True,
+        env_overrides=skills_env,
     )
     try:
         send_initialize(wire)
@@ -154,7 +157,7 @@ def test_skill_prompt_injects_skill_text(tmp_path: Path, monkeypatch: pytest.Mon
 
 
 def test_flow_skill(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    _enable_skills(monkeypatch, tmp_path, "test")
+    skills_env = _enable_skills(monkeypatch, tmp_path, "test")
     skill_dir = tmp_path / "skills"
     flow_dir = skill_dir / "test-flow"
     flow_dir.mkdir(parents=True)
@@ -188,6 +191,7 @@ def test_flow_skill(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         home_dir=home_dir,
         skills_dirs=[skill_dir],
         yolo=True,
+        env_overrides=skills_env,
     )
     try:
         send_initialize(wire)

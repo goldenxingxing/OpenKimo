@@ -49,6 +49,11 @@ def make_env(home_dir: Path) -> dict[str, str]:
     env["HOME"] = str(home_dir)
     env["USERPROFILE"] = str(home_dir)
     env["KIMO_SHARE_DIR"] = str(share_dir(home_dir))
+    # Managed-skill and wiki resolution honor these over HOME; a shell spawned
+    # from the desktop app exports them, which would leak the real user's
+    # skill library and wiki state into these hermetic runs.
+    env.pop("OPENKIMO_SKILL_DIR", None)
+    env.pop("OPENKIMO_WIKI_ROOT", None)
     return env
 
 
@@ -256,6 +261,7 @@ def start_wire(
     mcp_config_path: Path | None = None,
     skills_dirs: list[Path] | None = None,
     agent_file: Path | None = None,
+    env_overrides: dict[str, str] | None = None,
 ) -> WireProcess:
     cmd = _wire_base_command()
     if yolo:
@@ -281,7 +287,7 @@ def start_wire(
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
         text=True,
-        env=make_env(home_dir),
+        env={**make_env(home_dir), **(env_overrides or {})},
     )
     assert process.stdout is not None
     reader = LineReader(process.stdout)
