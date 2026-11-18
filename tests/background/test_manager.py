@@ -706,7 +706,7 @@ def test_recover_marks_stale_running_task_as_lost(runtime):
     store.create_task(spec)
     runtime_state = TaskRuntime(
         status="running",
-        worker_pid=111,
+        worker_pid=2_000_000,
         heartbeat_at=time.time() - 60,
         updated_at=time.time() - 60,
     )
@@ -823,7 +823,7 @@ def test_recover_marks_stale_starting_task_without_heartbeat_as_lost(runtime):
     store.create_task(spec)
     runtime_state = TaskRuntime(
         status="starting",
-        worker_pid=222,
+        worker_pid=2_000_001,
         started_at=time.time() - 60,
         updated_at=time.time() - 60,
     )

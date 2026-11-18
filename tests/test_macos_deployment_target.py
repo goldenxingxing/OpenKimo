@@ -142,6 +142,7 @@ def test_the_build_rewrites_readlink_f_out_of_layer_wrappers(tmp_path: Path) -> 
         assert wrapper.stat().st_mode & 0o111, f"{wrapper} lost its executable bit"
 
 
+@pytest.mark.skipif(not Path("/bin/zsh").exists(), reason="needs the macOS zsh at /bin/zsh")
 def test_the_portable_wrapper_resolves_the_same_directory(tmp_path: Path) -> None:
     """Run the rewritten wrapper with a readlink that predates macOS 12.3."""
     runtimes = tmp_path / "runtimes"

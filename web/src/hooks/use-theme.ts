@@ -163,7 +163,8 @@ export function useTheme(): UseThemeResult {
         // A skipped transition rejects `ready`; clear the attribute now so it
         // is not left on the root forever, and swallow `finished`'s rejection.
         stopThemeSwitching(root);
-        void transition.finished.catch(() => undefined);
+        // Swallow `finished`'s rejection without `void` (biome noVoid).
+        transition.finished.catch(() => undefined);
         return;
       }
 

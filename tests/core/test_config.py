@@ -40,6 +40,7 @@ def test_default_config_dump():
                 "max_retries_per_step": 5,
                 "finalize_on_max_steps": True,
                 "finalization_timeout_s": 120.0,
+                "step_timeout_s": 300.0,
                 "max_ralph_iterations": 0,
                 "reserved_context_size": 50000,
                 "compaction_trigger_ratio": 0.95,

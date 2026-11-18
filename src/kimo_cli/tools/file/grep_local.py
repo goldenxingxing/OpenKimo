@@ -142,7 +142,9 @@ class Params(BaseModel):
 
 
 RG_VERSION = "15.0.0"
-RG_BASE_URL = "https://cdn.kimo.com/binaries/kimo-cli/rg"
+# Official ripgrep GitHub release assets. The old project CDN is unreachable,
+# which silently broke Grep everywhere the local rg was missing.
+RG_BASE_URL = f"https://github.com/BurntSushi/ripgrep/releases/download/{RG_VERSION}"
 RG_TIMEOUT = 20  # seconds
 RG_MAX_BUFFER = 20_000_000  # 20MB stdout/stderr buffer limit
 RG_KILL_GRACE = 5  # seconds: SIGTERM → SIGKILL

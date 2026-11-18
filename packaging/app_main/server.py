@@ -106,6 +106,12 @@ class ServerState(str, Enum):
 def _build_env(p: AppPaths) -> dict[str, str]:
     """Assemble the environment for the uvicorn subprocess."""
     env = os.environ.copy()
+    # Never let the worker run in Python UTF-8 mode: PYTHONUTF8=1 also switches
+    # locale.getpreferredencoding(), which is what subprocess(text=True) decodes
+    # child output with. The Windows tools we shell out to legitimately emit the
+    # ANSI codepage, and CI runners export PYTHONUTF8 globally — the decode then
+    # dies inside subprocess's reader thread (regression guard for v0.1.29).
+    env.pop("PYTHONUTF8", None)
 
     # 1. Local mode flags (mirrors scripts/start.sh local_mode).
     env["KIMO_USE_CONTAINERS"] = "false"

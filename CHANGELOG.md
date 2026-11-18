@@ -22,6 +22,8 @@ this project adheres to [Semantic Versioning](https://semver.org/).
 - **CI 工作流路径**：ci.yml 适配当前仓库布局（src 在根目录），Ruff/Pyright 关卡校准到能拦真缺陷的规则集。
 - **IM 上下文丢失**：同一发送者的后续消息不再因会话解析依赖 web 端 metadata 而每次都新建会话——IM 桥直接按渠道绑定加载会话，对话上下文跨消息保留。
 - **IM 提问挂起**：IM 渠道中模型发起交互式提问时自动应答并引导其改用纯文本反问，turn 不再干等到渠道超时才失败。
+- **后台完成抢提示词**：交互 Shell 中后台任务完成触发的自动跟进 turn 不再顶着未决的审批弹窗触发——弹窗里已输入的草稿不再被抢占丢失，跟进在草稿提交后补发。
+- **Grep 二进制源**：ripgrep 下载源从失效的项目 CDN 切换到官方 GitHub release assets，Grep 工具不再静默失效。
 
 ## [v0.5.0] — 2026-11-09
 

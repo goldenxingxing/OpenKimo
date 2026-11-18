@@ -700,10 +700,11 @@ def test_shell_background_agent_approval_preserves_running_draft(tmp_path: Path)
         next_prompt_mark = shell.mark()
         _read_until_prompt(shell, after=next_prompt_mark)
 
-        assert list_turn_begin_inputs(home_dir, work_dir) == [
-            "Launch a background agent that writes a file.",
-            draft_text,
-        ]
+        begin_inputs = list_turn_begin_inputs(home_dir, work_dir)
+        # A completed background task appends an idle system-reminder to the
+        # next turn's input; the user's draft must survive it.
+        assert begin_inputs[0] == "Launch a background agent that writes a file."
+        assert draft_text in begin_inputs
 
         runtime = json.loads(runtime_path.read_text(encoding="utf-8"))
         assert runtime["failure_reason"] is None

@@ -46,9 +46,11 @@ function text(item: DisplayItem, name: string): string {
 }
 
 /** Lines in a text block, ignoring trailing newlines. */
+const TRAILING_NEWLINES = /\n+$/;
+
 function countLines(value: string): number {
   if (!value) return 0;
-  const body = value.replace(/\n+$/, "");
+  const body = value.replace(TRAILING_NEWLINES, "");
   return body ? body.split("\n").length : 0;
 }
 

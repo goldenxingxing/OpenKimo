@@ -533,7 +533,7 @@ class Shell:
             try:
                 while True:
                     if deferred_bg_trigger and not self._should_defer_background_auto_trigger(
-                        prompt_session
+                        prompt_session, self._approval_modal is not None
                     ):
                         result = None
                     elif deferred_bg_trigger:
@@ -550,7 +550,9 @@ class Shell:
                             result = await bg_watcher.wait_for_next(idle_events)
 
                     if result is None:
-                        if self._should_defer_background_auto_trigger(prompt_session):
+                        if self._should_defer_background_auto_trigger(
+                            prompt_session, self._approval_modal is not None
+                        ):
                             deferred_bg_trigger = True
                             resume_prompt.set()
                             continue
@@ -1043,7 +1045,13 @@ class Shell:
     @staticmethod
     def _should_defer_background_auto_trigger(
         prompt_session: _BackgroundAutoTriggerPromptState | None,
+        approval_modal_active: bool = False,
     ) -> bool:
+        # An open approval modal holds a drafted buffer of its own: firing a
+        # background follow-up turn underneath it races the modal and can
+        # swallow the draft, so wait until the modal has resolved.
+        if approval_modal_active:
+            return True
         if prompt_session is None:
             return False
         return prompt_session.has_pending_input() or prompt_session.had_recent_input_activity(
