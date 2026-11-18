@@ -14,6 +14,7 @@ view (history appears once the turn lands on disk).
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import re
 from pathlib import Path
 from typing import cast
@@ -26,8 +27,10 @@ from kimo_cli.app import KimoCLI
 from kimo_cli.session import Session
 from kimo_cli.session import Session as KimoCLISession
 from kimo_cli.session_state import load_session_state, save_session_state
+from kimo_cli.utils.aioqueue import QueueShutDown
 from kimo_cli.utils.logging import logger
 from kimo_cli.web.im import db
+from kimo_cli.wire.types import QuestionRequest
 
 
 def workspace_path(channel_id: int, external_id: str) -> Path:
@@ -45,8 +48,14 @@ async def _load_or_create_session(
 
     session: Session | None = None
     if bound_id is not None:
-        candidate = await KimoCLISession.continue_(work_dir)
-        if candidate is not None and candidate.id == bound_id:
+        # Load the bound session directly. Session.continue_() is unusable
+        # here: it resolves the session via the global metadata's
+        # ``last_session_id``, which is only written by the web runner's
+        # create-session path — IM-created sessions never set it, so every
+        # message would look "missing" and spawn a fresh session (context
+        # loss on every turn after the first).
+        candidate = await KimoCLISession.find(work_dir, bound_id)
+        if candidate is not None:
             session = candidate
         else:
             logger.warning(
@@ -110,13 +119,46 @@ class ImTurnRunner:
         texts: list[str] = []
         cancel_event = asyncio.Event()
         kimo = await KimoCLI.create(session, yolo=True, ui_mode="wire")
+        question_task = asyncio.create_task(self._answer_questions(kimo))
         try:
             async for msg in kimo.run(cast("list[ContentPart]", user_input), cancel_event):
                 if isinstance(msg, TextPart):
                     texts.append(msg.text)
         finally:
+            question_task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await question_task
             await kimo.close()
         return "".join(texts).strip()
+
+    @staticmethod
+    async def _answer_questions(kimo: KimoCLI) -> None:
+        """Auto-answer interactive questions so IM turns never hang on them.
+
+        IM has no channel to carry a question to the user or an answer back:
+        without this, AskUserQuestion sits unanswered until the turn hits the
+        channel timeout. Resolving with a note tells the model to ask the
+        question in its plain-text reply instead, where the user answers in
+        their next message — which keeps the conversation flowing.
+        """
+        runtime = getattr(kimo, "_runtime", None)
+        hub = getattr(runtime, "root_wire_hub", None)
+        if hub is None:
+            return
+        note = (
+            "（IM 渠道不支持交互式选择；请把这个问题直接写进给用户的回复正文，"
+            "用户会在下一条消息里用文字回答。）"
+        )
+        queue = hub.subscribe()
+        try:
+            while True:
+                msg = await queue.get()
+                if isinstance(msg, QuestionRequest):
+                    msg.resolve({q.question: note for q in msg.questions})
+        except QueueShutDown:
+            pass
+        finally:
+            hub.unsubscribe(queue)
 
     async def drop_session(self, channel_id: int, external_id: str) -> None:
         async with self._lock_for(channel_id, external_id):

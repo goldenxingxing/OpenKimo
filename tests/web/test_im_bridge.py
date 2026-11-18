@@ -598,3 +598,95 @@ def test_manager_keeps_last_error_after_channel_crash(
         time.sleep(0.05)
     assert "boom" in (_status()["last_error"] or "")
     assert _status()["running"] is False
+
+
+def test_im_binding_reused_across_turns(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """A sender must keep ONE session across messages.
+
+    Regression: Session.continue_() resolves via the global metadata's
+    ``last_session_id``, which only the web runner writes — IM sessions never
+    set it, so every message created a fresh session and the conversation lost
+    its context.
+    """
+    from kimo_cli import metadata as metadata_mod
+    from kimo_cli.web.im import runner as im_runner
+
+    bindings: dict = {}
+    monkeypatch.setattr(im_runner.db, "get_binding", lambda ch, ex: bindings.get((ch, ex)))
+    monkeypatch.setattr(
+        im_runner.db,
+        "set_binding",
+        lambda ch, ex, sid, name: bindings.__setitem__((ch, ex), sid),
+    )
+    monkeypatch.setattr(im_runner.share, "get_share_dir", lambda: tmp_path)
+    monkeypatch.setattr(metadata_mod, "get_metadata_file", lambda: tmp_path / "kimo.json")
+
+    async def _go() -> tuple:
+        s1 = await im_runner._load_or_create_session(9, "ext1", "测试人", "t")
+        s2 = await im_runner._load_or_create_session(9, "ext1", "测试人", "t")
+        return s1, s2
+
+    s1, s2 = asyncio.run(_go())
+    assert s1.id == s2.id, "second message landed in a different session"
+
+
+def test_im_turn_answers_questions_automatically(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """AskUserQuestion must be auto-answered so IM turns never hang on it."""
+    from kimo_cli.web.im.runner import ImTurnRunner
+    from kimo_cli.wire.types import QuestionItem, QuestionOption, QuestionRequest
+
+    class _FakeQueue:
+        def __init__(self, msgs: list) -> None:
+            self._it = iter(msgs)
+
+        async def get(self):  # noqa: ANN202 - test double
+            for m in self._it:
+                return m
+            await asyncio.sleep(3600)
+
+    class _FakeHub:
+        def __init__(self, msgs: list) -> None:
+            self._msgs = msgs
+
+        def subscribe(self):  # noqa: ANN202 - test double
+            return _FakeQueue(self._msgs)
+
+        def unsubscribe(self, q) -> None:  # noqa: ANN001 - test double
+            pass
+
+    request = QuestionRequest(
+        id="q1",
+        tool_call_id="t1",
+        questions=[
+            QuestionItem(
+                question="继续吗？",
+                header="",
+                options=[QuestionOption(label="是", description="")],
+                multi_select=False,
+            )
+        ],
+    )
+    answered: dict = {}
+    original_resolve = QuestionRequest.resolve
+
+    def _spy(self: QuestionRequest, answers: dict) -> None:
+        answered.update(answers)
+        original_resolve(self, answers)
+
+    monkeypatch.setattr(QuestionRequest, "resolve", _spy)
+
+    fake_kimo = type("K", (), {"_runtime": type("R", (), {"root_wire_hub": _FakeHub([request])})})
+
+    async def _go() -> None:
+        task = asyncio.create_task(ImTurnRunner._answer_questions(fake_kimo))
+        await asyncio.sleep(0.1)
+        task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await task
+
+    asyncio.run(_go())
+    assert answered.get("继续吗？") and "IM" in answered["继续吗？"], (
+        "question was not auto-answered with the IM guidance note"
+    )

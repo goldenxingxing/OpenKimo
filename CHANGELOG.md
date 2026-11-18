@@ -20,6 +20,8 @@ this project adheres to [Semantic Versioning](https://semver.org/).
 - **渠道状态留存**：adapter 崩溃后的错误信息保留在 UI（红点悬停可见），不再重置为空白「已停止」。
 - **LLM 单步挂起检测**：`loop_control.step_timeout_s`（默认 300s）超时转重试，消除单步无限挂起。
 - **CI 工作流路径**：ci.yml 适配当前仓库布局（src 在根目录），Ruff/Pyright 关卡校准到能拦真缺陷的规则集。
+- **IM 上下文丢失**：同一发送者的后续消息不再因会话解析依赖 web 端 metadata 而每次都新建会话——IM 桥直接按渠道绑定加载会话，对话上下文跨消息保留。
+- **IM 提问挂起**：IM 渠道中模型发起交互式提问时自动应答并引导其改用纯文本反问，turn 不再干等到渠道超时才失败。
 
 ## [v0.5.0] — 2026-11-09
 
