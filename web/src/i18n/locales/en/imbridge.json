@@ -1,0 +1,103 @@
+{
+  "nav": {
+    "title": "IM Bridge"
+  },
+  "page": {
+    "back": "Back",
+    "title": "IM Bridge",
+    "description": "Connect IM bots to this server: manage app credentials, switches, whitelists, and view bindings.",
+    "loading": "Loading channels...",
+    "empty": "No channels configured yet.",
+    "loadFailed": "Failed to load channels."
+  },
+  "channel": {
+    "add": "Add Channel",
+    "edit": "Edit",
+    "delete": "Delete",
+    "whitelist": "Whitelist",
+    "bindings": "Bindings",
+    "deleteConfirm": "Are you sure you want to delete channel \"{{name}}\"? This cannot be undone.",
+    "types": {
+      "feishu": "Feishu",
+      "dingtalk": "DingTalk"
+    },
+    "fields": {
+      "name": "Name",
+      "namePlaceholder": "e.g. Team Feishu Bot",
+      "type": "Type",
+      "appId": "App ID",
+      "appIdPlaceholder": "cli_xxxxxxxxxxxx",
+      "appSecret": "App Secret",
+      "appSecretPlaceholder": "Enter app secret",
+      "secretUnchanged": "Leave empty to keep the current secret",
+      "secretRequired": "App secret is required.",
+      "timeout": "Timeout (seconds)",
+      "showThinking": "Show thinking",
+      "showThinkingHint": "Send intermediate thinking content to the chat.",
+      "groupChat": "Group chat",
+      "groupChatHint": "Allow the bot to respond in group chats.",
+      "feishuAppId": "App ID",
+      "feishuAppIdPlaceholder": "App ID of the Feishu app (cli_…)",
+      "feishuAppSecret": "App Secret",
+      "feishuAppSecretPlaceholder": "App Secret of the same app",
+      "dingtalkAppId": "Client ID (AppKey)",
+      "dingtalkAppIdPlaceholder": "Client ID of the DingTalk app",
+      "dingtalkAppSecret": "Client Secret (AppSecret)",
+      "dingtalkAppSecretPlaceholder": "Client Secret of the same app"
+    }
+  },
+  "status": {
+    "running": "Running",
+    "stopped": "Stopped",
+    "error": "Error",
+    "disabled": "Disabled"
+  },
+  "whitelist": {
+    "title": "Whitelist",
+    "description": "Users on the whitelist can talk to the bot and their tool calls are auto-approved. Messages from anyone else are rejected.",
+    "placeholder": "One open_id per line",
+    "save": "Save Whitelist",
+    "saving": "Saving...",
+    "saved": "Whitelist saved",
+    "loadFailed": "Failed to load whitelist.",
+    "saveFailed": "Failed to save whitelist."
+  },
+  "bindings": {
+    "title": "Bindings",
+    "empty": "No bindings yet.",
+    "loadFailed": "Failed to load bindings.",
+    "externalId": "External ID",
+    "displayName": "Display Name",
+    "sessionId": "Session ID",
+    "copied": "Session ID copied",
+    "viewSession": "View Conversation"
+  },
+  "actions": {
+    "cancel": "Cancel",
+    "save": "Save",
+    "saving": "Saving...",
+    "create": "Create",
+    "creating": "Creating...",
+    "close": "Close"
+  },
+  "toast": {
+    "created": "Channel created",
+    "saved": "Channel saved",
+    "deleted": "Channel deleted",
+    "error": "Operation failed"
+  },
+  "pending": {
+    "title": "Pending Authorization",
+    "description": "When a stranger messages the bot, they show up here. Click \"Add to Whitelist\" to authorize them — no need to type an open_id by hand.",
+    "empty": "No pending requests. Strangers who message the bot will show up here.",
+    "approve": "Add to Whitelist",
+    "dismiss": "Dismiss",
+    "approved": "Added to whitelist",
+    "dismissed": "Request dismissed",
+    "loadFailed": "Failed to load pending requests.",
+    "actionFailed": "Operation failed.",
+    "lastSeen": "Last message",
+    "messages_one": "{{count}} message",
+    "messages_other": "{{count}} messages"
+  }
+}

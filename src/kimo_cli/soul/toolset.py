@@ -30,7 +30,7 @@ from kosong.tooling.mcp import convert_mcp_content
 from kosong.utils.typing import JsonType
 
 from kimo_cli import logger
-from kimo_cli.exception import InvalidToolError, MCPRuntimeError
+from kimo_cli.exception import InvalidToolError
 from kimo_cli.hooks.engine import HookEngine
 from kimo_cli.hooks.runner import HookResult
 from kimo_cli.soul.offload import ToolOutputOffloader, current_offloader
@@ -926,9 +926,10 @@ class KimoToolset:
         """
         Load MCP tools from specified MCP configs.
 
-        Raises:
-            MCPRuntimeError(KimoCLIException, RuntimeError): When any MCP server cannot be
-                connected.
+        Failures to connect individual MCP servers are logged and skipped, so a
+        flaky or unavailable server cannot abort the session: the affected server
+        stays marked "failed" in the MCP status snapshot and the remaining
+        servers (plus the built-in tools) keep working.
         """
         import fastmcp
         from fastmcp.mcp_config import MCPConfig, RemoteMCPServer
@@ -1001,8 +1002,17 @@ class KimoToolset:
             failed_servers = {name: error for name, error in results if error is not None}
 
             if failed_servers:
-                _toast_mcp("mcp connection failed")
-                raise MCPRuntimeError(f"Failed to connect MCP servers: {failed_servers}")
+                # A flaky or unavailable MCP server must not abort the whole
+                # session's first turn. Degrade gracefully instead: log the
+                # failures, keep the servers marked "failed" (visible in the MCP
+                # status snapshot), and continue with whatever connected.
+                for server_name, error in failed_servers.items():
+                    logger.warning(
+                        "MCP server {server_name} unavailable; continuing without it: {error}",
+                        server_name=server_name,
+                        error=error,
+                    )
+                _toast_mcp("mcp connection failed (continuing without it)")
             if self._mcp_filter is not None:
                 allowed_servers, allowed_tools, excluded_tools = self._mcp_filter
                 self.filter_mcp_tools(

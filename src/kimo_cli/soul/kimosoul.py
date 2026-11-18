@@ -1127,10 +1127,10 @@ class KimoSoul:
             outstanding_tool_calls = self._issued_tool_calls - self._completed_tool_calls
             if outstanding_tool_calls:
                 logger.warning(
-                    "Emitting compensating ToolResult for %d tool_call(s) with "
-                    "no result before turn ended (reason=%s)",
-                    len(outstanding_tool_calls),
-                    interrupt_reason or "error",
+                    "Emitting compensating ToolResult for {count} tool_call(s) "
+                    "with no result before turn ended (reason={reason})",
+                    count=len(outstanding_tool_calls),
+                    reason=interrupt_reason or "error",
                 )
                 for tc_id in sorted(outstanding_tool_calls):
                     wire_send(
@@ -1900,7 +1900,8 @@ class KimoSoul:
                     self._completed_tool_calls.add(msg.tool_call_id)
                 wire_send(msg)
 
-            return await kosong.step(
+            step_timeout = self._loop_control.step_timeout_s
+            step_coro = kosong.step(
                 request_chat_provider,
                 self._agent.system_prompt,
                 self._agent.toolset,
@@ -1908,6 +1909,19 @@ class KimoSoul:
                 on_message_part=_tracked_wire_send,
                 on_tool_result=_tracked_wire_send,
             )
+            if step_timeout is None:
+                return await step_coro
+            try:
+                return await asyncio.wait_for(step_coro, timeout=step_timeout)
+            except TimeoutError as e:
+                # A provider request that hangs without responding is
+                # indistinguishable from a dead connection: surface it as the
+                # retryable timeout the step-retry machinery already knows,
+                # instead of waiting forever.
+                raise APITimeoutError(
+                    f"LLM step produced no response within {step_timeout:.0f}s"
+                    " (hung provider call); treating as a retryable timeout"
+                ) from e
 
         max_attempts = self._effective_max_step_attempts()
 

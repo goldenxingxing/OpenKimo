@@ -38,13 +38,13 @@ def test_kimo_clis_own_suite_runs() -> None:
     workflow = _workflow_text()
 
     assert "kimo-cli-tests:" in workflow
-    assert "run: uv run pytest tests -q" in workflow
+    assert "run: uv run pytest tests -q --inline-snapshot=disable" in workflow
     assert 'UV_PYTHON: "3.12"' in workflow
 
 
 def test_outer_tests_run_from_the_outer_repository_root() -> None:
     workflow = _workflow_text()
 
-    assert "run: kimo-cli/.venv/bin/python -m pytest tests -v --tb=short" in workflow
+    assert "run: .venv/bin/python -m pytest tests -v --tb=short --inline-snapshot=disable" in workflow
     assert "working-directory: ." in workflow
     assert "uv run pytest ../tests/" not in workflow

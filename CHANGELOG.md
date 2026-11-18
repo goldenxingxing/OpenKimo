@@ -4,6 +4,23 @@ All notable changes to this project are documented here. The format
 follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and
 this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [v0.5.1] — 2026-11-18
+
+### Added
+
+- **IM 桥接（飞书 + 钉钉）**：IM 机器人接入 OpenKimo Web 服务端进程内，前端「IM 桥接」页管理渠道（应用凭据、开关、白名单、绑定、待授权一键通过）；飞书经 lark-oapi 长连接，钉钉经 dingtalk-stream Stream 模式（均无需公网回调）；IM 消息写入普通会话，Web 会话视图直接承接；白名单外陌生人拒答并记录待授权。
+- **桌面端退出清理**：macOS（rumps before_quit/atexit/SIGTERM）与 Windows（atexit/SIGTERM）全路径退出都会关停 uvicorn 子进程，不再残留孤儿服务器占端口。
+
+### Fixed
+
+- **会话流恢复**：WebSocket 空闲 30s 服务端心跳探活；网络抖动后 online 事件无条件重连；看门狗/超时放弃时纠正「干活中」假状态——不再出现永久运行中无输出。
+- **前端热更新**：SPA 的 index.html 改为按请求读盘，替换静态资源不再需要重启进程。
+- **IM 目录泄漏**：IM 桥工作目录不再出现在「新建会话」的最近目录列表，也不会被记为启动目录。
+- **渠道断连**：停用 IM 渠道时真正断开平台长连接（飞书/钉钉同构修复），同一机器人在多处桥接时不再互相分流消息。
+- **渠道状态留存**：adapter 崩溃后的错误信息保留在 UI（红点悬停可见），不再重置为空白「已停止」。
+- **LLM 单步挂起检测**：`loop_control.step_timeout_s`（默认 300s）超时转重试，消除单步无限挂起。
+- **CI 工作流路径**：ci.yml 适配当前仓库布局（src 在根目录），Ruff/Pyright 关卡校准到能拦真缺陷的规则集。
+
 ## [v0.5.0] — 2026-11-09
 
 ### Changed

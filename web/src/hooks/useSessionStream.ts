@@ -2924,6 +2924,11 @@ export function useSessionStream(
                   "Lost connection to the session and could not reconnect",
                 ),
               );
+              // Same rationale as the streaming watchdog: hand the socket to
+              // the onclose handler so status is corrected and recovery stays
+              // possible. A socket that never got session_status is not
+              // trustworthy.
+              currentWs?.close();
             }
           }, 15000);
           return;
@@ -3468,7 +3473,8 @@ export function useSessionStream(
             hasUnsubmittedApproval || hasUnsubmittedQuestion;
           if (
             elapsed > 45_000 &&
-            statusRef.current === "streaming" &&
+            (statusRef.current === "streaming" ||
+              statusRef.current === "submitted") &&
             !hasPendingInteraction
           ) {
             // Route through decideOnClose so a wedged worker on Windows
@@ -3485,7 +3491,7 @@ export function useSessionStream(
             if (decision.action === "retry") {
               reconnectAttemptRef.current = decision.attempt;
               console.warn(
-                `[SessionStream] Watchdog: no messages for ${Math.round(elapsed / 1000)}s while streaming, ` +
+                `[SessionStream] Watchdog: no messages for ${Math.round(elapsed / 1000)}s while ${statusRef.current}, ` +
                   `reconnecting (attempt ${decision.attempt} in ${decision.delayMs}ms)...`,
               );
               if (reconnectTimeoutRef.current !== null) {
@@ -3501,6 +3507,11 @@ export function useSessionStream(
                   "Lost connection to the session and could not reconnect",
                 ),
               );
+              // Closing the socket lets the onclose handler run its cleanup:
+              // status is corrected to non-busy, the watchdog stops, and a
+              // later network-up event is allowed to reconnect. Without this
+              // the UI stayed "streaming" forever on a dead socket.
+              wsRef.current?.close();
             }
           }
         }, 10_000);
@@ -3519,6 +3530,15 @@ export function useSessionStream(
         }
 
         lastWsMessageTimeRef.current = Date.now();
+        // Server keepalive probe: counts as connection liveness for the
+        // watchdog but carries no conversation content. Skipping it here
+        // keeps it out of the duplicate-delivery window and message log.
+        if (
+          typeof event.data === "string" &&
+          event.data.includes('"method":"ping"')
+        ) {
+          return;
+        }
         handleMessage(event.data);
       };
 
@@ -3908,7 +3928,21 @@ export function useSessionStream(
       hiddenAt = null;
       check(hiddenForMs);
     };
-    const onOnline = () => check(0);
+    const onOnline = () => {
+      // Coming back online is the strongest reconnect signal there is: a
+      // socket that read as OPEN through the outage may be half-dead and
+      // will never deliver again. Reconnect unconditionally — a healthy
+      // connection just replays and dedupes; an idempotent no-op otherwise.
+      if (
+        reconnectTimeoutRef.current !== null ||
+        wsRef.current?.readyState === WebSocket.CONNECTING
+      ) {
+        return; // Already on its way back.
+      }
+      console.log("[SessionStream] Back online, reconnecting to catch up");
+      reconnectAttemptRef.current = 0;
+      reconnectRef.current();
+    };
     document.addEventListener("visibilitychange", onVisibility);
     window.addEventListener("online", onOnline);
     return () => {

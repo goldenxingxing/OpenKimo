@@ -8,8 +8,8 @@
 - 回复事件: {"method":"event","params":{"type":"ContentPart","payload":{...}}}
 - turn 结束: params.type == "TurnEnd"
 
-前置条件：OpenKimo >= 0.4.10 源码补丁——web 会话默认 approval.yolo=True，
-否则 LLM 调用工具时会永久等待审批。
+前置条件：创建会话时显式传 `yolo=true`（本桥已自动传）——IM 客户端
+没有交互审批面，否则 LLM 调用工具时会永久等待审批。
 """
 from __future__ import annotations
 
@@ -43,7 +43,9 @@ class OpenKimoClient:
                 timeout=aiohttp.ClientTimeout(total=30)
             ) as sess:
                 async with sess.post(
-                    f"{self.base_url}/api/sessions/", json={}, headers=self._headers()
+                    f"{self.base_url}/api/sessions/",
+                    json={"yolo": True},
+                    headers=self._headers(),
                 ) as resp:
                     if resp.status != 200:
                         return None
@@ -57,10 +59,15 @@ class OpenKimoClient:
             return None
 
     async def prompt(self, session_id: str, user_input: Any) -> str:
-        """发一条 prompt，收集文本回复直到 TurnEnd。user_input 为 str 或 part list。"""
+        """发一条 prompt，收集文本回复直到 TurnEnd。user_input 为 str 或 part list。
+
+        异常路径都会 raise RuntimeError（带原因），由调用方回复用户；绝不静默返回
+        空串——空串在调用方会被当成「未返回文本」，掩盖真实故障。
+        """
         parts: list[str] = []
         prompt_id = str(uuid.uuid4())
         sent = False
+        turn_error: str | None = None
         async with aiohttp.ClientSession(
             timeout=aiohttp.ClientTimeout(total=self.timeout)
         ) as sess:
@@ -70,7 +77,11 @@ class OpenKimoClient:
                 async for msg in ws:
                     if msg.type == aiohttp.WSMsgType.TEXT:
                         parsed = self._parse_event(msg.data)
-                        if not parsed:
+                        if parsed is None:
+                            # JSONRPC 错误响应（如 prompt 校验失败）：{"error": {...}}
+                            err = self._parse_error(msg.data)
+                            if err is not None:
+                                raise RuntimeError(f"OpenKimo 返回错误: {err}")
                             continue
                         etype, payload = parsed
                         if not sent:
@@ -89,10 +100,32 @@ class OpenKimoClient:
                                 if isinstance(t, str):
                                     parts.append(t)
                         elif etype == "TurnEnd":
+                            # TurnEnd.interrupt_reason: user_cancelled | error | max_steps | None
+                            reason = payload.get("interrupt_reason")
+                            if reason == "error":
+                                turn_error = "会话执行出错（interrupt_reason=error）"
                             break
                     elif msg.type in (aiohttp.WSMsgType.CLOSED, aiohttp.WSMsgType.ERROR):
                         break
-        return "".join(parts).strip()
+        if not sent:
+            raise RuntimeError("会话流在 history_complete 前关闭，prompt 未发送")
+        text = "".join(parts).strip()
+        if turn_error is not None:
+            suffix = f"\n\n⚠️ {turn_error}" if text else f"⚠️ {turn_error}"
+            return (text + suffix).strip()
+        return text
+
+    @staticmethod
+    def _parse_error(raw: str) -> str | None:
+        """从 JSONRPC 错误响应里提取错误消息；不是错误响应则返回 None。"""
+        try:
+            data = json.loads(raw)
+        except json.JSONDecodeError:
+            return None
+        if isinstance(data, dict) and isinstance(data.get("error"), dict):
+            err = data["error"]
+            return str(err.get("message") or err.get("data") or err)
+        return None
 
     @staticmethod
     def _parse_event(raw: str) -> tuple[str, dict[str, Any]] | None:

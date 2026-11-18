@@ -37,6 +37,27 @@ def test_index_html_has_no_cache_header() -> None:
 
 
 @_needs_static
+def test_index_html_reflects_on_disk_changes_without_restart() -> None:
+    """The SPA shell is read per request, so hot-swapped bundles apply immediately.
+
+    create_app() used to read index.html into memory once at startup; a
+    patched install then kept serving chunk hashes that no longer existed on
+    disk, and a plain reload 404'd every script until the process restarted.
+    """
+    index = STATIC_DIR / "index.html"
+    original = index.read_text(encoding="utf-8")
+    client = _make_client()
+    try:
+        index.write_text("<!-- patched -->\n" + original, encoding="utf-8")
+        for path in ("/", "/some/client/route"):
+            resp = client.get(path)
+            assert resp.status_code == 200, path
+            assert "<!-- patched -->" in resp.text, f"{path} served a stale in-memory index.html"
+    finally:
+        index.write_text(original, encoding="utf-8")
+
+
+@_needs_static
 def test_hashed_asset_has_immutable_cache_header() -> None:
     """Hashed assets under /assets/ should be cached aggressively."""
     client = _make_client()

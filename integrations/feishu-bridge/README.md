@@ -40,7 +40,8 @@ python main.py
 要点（2026-11 实测踩坑，勿删）：
 - 新版飞书发送视频/文件时是 **post 消息，附件挂在 content 顶层 `files` 数组**，
   正文 content 里只有文字；只解析 content 内的 tag 会静默丢附件。
-- OpenKimo 侧需 `approval.yolo=True`（web 会话默认），否则工具审批会卡死。
+- 本桥创建会话时显式传 `yolo=true`（无审批面的 IM 客户端必需）；浏览器 Web UI
+  会话不受影响，仍走各自的审批门。
 - LLM API 无法加载本地路径形式的 `image_url`，历史里混入会使整个 turn 报错
   （发 `/ok_reset` 重置会话可解）。
 

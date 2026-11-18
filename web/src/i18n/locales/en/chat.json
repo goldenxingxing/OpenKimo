@@ -117,7 +117,8 @@
     "createSessionHint": "Click the + button in the sidebar to start a new session",
     "createNewSession": "Create new session",
     "newTabHint": "{{modifier}}+Click to open in new tab",
-    "startConversation": "Start a conversation by typing a message below."
+    "startConversation": "Start a conversation by typing a message below.",
+    "scrollToBottom": "Scroll to bottom"
   },
   "files": {
     "title": "Workspace files",

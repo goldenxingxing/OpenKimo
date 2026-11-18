@@ -110,6 +110,21 @@ class LoopControl(BaseModel):
     """Wall-clock budget for the finalization round. Unlike regular steps it does
     not go through the retry loop (the step budget is already exhausted), so this
     timeout is the only guard against a hung provider."""
+    step_timeout_s: float | None = Field(default=300.0, ge=1.0)
+    """Wall-clock budget for a single LLM step (the provider call plus its tool
+    calls). Guards against a provider request that hangs without ever responding:
+    the step is cancelled and retried per ``max_retries_per_step`` (the retry
+    emits ``StepRetry`` like any retryable provider error). ``None`` disables the
+    guard.
+
+    A network blip can leave a provider request hung (no error, no response) for
+    minutes; without this guard the turn would sit in "working" with no output
+    until the provider's own (often absent) timeout fires. The default of 300 s
+    bounds that window while staying well above a normal single-step duration.
+    Tool calls are bounded by their own timeouts (usually 120-600 s), so this
+    per-step budget is about catching a hung *provider* call, not a slow tool;
+    if a genuinely slow-but-alive step exceeds it, the bounded retry re-runs it.
+    Default is 300 s."""
     max_ralph_iterations: int = Field(default=0, ge=-1)
     """Extra iterations after the first turn in Ralph mode. Use -1 for unlimited."""
     reserved_context_size: int = Field(default=50_000, ge=1000)

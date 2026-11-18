@@ -174,7 +174,7 @@ class AskUserQuestion(CallableTool2[Params]):
                 brief="Client unsupported",
             )
         except Exception:
-            logger.exception("Failed to get user response for question %s", request.id)
+            logger.exception("Failed to get user response for question {}", request.id)
             return ToolError(
                 message="Failed to get user response.",
                 brief="Question failed",

@@ -8,6 +8,7 @@ import { cn } from "./lib/utils";
 import { ResizablePanel, ResizablePanelGroup } from "./components/ui/resizable";
 import { ChatWorkspaceContainer } from "./features/chat/chat-workspace-container";
 import { SessionsSidebar } from "./features/sessions/sessions";
+import { ImBridgePage } from "./features/im-bridge/im-bridge-page";
 import type { ArchiveState } from "./features/sessions/sessions";
 import { CreateSessionDialog } from "./features/sessions/create-session-dialog";
 import { Toaster } from "./components/ui/sonner";
@@ -287,9 +288,44 @@ function App() {
     hasRestoredFromUrlRef.current = true;
   }, [selectSession]);
 
+  // Sessions opened from outside the current work dir's list (e.g. the IM
+  // bridge's "view conversation" jump) are not members of `sessions`, so the
+  // existence check below would clear them on the next list refresh. Keep the
+  // externally opened ids in sessionStorage so the check skips them (and so a
+  // reload with ?session= keeps working).
+  const isExternallyOpened = useCallback((sessionId: string) => {
+    try {
+      const ids = JSON.parse(
+        window.sessionStorage.getItem("kimo_external_sessions") ?? "[]",
+      );
+      return Array.isArray(ids) && ids.includes(sessionId);
+    } catch {
+      return false;
+    }
+  }, []);
+
+  const markExternallyOpened = useCallback((sessionId: string) => {
+    try {
+      const ids = JSON.parse(
+        window.sessionStorage.getItem("kimo_external_sessions") ?? "[]",
+      );
+      if (Array.isArray(ids) && !ids.includes(sessionId)) {
+        ids.push(sessionId);
+        window.sessionStorage.setItem("kimo_external_sessions", JSON.stringify(ids));
+      }
+    } catch {
+      // sessionStorage unavailable (private mode etc.) — the jump still works,
+      // only the reload-survival is lost.
+    }
+  }, []);
+
   // Validate session exists once session list loads, clear URL if not found
   useEffect(() => {
     if (sessions.length === 0 || !selectedSessionId) {
+      return;
+    }
+
+    if (isExternallyOpened(selectedSessionId)) {
       return;
     }
 
@@ -304,7 +340,15 @@ function App() {
       updateUrlWithSession(null);
       selectSession("");
     }
-  }, [sessions, archivedSessions, selectedSessionId, selectSession, hasMoreSessions, searchQuery]);
+  }, [
+    sessions,
+    archivedSessions,
+    selectedSessionId,
+    selectSession,
+    hasMoreSessions,
+    searchQuery,
+    isExternallyOpened,
+  ]);
 
   // Update URL when selected session changes
   useEffect(() => {
@@ -380,13 +424,32 @@ function App() {
     [deleteSession],
   );
 
+  const [showImBridge, setShowImBridge] = useState(false);
+
   const handleSelectSession = useCallback(
     (sessionId: string) => {
       selectSession(sessionId);
+      setShowImBridge(false);
       setIsMobileSidebarOpen(false);
     },
     [selectSession],
   );
+
+  // The IM bridge's "view conversation" opens a session that lives in the IM
+  // workspace, not the current work dir — mark it so the list-refresh
+  // validation does not clear it.
+  const handleOpenImSession = useCallback(
+    (sessionId: string) => {
+      markExternallyOpened(sessionId);
+      handleSelectSession(sessionId);
+    },
+    [markExternallyOpened, handleSelectSession],
+  );
+
+  const handleOpenImBridge = useCallback(() => {
+    setShowImBridge(true);
+    setIsMobileSidebarOpen(false);
+  }, []);
 
   const handleRefreshSessions = useCallback(async () => {
     await refreshSessions();
@@ -616,8 +679,14 @@ function App() {
     );
   }
 
-  const renderChatPanel = () => (
-    <ChatWorkspaceContainer
+  const renderChatPanel = () =>
+    showImBridge ? (
+      <ImBridgePage
+        onClose={() => setShowImBridge(false)}
+        onOpenSession={handleOpenImSession}
+      />
+    ) : (
+      <ChatWorkspaceContainer
       selectedSessionId={selectedSessionId}
       currentSession={currentSession}
       sessionDescription={currentSession?.title}
@@ -635,8 +704,8 @@ function App() {
       onSelectSessionModel={updateSessionModel}
       draftModel={draftModel}
       onDraftModelChange={setDraftModel}
-    />
-  );
+      />
+    );
 
   return (
     <PromptInputProvider draftKey={selectedSessionId}>
@@ -716,6 +785,7 @@ function App() {
                     onLoadMoreArchivedSessions={loadMoreArchivedSessions}
                     onOpenCreateDialog={handleOpenCreateDialog}
                     onCreateSessionInDir={handleCreateSessionInDir}
+                    onOpenImBridge={handleOpenImBridge}
                     streamStatus={streamStatus}
                     selectedSessionId={selectedSessionId}
                     sessions={sessionSummaries}
@@ -827,6 +897,7 @@ function App() {
                 onLoadMoreArchivedSessions={loadMoreArchivedSessions}
                 onOpenCreateDialog={handleOpenCreateDialog}
                 onCreateSessionInDir={handleCreateSessionInDir}
+                onOpenImBridge={handleOpenImBridge}
                 onClose={handleCloseMobileSidebar}
                 streamStatus={streamStatus}
                 selectedSessionId={selectedSessionId}

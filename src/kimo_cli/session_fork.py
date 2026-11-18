@@ -37,8 +37,9 @@ _COMPACTION_SNAPSHOT_TAGS = (
     "code_state",
 )
 
+_COMPACTION_SNAPSHOT_TAGS_RE = "|".join(_COMPACTION_SNAPSHOT_TAGS)
 _COMPACTION_SNAPSHOT_RE = re.compile(
-    r"<(?:%s)>.*?</(?:%s)>" % ("|".join(_COMPACTION_SNAPSHOT_TAGS), "|".join(_COMPACTION_SNAPSHOT_TAGS)),
+    rf"<(?:{_COMPACTION_SNAPSHOT_TAGS_RE})>.*?</(?:{_COMPACTION_SNAPSHOT_TAGS_RE})>",
     re.DOTALL,
 )
 

@@ -117,7 +117,8 @@
     "createSessionHint": "点击侧边栏的 + 按钮新建会话",
     "createNewSession": "新建会话",
     "newTabHint": "{{modifier}}+点击在新标签页打开",
-    "startConversation": "在下方输入消息开始对话。"
+    "startConversation": "在下方输入消息开始对话。",
+    "scrollToBottom": "滚动到底部"
   },
   "files": {
     "title": "工作区文件",

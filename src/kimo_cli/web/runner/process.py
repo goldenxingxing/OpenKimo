@@ -105,6 +105,13 @@ WS_SEND_TIMEOUT_S = 60.0
 # Closing a wedged socket writes a close frame, which can block for the same
 # reason the data did. Never wait on it.
 WS_CLOSE_TIMEOUT_S = 5.0
+# A connection idle this long gets a lightweight ping frame. A browser tab
+# that went through a network blip may hold a half-dead TCP socket: no close
+# event fires on either side, and the next real event may be minutes away.
+# The ping surfaces that within one interval — send stalls or errors mean the
+# peer is gone and the connection is torn down, so the client reconnects and
+# replays instead of sitting on a dead socket.
+WS_IDLE_PING_INTERVAL_S = 30.0
 
 # Auto-restart after an unexpected worker exit: give a user-triggered start
 # (send_message auto-starts the worker) a moment to win first, never restart a
@@ -146,6 +153,7 @@ class _WebSocketChannel:
         self._wakeup = asyncio.Event()
         self._task: asyncio.Task[None] | None = None
         self._on_dead: Callable[[WebSocket], Awaitable[None]] | None = None
+        self._ping_seq = 0
 
     def enqueue(self, message: str) -> bool:
         """Queue a message for this connection. Never blocks.
@@ -179,13 +187,27 @@ class _WebSocketChannel:
     async def _write_loop(self) -> None:
         try:
             while True:
-                if not self._queue:
+                if self._queue:
+                    message = self._queue.popleft()
+                    self._queued_bytes -= len(message)
+                else:
                     self._wakeup.clear()
                     if not self._queue:
-                        await self._wakeup.wait()
-                    continue
-                message = self._queue.popleft()
-                self._queued_bytes -= len(message)
+                        try:
+                            await asyncio.wait_for(self._wakeup.wait(), WS_IDLE_PING_INTERVAL_S)
+                            continue
+                        except TimeoutError:
+                            # Idle past the ping interval: probe the
+                            # connection. A distinct seq keeps every frame
+                            # unique so clients' duplicate-frame detection
+                            # never mistakes a ping for a re-delivery.
+                            self._ping_seq += 1
+                            message = (
+                                '{"jsonrpc":"2.0","method":"ping",'
+                                f'"params":{{"seq":{self._ping_seq}}}}}'
+                            )
+                    else:
+                        continue
                 if self.ws.client_state != WebSocketState.CONNECTED:
                     break
                 try:
@@ -996,7 +1018,7 @@ class SessionProcess:
                     TextPart(text=f"</image>{gap}"),
                 ]
             except Exception:
-                logger.exception("Failed to encode uploaded image %s", file_path)
+                logger.exception("Failed to encode uploaded image {}", file_path)
         elif is_video_in and mime_type.startswith("video/"):
             # For video files, emit a <video> tag for frontend display but don't embed content.
             # The agent will use ReadMediaFile tool to read it, which handles video uploads

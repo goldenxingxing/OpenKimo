@@ -233,7 +233,7 @@ class FsCheckpointer:
             return 127, b"", b"git not found"
         try:
             out, err = await asyncio.wait_for(proc.communicate(), timeout=self._GIT_TIMEOUT)
-        except asyncio.TimeoutError:
+        except TimeoutError:
             # ``git.exe`` on Windows is a shim whose child keeps the stdout/stderr
             # pipes open; killing only the shim leaves the real git orphaned and
             # ``communicate()`` then waits for EOF forever, re-hanging the loop.
@@ -241,7 +241,11 @@ class FsCheckpointer:
             if os.name == "nt":
                 with contextlib.suppress(Exception):
                     tk = await asyncio.create_subprocess_exec(
-                        "taskkill", "/F", "/T", "/PID", str(proc.pid),
+                        "taskkill",
+                        "/F",
+                        "/T",
+                        "/PID",
+                        str(proc.pid),
                         stdout=asyncio.subprocess.DEVNULL,
                         stderr=asyncio.subprocess.DEVNULL,
                     )
@@ -251,8 +255,15 @@ class FsCheckpointer:
                 proc.kill()
             with contextlib.suppress(asyncio.TimeoutError, Exception):
                 await asyncio.wait_for(proc.communicate(), timeout=2.0)
+            # args usually carries the _GIT_IDENTITY prefix (see _git()); strip
+            # it so the message names the real subcommand, not the -c flags.
+            cmd = (
+                args[len(_GIT_IDENTITY) :]
+                if args[: len(_GIT_IDENTITY)] == tuple(_GIT_IDENTITY)
+                else args
+            )
             raise RuntimeError(
-                f"git {' '.join(args[:2])} timed out after {self._GIT_TIMEOUT}s in {self._workspace}"
+                f"git {' '.join(cmd[:2])} timed out after {self._GIT_TIMEOUT}s in {self._workspace}"
             ) from None
         return proc.returncode if proc.returncode is not None else -1, out, err
 

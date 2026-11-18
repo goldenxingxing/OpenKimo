@@ -310,7 +310,7 @@ async def get_wire_events(work_dir_hash: str, session_id: str) -> dict[str, Any]
             try:
                 parsed = parse_wire_file_line(line)
             except Exception:
-                logger.debug("Skipped malformed line in %s", wire_path)
+                logger.debug("Skipped malformed line in {}", wire_path)
                 continue
             if isinstance(parsed, WireFileMetadata):
                 continue
@@ -348,7 +348,7 @@ async def get_context_messages(work_dir_hash: str, session_id: str) -> dict[str,
             try:
                 msg = json.loads(line)
             except json.JSONDecodeError:
-                logger.debug("Skipped malformed line in %s", context_path)
+                logger.debug("Skipped malformed line in {}", context_path)
                 continue
             msg["index"] = index
             messages.append(msg)
@@ -422,7 +422,7 @@ async def get_session_summary(work_dir_hash: str, session_id: str) -> dict[str, 
             try:
                 parsed = parse_wire_file_line(line)
             except Exception:
-                logger.debug("Skipped malformed line in %s", wire_path)
+                logger.debug("Skipped malformed line in {}", wire_path)
                 continue
             if isinstance(parsed, WireFileMetadata):
                 continue
@@ -554,7 +554,7 @@ async def get_subagent_wire_events(
             try:
                 parsed = parse_wire_file_line(line)
             except Exception:
-                logger.debug("Skipped malformed line in %s", wire_path)
+                logger.debug("Skipped malformed line in {}", wire_path)
                 continue
             if isinstance(parsed, WireFileMetadata):
                 continue
@@ -597,7 +597,7 @@ async def get_subagent_context(
             try:
                 msg = json.loads(line)
             except json.JSONDecodeError:
-                logger.debug("Skipped malformed line in %s", context_path)
+                logger.debug("Skipped malformed line in {}", context_path)
                 continue
             msg["index"] = index
             messages.append(msg)

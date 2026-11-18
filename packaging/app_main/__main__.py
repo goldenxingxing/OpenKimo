@@ -13,9 +13,11 @@ Responsibilities:
 
 from __future__ import annotations
 
+import atexit
 import logging
 import os
 import shlex
+import signal
 import subprocess
 import sys
 import threading
@@ -456,6 +458,40 @@ class OpenKimoApp(rumps.App):
         ).start()
 
 
+def _install_shutdown_backstops(supervisor: "UvicornSupervisor") -> None:
+    """Make the uvicorn child die with the menu-bar process on every exit path.
+
+    The rumps Quit item routes through ``_on_quit``, but external quits —
+    Dock right-click Quit, ``osascript -e 'quit app'``, the AppleEvent a
+    launcher or updater sends — hit ``terminate:`` directly and used to
+    leave the ``start_new_session`` child orphaned on the port. rumps fires
+    ``before_quit`` from ``applicationWillTerminate:``, which runs on every
+    termination path; atexit and SIGTERM cover interpreter-level exits.
+    All three funnel into ``UvicornSupervisor.shutdown()``, which is
+    idempotent, so the menu path that already shut down is a cheap no-op.
+    """
+
+    def _quiet_shutdown() -> None:
+        try:
+            supervisor.shutdown()
+        except Exception:
+            log.exception("shutdown backstop raised")
+
+    atexit.register(_quiet_shutdown)
+    try:
+        rumps.events.before_quit.register(_quiet_shutdown)
+    except Exception:
+        log.exception("failed to register before_quit backstop")
+
+    def _sigterm(signum: int, _frame) -> None:
+        _quiet_shutdown()
+        # The supervisor is down and there is nothing else worth running;
+        # leave without unwinding the AppKit run loop.
+        os._exit(128 + signum)
+
+    signal.signal(signal.SIGTERM, _sigterm)
+
+
 def _read_version(_p: paths_mod.AppPaths) -> str:
     """Version string from brand.json.
 
@@ -571,6 +607,7 @@ def main() -> int:
         sys.path.insert(0, str(p.kimo_cli.parent))
 
     app = OpenKimoApp(p)
+    _install_shutdown_backstops(app.supervisor)
     _install_edit_menu(p.app_name, lambda: app._on_quit(None))
     app.run()
     return 0

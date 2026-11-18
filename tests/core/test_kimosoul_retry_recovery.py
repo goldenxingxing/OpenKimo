@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import time
 from collections.abc import AsyncIterator, Sequence
 from pathlib import Path
 from typing import Self
@@ -10,6 +11,7 @@ import pytest
 from kosong.chat_provider import (
     APIConnectionError,
     APIStatusError,
+    APITimeoutError,
     StreamedMessagePart,
     ThinkingEffort,
     TokenUsage,
@@ -89,6 +91,41 @@ class RecoveringSequenceProvider:
         if self.generate_attempts == 1:
             raise APIConnectionError("Connection error.")
         return StaticStreamedMessage([TextPart(text="recovered")])
+
+    def on_retryable_error(self, error: BaseException) -> bool:
+        self.recovery_calls += 1
+        return True
+
+    def with_thinking(self, effort: ThinkingEffort) -> Self:
+        return self
+
+
+class HungProvider:
+    """A provider whose generate() never returns — the hung-LLM-call case."""
+
+    name = "hung"
+
+    def __init__(self) -> None:
+        self.generate_attempts = 0
+        self.recovery_calls = 0
+
+    @property
+    def model_name(self) -> str:
+        return "hung"
+
+    @property
+    def thinking_effort(self) -> ThinkingEffort | None:
+        return None
+
+    async def generate(
+        self,
+        system_prompt: str,
+        tools: Sequence[Tool],
+        history: Sequence[Message],
+    ) -> StaticStreamedMessage:
+        self.generate_attempts += 1
+        await asyncio.Event().wait()  # hangs forever
+        raise AssertionError("unreachable")
 
     def on_retryable_error(self, error: BaseException) -> bool:
         self.recovery_calls += 1
@@ -406,6 +443,35 @@ async def test_step_retry_recovers_retryable_provider(runtime: Runtime, tmp_path
     assert provider.generate_attempts == 2
     assert provider.recovery_calls == 1
     assert context.history[-1].extract_text(" ").strip() == "recovered"
+
+
+@pytest.mark.asyncio
+async def test_step_timeout_converts_hung_provider_to_retryable_error(
+    runtime: Runtime, tmp_path: Path
+) -> None:
+    """A provider call that hangs must hit the step timeout, not wait forever.
+
+    The timeout surfaces as APITimeoutError (a ChatProviderError), so the
+    existing retry machinery treats it like any retryable provider failure —
+    and, with the retry budget at one attempt, the turn fails fast.
+    """
+    runtime.config.loop_control.max_retries_per_step = 1
+    runtime.config.loop_control.step_timeout_s = 0.4
+    provider = HungProvider()
+    llm = LLM(
+        chat_provider=provider,
+        max_context_size=100_000,
+        capabilities=set(),
+    )
+    soul, _ = _make_soul(runtime, llm, tmp_path)
+
+    t0 = time.monotonic()
+    with pytest.raises(APITimeoutError):
+        await run_soul(soul, "trigger hang", _drain_ui_messages, asyncio.Event())
+    elapsed = time.monotonic() - t0
+
+    assert provider.generate_attempts == 1
+    assert elapsed < 5  # failed fast, did not wait on the hung call
 
 
 @pytest.mark.asyncio

@@ -435,8 +435,7 @@ class TestForkSession:
         _write_wire_file(source.dir, ["continue"])
 
         marker = (
-            "<system>Previous context has been compacted. Here is the compaction "
-            "output:</system>"
+            "<system>Previous context has been compacted. Here is the compaction output:</system>"
         )
         summary_content = [
             {"type": "text", "text": marker},
@@ -456,9 +455,7 @@ class TestForkSession:
         with context_path.open("w", encoding="utf-8") as f:
             f.write(json.dumps({"role": "user", "content": summary_content}) + "\n")
             f.write(
-                json.dumps(
-                    {"role": "assistant", "content": [{"type": "text", "text": "ok"}]}
-                )
+                json.dumps({"role": "assistant", "content": [{"type": "text", "text": "ok"}]})
                 + "\n"
             )
 

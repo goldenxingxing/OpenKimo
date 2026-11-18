@@ -123,7 +123,7 @@ def _build_global_config() -> GlobalConfig:
     # writer, or a failed prune) and must not be served to the admin panel nor
     # written back. Empty set (no LLM_PROVIDERS) keeps legacy/plain-config mode.
     env_provider_names: set[str] = (
-        {p.get("name") for p in providers_list if p.get("name")} if providers_list else set()
+        {str(p.get("name")) for p in providers_list if p.get("name")} if providers_list else set()
     )
     if providers_list:
         for p in providers_list:

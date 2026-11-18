@@ -1,2 +1,2 @@
-lark-oapi>=1.4.0
+lark-oapi>=1.4.0,<2
 aiohttp>=3.9.0

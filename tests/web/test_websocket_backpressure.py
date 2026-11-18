@@ -166,3 +166,42 @@ async def test_remove_websocket_stops_its_writer() -> None:
 
     assert ws.sent == ["one"]
     assert sp.websocket_count == 0
+
+
+@pytest.mark.asyncio
+async def test_idle_connection_sends_keepalive_pings(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """An idle connection is probed with pings so a half-dead peer is found."""
+    import json
+
+    monkeypatch.setattr(process_mod, "WS_IDLE_PING_INTERVAL_S", 0.05)
+    sp, _ = _session_with_stdout()
+    ws = FakeWS()
+    await _attach(sp, ws)
+    await asyncio.sleep(0.3)
+
+    pings = [m for m in ws.sent if '"method":"ping"' in m]
+    assert len(pings) >= 2, f"no keepalive pings on an idle connection: {ws.sent}"
+    seqs = [json.loads(m)["params"]["seq"] for m in pings]
+    assert seqs == sorted(set(seqs)), "ping seqs must be strictly distinct"
+    await sp._close_all_websockets()
+
+
+@pytest.mark.asyncio
+async def test_failed_keepalive_drops_client(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A peer whose socket errors on the ping is detached, not held forever."""
+    monkeypatch.setattr(process_mod, "WS_IDLE_PING_INTERVAL_S", 0.05)
+    sp, _ = _session_with_stdout()
+    ws = FakeWS()
+    await _attach(sp, ws)
+
+    async def boom(message: str) -> None:
+        raise ConnectionResetError("peer gone")
+
+    ws.send_text = boom  # type: ignore[method-assign]
+    await asyncio.sleep(0.3)
+
+    assert sp.websocket_count == 0, "a dead peer stayed attached after a failed keepalive"

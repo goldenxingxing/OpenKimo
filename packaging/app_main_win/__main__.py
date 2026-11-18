@@ -20,8 +20,10 @@ so the two stay easy to diff. The differences vs macOS are:
 
 from __future__ import annotations
 
+import atexit
 import logging
 import os
+import signal
 import subprocess
 import sys
 import threading
@@ -406,6 +408,34 @@ class OpenKimoApp:
         self.icon.stop()
 
 
+def _install_shutdown_backstops(supervisor: "UvicornSupervisor") -> None:
+    """Make the uvicorn child die with the tray process on every exit path.
+
+    The pystray Quit item routes through ``_on_quit``, but interpreter-level
+    exits — an updater killing the tray, a console-less logoff, ``taskkill``
+    without ``/T`` — used to leave the child orphaned on the port. atexit
+    covers every clean interpreter exit; SIGTERM covers POSIX-style kills.
+    Both funnel into ``UvicornSupervisor.shutdown()``, which is idempotent,
+    so the menu path that already shut down is a cheap no-op. (Windows
+    logoff/console-less kills remain covered by the orphan reaper in
+    ``server.py`` on the next launch.)
+    """
+
+    def _quiet_shutdown() -> None:
+        try:
+            supervisor.shutdown()
+        except Exception:
+            log.exception("shutdown backstop raised")
+
+    atexit.register(_quiet_shutdown)
+
+    def _sigterm(signum: int, _frame) -> None:
+        _quiet_shutdown()
+        os._exit(128 + signum)
+
+    signal.signal(signal.SIGTERM, _sigterm)
+
+
 def main() -> int:
     p = paths_mod.ensure_dirs()
     logfile = p.logs / "tray.log"
@@ -440,6 +470,7 @@ def main() -> int:
         sys.path.insert(0, str(p.kimo_cli.parent))
 
     app = OpenKimoApp(p)
+    _install_shutdown_backstops(app.supervisor)
     app.run()
     return 0
 

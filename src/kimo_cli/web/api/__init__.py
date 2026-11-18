@@ -6,6 +6,7 @@ from kimo_cli.web.api import admin_wiki as admin_wiki_module
 from kimo_cli.web.api import auth_user, capabilities, config, memory, open_in, sessions
 from kimo_cli.web.api import branding as branding_module
 from kimo_cli.web.api import mcp as mcp_module
+from kimo_cli.web.im import api as im_module
 
 config_router = config.router
 sessions_router = sessions.router
@@ -19,6 +20,7 @@ admin_wiki_router = admin_wiki_module.router
 mcp_router = mcp_module.router
 branding_public_router = branding_module.public_router
 branding_admin_router = branding_module.admin_router
+im_router = im_module.router
 memory_router = memory.router
 capabilities_router = capabilities.capabilities_router
 
@@ -31,6 +33,7 @@ __all__ = [
     "branding_admin_router",
     "branding_public_router",
     "capabilities_router",
+    "im_router",
     "config_router",
     "mcp_router",
     "memory_router",

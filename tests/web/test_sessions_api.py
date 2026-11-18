@@ -246,6 +246,21 @@ async def test_startup_dir_falls_back_when_last_dir_is_evolution(
     assert await sessions_api.get_startup_dir(request) == "/fallback"
 
 
+@pytest.mark.anyio
+async def test_startup_dir_falls_back_when_last_dir_is_im_bridge(
+    isolated_share_dir: Path, monkeypatch
+) -> None:
+    """A last_work_dir under <share>/im_bridge must not become the startup dir."""
+    from kimo_cli.metadata import Metadata, save_metadata
+
+    monkeypatch.setattr(sessions_api, "get_share_dir", lambda: isolated_share_dir)
+    im_ws = isolated_share_dir / "im_bridge" / "workspaces" / "ch1_ou_abc"
+    save_metadata(Metadata(last_work_dir=str(im_ws)))
+    request = SimpleNamespace(app=SimpleNamespace(state=SimpleNamespace(startup_dir="/fallback")))
+
+    assert await sessions_api.get_startup_dir(request) == "/fallback"
+
+
 def test_get_work_dirs_filters_evolution_dirs(isolated_share_dir: Path, monkeypatch) -> None:
     """Evolution artifact dirs must not surface in the recent work dirs list."""
     from kimo_cli.metadata import Metadata, WorkDirMeta, save_metadata
@@ -259,6 +274,26 @@ def test_get_work_dirs_filters_evolution_dirs(isolated_share_dir: Path, monkeypa
         WorkDirMeta(path=str(evo_root / "verify_runs" / "p1" / "baseline")),
         WorkDirMeta(path=str(evo_root / "verify_runs" / "p1" / "candidate")),
         WorkDirMeta(path=str(evo_root / "proposals" / "p2")),
+        WorkDirMeta(path=str(normal)),
+    ]
+    save_metadata(Metadata(work_dirs=leaked))
+    sessions_api.invalidate_work_dirs_cache()
+
+    assert sessions_api._get_work_dirs_sync() == [str(normal)]
+
+
+def test_get_work_dirs_filters_im_bridge_dirs(isolated_share_dir: Path, monkeypatch) -> None:
+    """IM-bridge per-sender workspaces must not surface in the recent work dirs list."""
+    from kimo_cli.metadata import Metadata, WorkDirMeta, save_metadata
+
+    monkeypatch.setattr(sessions_api, "get_share_dir", lambda: isolated_share_dir)
+    # Use a real directory that is not under /tmp|/var/folders|/.cache/ so the
+    # existing temp-dir filter does not swallow the legit entry.
+    normal = Path.cwd()
+    im_root = isolated_share_dir / "im_bridge"
+    leaked = [
+        WorkDirMeta(path=str(im_root / "workspaces" / "ch1_ou_abc")),
+        WorkDirMeta(path=str(im_root / "ch1" / "media")),
         WorkDirMeta(path=str(normal)),
     ]
     save_metadata(Metadata(work_dirs=leaked))

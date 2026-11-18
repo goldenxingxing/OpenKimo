@@ -30,6 +30,7 @@ import {
   Square,
   PanelLeftClose,
   BookmarkPlus,
+  MessagesSquare,
 } from "lucide-react";
 import { Virtuoso } from "react-virtuoso";
 import { useTranslation } from "react-i18next";
@@ -231,6 +232,7 @@ type SessionsSidebarProps = {
   onSearchQueryChange: (query: string) => void;
   onOpenCreateDialog: () => void;
   onCreateSessionInDir?: (workDir: string) => void;
+  onOpenImBridge?: () => void;
   onClose?: () => void;
   streamStatus?: "ready" | "streaming" | "submitted" | "error";
 };
@@ -300,6 +302,7 @@ export const SessionsSidebar = memo(function SessionsSidebarComponent({
   onSearchQueryChange,
   onOpenCreateDialog,
   onCreateSessionInDir,
+  onOpenImBridge,
   onClose,
 }: SessionsSidebarProps): ReactElement {
   const { t } = useTranslation(["sessions", "toasts"]);
@@ -1334,6 +1337,20 @@ export const SessionsSidebar = memo(function SessionsSidebarComponent({
               />
             )}
             </div>
+
+            {/* IM Bridge entry */}
+            {onOpenImBridge && (
+              <div className="mx-2 mb-2 shrink-0 rounded-lg border border-border bg-muted/30">
+                <button
+                  type="button"
+                  className="flex w-full items-center gap-2 px-3 py-2 text-xs text-muted-foreground hover:text-foreground rounded-lg hover:bg-muted/50"
+                  onClick={onOpenImBridge}
+                >
+                  <MessagesSquare className="size-3.5" />
+                  <span className="flex-1 text-left font-medium">{t("imbridge:nav.title")}</span>
+                </button>
+              </div>
+            )}
 
             {/* Archived Sessions Section */}
             {(onArchiveSession || onUnarchiveSession) && (

@@ -40,6 +40,7 @@ from kimo_cli.web.api import (
     branding_public_router,
     capabilities_router,
     config_router,
+    im_router,
     mcp_router,
     memory_router,
     open_in_router,
@@ -330,6 +331,14 @@ def create_app(
         app.state.runner = runner
         runner.start()
 
+        # IM bridge (Feishu etc.): one asyncio task per enabled channel, living
+        # for the whole app lifetime (same lifecycle as the runner above).
+        from kimo_cli.web.im.manager import ImBridgeManager
+
+        im_bridge = ImBridgeManager()
+        app.state.im_bridge = im_bridge
+        await im_bridge.start()
+
         # A settings change reaches this process through a signal file rather
         # than a restart, so nothing has to be killed to deliver it.
         reload_task: asyncio.Task[None] | None = None
@@ -343,6 +352,7 @@ def create_app(
                 reload_task.cancel()
                 with contextlib.suppress(asyncio.CancelledError):
                     await reload_task
+            await im_bridge.stop()
             await runner.stop()
 
     application = FastAPI(
@@ -396,6 +406,7 @@ def create_app(
     application.include_router(mcp_router)
     application.include_router(memory_router)
     application.include_router(capabilities_router)
+    application.include_router(im_router)
     if not restrict_sensitive_apis:
         application.include_router(open_in_router)
 
@@ -430,16 +441,22 @@ def create_app(
     if _index_html.exists():
         from fastapi.responses import FileResponse as _FileResponse
 
-        _spa_html_response = HTMLResponse(
-            content=_index_html.read_text(encoding="utf-8"),
-            headers={"cache-control": "no-cache, no-store, must-revalidate"},
-        )
+        # The SPA shell is read per request, not once at startup. A desktop
+        # install can swap the bundled UI without a server restart (and this
+        # very route used to hold the file in memory, so a patched install
+        # kept serving an index.html whose chunk hashes no longer existed on
+        # disk — a plain reload then 404'd every script and the page went
+        # blank until the process was restarted).
+        _no_cache = {"cache-control": "no-cache, no-store, must-revalidate"}
+
+        def _spa_html_response() -> Response:
+            return _FileResponse(_index_html, headers=_no_cache)
 
         # Explicit root route: /{full_path:path} does NOT match "/" in Starlette
         # because the path converter requires at least one character.
         @application.get("/", include_in_schema=False)
         async def spa_root() -> Response:  # pyright: ignore[reportUnusedFunction]
-            return _spa_html_response
+            return _spa_html_response()
 
         _static_root = STATIC_DIR.resolve()
 
@@ -459,10 +476,11 @@ def create_app(
                 resolved = candidate.resolve()
             except (OSError, ValueError):
                 resolved = None
-            inside = resolved is not None and (
-                resolved == _static_root or _static_root in resolved.parents
-            )
-            if inside and resolved.is_file():
+            if (
+                resolved is not None
+                and resolved.is_file()
+                and (resolved == _static_root or _static_root in resolved.parents)
+            ):
                 return _FileResponse(resolved)
             # Path with an extension that doesn't exist → true 404
             # (avoids serving index.html with wrong MIME type for missing assets).
@@ -471,7 +489,7 @@ def create_app(
 
                 raise HTTPException(status_code=404)
             # No extension → SPA client-side route (e.g. /admin) → index.html
-            return _spa_html_response
+            return _spa_html_response()
 
     # Mount static files as secondary fallback (reached only when the
     # catch-all above is absent, i.e. index.html does not exist yet).

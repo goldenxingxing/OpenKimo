@@ -41,10 +41,24 @@ def test_deleted_models_are_not_served_nor_written_back(monkeypatch: pytest.Monk
     """'gone' exists only in config.toml (deleted from .env) -> filtered out and
     pruned on write-back; 'new' comes from env -> added and served."""
     env_list = [
-        {"name": "ds", "type": "openai_legacy", "model": "ds", "api_key": "k",
-         "base_url": "", "max_context_size": 100000, "capabilities": []},
-        {"name": "new", "type": "openai_legacy", "model": "new", "api_key": "k",
-         "base_url": "", "max_context_size": 100000, "capabilities": []},
+        {
+            "name": "ds",
+            "type": "openai_legacy",
+            "model": "ds",
+            "api_key": "k",
+            "base_url": "",
+            "max_context_size": 100000,
+            "capabilities": [],
+        },
+        {
+            "name": "new",
+            "type": "openai_legacy",
+            "model": "new",
+            "api_key": "k",
+            "base_url": "",
+            "max_context_size": 100000,
+            "capabilities": [],
+        },
     ]
     monkeypatch.setattr(config_module, "parse_llm_providers_env", lambda: env_list)
     cfg = _cfg(

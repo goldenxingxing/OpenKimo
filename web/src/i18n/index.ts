@@ -16,6 +16,7 @@ import enWiki from "./locales/en/wiki.json";
 import enMemory from "./locales/en/memory.json";
 import enAuth from "./locales/en/auth.json";
 import enTools from "./locales/en/tools.json";
+import enImbridge from "./locales/en/imbridge.json";
 import zhBackend from "./locales/zh-CN/backend.json";
 import zhChat from "./locales/zh-CN/chat.json";
 import zhCommon from "./locales/zh-CN/common.json";
@@ -30,6 +31,7 @@ import zhWiki from "./locales/zh-CN/wiki.json";
 import zhMemory from "./locales/zh-CN/memory.json";
 import zhAuth from "./locales/zh-CN/auth.json";
 import zhTools from "./locales/zh-CN/tools.json";
+import zhImbridge from "./locales/zh-CN/imbridge.json";
 
 export const SUPPORTED_LANGS = ["en", "zh-CN"] as const;
 export type SupportedLang = (typeof SUPPORTED_LANGS)[number];
@@ -50,7 +52,8 @@ export const I18N_NAMESPACES = [
   "wiki",
   "memory",
   "auth",
-  "tools"
+  "tools",
+  "imbridge"
 ] as const;
 
 const resources = {
@@ -68,7 +71,8 @@ const resources = {
     wiki: enWiki,
     memory: enMemory,
     auth: enAuth,
-    tools: enTools
+    tools: enTools,
+    imbridge: enImbridge
   },
   "zh-CN": {
     common: zhCommon,
@@ -84,7 +88,8 @@ const resources = {
     wiki: zhWiki,
     memory: zhMemory,
     auth: zhAuth,
-    tools: zhTools
+    tools: zhTools,
+    imbridge: zhImbridge
   },
 } as const;
 

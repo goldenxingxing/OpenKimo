@@ -25,7 +25,7 @@ jobs:
     runs-on: ubuntu-latest
     defaults:
       run:
-        working-directory: kimo-cli/web
+        working-directory: web
     steps:
       - uses: actions/checkout@v5
         with:
@@ -35,7 +35,7 @@ jobs:
         with:
           node-version: 20
           cache: npm
-          cache-dependency-path: kimo-cli/web/package-lock.json
+          cache-dependency-path: web/package-lock.json
 
       - run: npm ci
 
@@ -57,7 +57,7 @@ jobs:
     runs-on: ubuntu-latest
     defaults:
       run:
-        working-directory: kimo-cli
+        working-directory: .
     env:
       # This job declared 3.12 through actions/setup-python and ran 3.14:
       # `uv sync` picks the interpreter from .python-version and ignores what
@@ -103,13 +103,13 @@ jobs:
       - name: Ruff error check (OpenKimo sources)
         working-directory: .
         run: >-
-          kimo-cli/.venv/bin/python -m ruff check
+          .venv/bin/python -m ruff check
           --select E9,F63,F7,F82
           app packaging tests scripts .github/scripts
 
       - name: Tests
         working-directory: .
-        run: kimo-cli/.venv/bin/python -m pytest tests -v --tb=short
+        run: .venv/bin/python -m pytest tests -v --tb=short --inline-snapshot=disable
 
   # -----------------------------------------------------------------
   # kimo-cli's own suite, which nothing used to run
@@ -128,7 +128,7 @@ jobs:
     timeout-minutes: 30
     defaults:
       run:
-        working-directory: kimo-cli
+        working-directory: .
     env:
       # 3.12 is what release.yml builds the shipped artifact on, and a suite
       # green on the 3.14 in .python-version says nothing about the binary
@@ -152,7 +152,7 @@ jobs:
         run: uv run python -c "import sys; print(sys.version); assert sys.version_info[:2] == (3, 12)"
 
       - name: Tests
-        run: uv run pytest tests -q
+        run: uv run pytest tests -q --inline-snapshot=disable
 
   # -----------------------------------------------------------------
   # Docker: verify images build successfully

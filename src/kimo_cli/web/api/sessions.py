@@ -359,14 +359,18 @@ async def list_sessions(
     if current_user is not None:
         is_admin = current_user.get("role") == "admin"
         if not is_admin or not all:
-            owner_id = current_user["id"]
+            _mine = current_user["id"]
 
-            def owner_filter(owner: str | None, _mine: str = owner_id) -> bool:
+            def _owner_filter(owner: str | None, _mine: str = _mine) -> bool:
                 return owner == _mine
+
+            owner_filter = _owner_filter
     else:
         # Unauthenticated (static-token-only) callers may only see ownerless sessions.
-        def owner_filter(owner: str | None) -> bool:
+        def _ownerless_filter(owner: str | None) -> bool:
             return owner is None
+
+        owner_filter = _ownerless_filter
 
     sessions = load_sessions_page(
         limit=limit,
@@ -562,12 +566,20 @@ async def create_session(
         session_model = request.model
 
     kimo_cli_session = await KimoCLISession.create(work_dir=work_dir)
-    # Web/API sessions have no interactive approval surface; auto-approve tool
-    # calls so they do not block forever waiting for an approval response.
-    from kimo_cli.session_state import save_session_state as _save_state
+    # Approval policy is opt-in: clients without an interactive approval
+    # surface (e.g. IM bridges) request yolo=True explicitly at creation;
+    # interactive web UI sessions keep the approval gate untouched.
+    if request is not None and request.yolo is not None:
+        from kimo_cli.session_state import (
+            load_session_state as _load_state,
+        )
+        from kimo_cli.session_state import (
+            save_session_state as _save_state,
+        )
 
-    kimo_cli_session.state.approval.yolo = True
-    _save_state(kimo_cli_session.state, kimo_cli_session.dir)
+        _state = _load_state(kimo_cli_session.dir)
+        _state.approval.yolo = request.yolo
+        _save_state(_state, kimo_cli_session.dir)
     context_file = kimo_cli_session.dir / "context.jsonl"
 
     # Persist per-session config (thinking override + model override + agent spec path)
@@ -624,6 +636,8 @@ class CreateSessionRequest(BaseModel):
     thinking: bool | None = None  # Per-session thinking override; None = use global config
     agent_name: str | None = None  # Name of a discovered agent spec
     model: str | None = None  # Per-session model override; None = use global default model
+    yolo: bool | None = None  # Per-session auto-approve override; None = keep
+    # the approval gate (default off)
 
 
 class ForkSessionRequest(BaseModel):
@@ -1640,6 +1654,18 @@ def _is_evolution_dir(path: str) -> bool:
     return path == root or path.startswith(root + os.sep)
 
 
+def _is_im_bridge_dir(path: str) -> bool:
+    """True for IM-bridge managed workspace directories.
+
+    IM bridge sessions get a per-sender workspace under
+    ``<share>/im_bridge/`` (see kimo_cli.web.im.runner.workspace_path).
+    These are internal and must not surface in the "recent work dirs"
+    picker or be remembered as the startup directory.
+    """
+    root = str(get_share_dir() / "im_bridge")
+    return path == root or path.startswith(root + os.sep)
+
+
 def _get_work_dirs_sync() -> list[str]:
     """Synchronous helper for get_work_dirs (runs in thread pool)."""
     import time
@@ -1662,6 +1688,9 @@ def _get_work_dirs_sync() -> list[str]:
         # (verify_runs, proposals, ...) that leaked into metadata.
         if _is_evolution_dir(wd.path):
             continue
+        # Filter out IM-bridge managed workspaces (per-sender internal dirs).
+        if _is_im_bridge_dir(wd.path):
+            continue
         # Verify directory exists
         if Path(wd.path).exists():
             work_dirs.append(wd.path)
@@ -1683,7 +1712,12 @@ async def get_work_dirs() -> list[str]:
 async def get_startup_dir(request: Request) -> str:
     """Get the last selected directory, falling back to the app default."""
     last_work_dir = load_metadata().last_work_dir
-    if last_work_dir and not _is_evolution_dir(last_work_dir) and Path(last_work_dir).is_dir():
+    if (
+        last_work_dir
+        and not _is_evolution_dir(last_work_dir)
+        and not _is_im_bridge_dir(last_work_dir)
+        and Path(last_work_dir).is_dir()
+    ):
         return last_work_dir
     return request.app.state.startup_dir
 
@@ -1746,9 +1780,7 @@ def _is_app_runtime_path(rel_path: str) -> bool:
         return True
     if name.endswith((".tmp", ".swp", ".pyc", ".DS_Store")):
         return True
-    if "/__pycache__/" in p or p.endswith("/__pycache__"):
-        return True
-    return False
+    return "/__pycache__/" in p or p.endswith("/__pycache__")
 
 
 @router.get("/{session_id}/git-diff", summary="Get git diff stats")

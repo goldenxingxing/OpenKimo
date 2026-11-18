@@ -1,0 +1,103 @@
+{
+  "nav": {
+    "title": "IM 桥接"
+  },
+  "page": {
+    "back": "返回",
+    "title": "IM 桥接",
+    "description": "将 IM 机器人接入本服务器：管理应用凭据、开关、白名单，并查看绑定关系。",
+    "loading": "正在加载渠道...",
+    "empty": "暂无渠道。",
+    "loadFailed": "加载渠道失败。"
+  },
+  "channel": {
+    "add": "添加渠道",
+    "edit": "编辑",
+    "delete": "删除",
+    "whitelist": "白名单",
+    "bindings": "绑定",
+    "deleteConfirm": "确定要删除渠道「{{name}}」吗？此操作不可撤销。",
+    "types": {
+      "feishu": "飞书",
+      "dingtalk": "钉钉"
+    },
+    "fields": {
+      "name": "名称",
+      "namePlaceholder": "例如：团队飞书机器人",
+      "type": "类型",
+      "appId": "App ID",
+      "appIdPlaceholder": "cli_xxxxxxxxxxxx",
+      "appSecret": "App Secret",
+      "appSecretPlaceholder": "请输入应用密钥",
+      "secretUnchanged": "留空则不修改",
+      "secretRequired": "必须填写应用密钥。",
+      "timeout": "超时时间（秒）",
+      "showThinking": "展示思考过程",
+      "showThinkingHint": "将中间思考内容发送到会话中。",
+      "groupChat": "群聊",
+      "groupChatHint": "允许机器人在群聊中响应。",
+      "feishuAppId": "App ID",
+      "feishuAppIdPlaceholder": "飞书开放平台应用的 App ID（cli_ 开头）",
+      "feishuAppSecret": "App Secret",
+      "feishuAppSecretPlaceholder": "对应应用的 App Secret",
+      "dingtalkAppId": "Client ID (AppKey)",
+      "dingtalkAppIdPlaceholder": "钉钉开放平台应用的 Client ID",
+      "dingtalkAppSecret": "Client Secret (AppSecret)",
+      "dingtalkAppSecretPlaceholder": "对应应用的 Client Secret"
+    }
+  },
+  "status": {
+    "running": "运行中",
+    "stopped": "已停止",
+    "error": "错误",
+    "disabled": "已停用"
+  },
+  "whitelist": {
+    "title": "白名单",
+    "description": "白名单内用户可与机器人对话，且工具调用自动批准；名单外消息将被拒绝。",
+    "placeholder": "每行一个 open_id",
+    "save": "保存白名单",
+    "saving": "保存中...",
+    "saved": "白名单已保存",
+    "loadFailed": "加载白名单失败。",
+    "saveFailed": "保存白名单失败。"
+  },
+  "bindings": {
+    "title": "绑定",
+    "empty": "暂无绑定。",
+    "loadFailed": "加载绑定失败。",
+    "externalId": "External ID",
+    "displayName": "显示名称",
+    "sessionId": "会话 ID",
+    "copied": "会话 ID 已复制",
+    "viewSession": "查看对话"
+  },
+  "actions": {
+    "cancel": "取消",
+    "save": "保存",
+    "saving": "保存中...",
+    "create": "创建",
+    "creating": "创建中...",
+    "close": "关闭"
+  },
+  "toast": {
+    "created": "渠道已创建",
+    "saved": "渠道已保存",
+    "deleted": "渠道已删除",
+    "error": "操作失败"
+  },
+  "pending": {
+    "title": "待授权",
+    "description": "陌生人给机器人发消息后会出现在这里，点「加入白名单」即可授权，无需手动填写 open_id。",
+    "empty": "暂无待授权用户。陌生人给机器人发消息后会出现在这里。",
+    "approve": "加入白名单",
+    "dismiss": "忽略",
+    "approved": "已加入白名单",
+    "dismissed": "已忽略该请求",
+    "loadFailed": "加载待授权列表失败。",
+    "actionFailed": "操作失败。",
+    "lastSeen": "最后一条消息",
+    "messages_one": "{{count}} 条消息",
+    "messages_other": "{{count}} 条消息"
+  }
+}

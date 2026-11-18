@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import asyncio
 import time
+import traceback
 from pathlib import Path
 
 import lark_oapi as lark
@@ -64,9 +65,21 @@ class FeishuOpenKimoBridge:
 
             print(f"[feishu] recv type={message.message_type} id={message_id}")
             coro = self._handle(open_id, message_id, message)
-            asyncio.run_coroutine_threadsafe(coro, self.loop)
+            future = asyncio.run_coroutine_threadsafe(coro, self.loop)
+            # Consume the result: an unretrieved exception here would surface
+            # only as "Task exception was never retrieved" and the user would
+            # get no reply and no actionable log.
+            future.add_done_callback(self._on_handle_done)
         except Exception as e:
             print(f"[bridge] on_message error: {e}")
+
+    @staticmethod
+    def _on_handle_done(future) -> None:
+        try:
+            future.result()
+        except Exception:
+            traceback.print_exc()
+            print("[bridge] message handler crashed (see traceback above)", flush=True)
 
     def _is_duplicate(self, message_id: str) -> bool:
         now = time.time()
@@ -95,7 +108,6 @@ class FeishuOpenKimoBridge:
             self._busy.discard(open_id)
 
     async def _handle_inner(self, open_id: str, message_id: str, message) -> None:
-        text_preview = (message.content or "")[:100]
         try:
             user_input = await self.parser.parse(
                 message_id, message.message_type or "", message.content or ""

@@ -22,9 +22,7 @@ class TestIsAppRuntimePath:
         assert _is_app_runtime_path(
             "output/.~AI\u9a71\u52a8\u95ed\u73af\u80f0\u5c9b\u7d20\u6c55_\u9879\u76ee\u76ee\u6807\u4e0e\u80cc\u666f.pptx"
         )
-        assert _is_app_runtime_path(
-            '"output/.~AI\\351\\251\\261...pptx"'
-        )
+        assert _is_app_runtime_path('"output/.~AI\\351\\251\\261...pptx"')
 
     def test_editor_artifacts_excluded(self):
         assert _is_app_runtime_path("output/x.tmp")
