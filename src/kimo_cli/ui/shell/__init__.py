@@ -1061,9 +1061,7 @@ class Shell:
         approval_runtime = getattr(runtime, "approval_runtime", None)
         requests = getattr(approval_runtime, "_requests", None)
         if requests:
-            return any(
-                getattr(record, "status", None) == "pending" for record in requests.values()
-            )
+            return any(getattr(record, "status", None) == "pending" for record in requests.values())
         return False
 
     @staticmethod
