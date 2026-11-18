@@ -73,6 +73,13 @@ _MAX_BG_AUTO_TRIGGER_FAILURES = 3
 _BG_AUTO_TRIGGER_INPUT_GRACE_S = 0.75
 """Delay background auto-trigger briefly after local prompt activity."""
 
+_BG_AUTO_TRIGGER_APPROVAL_GRACE_S = 10.0
+"""Delay background auto-trigger after approval activity resolves.
+
+The modal restores its drafted buffer asynchronously after the approval
+resolves; a follow-up that fires in that gap steals the pending submission.
+"""
+
 _VISIBLE_WORKFLOW_SLASH_PREFIXES = (SKILL_COMMAND_PREFIX, FLOW_COMMAND_PREFIX)
 """Explicit skill/flow prefixes that should remain visible in transcript."""
 
@@ -195,6 +202,7 @@ class Shell:
         self._pending_approval_requests = deque[ApprovalRequest]()
         self._current_prompt_approval_request: ApprovalRequest | None = None
         self._approval_modal: ApprovalPromptDelegate | None = None
+        self._last_approval_activity_at: float | None = None
         self._exit_after_run = False
         soul_slash_commands = list(soul.available_slash_commands)
         shell_slash_commands = shell_slash_registry.list_commands()

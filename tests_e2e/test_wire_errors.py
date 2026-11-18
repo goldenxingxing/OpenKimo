@@ -219,7 +219,9 @@ def test_llm_not_set(tmp_path) -> None:
             }
         )
         resp, _ = collect_until_response(wire, "prompt-1")
-        assert normalize_response(resp) == snapshot({"error": {"code": -32001, "message": "LLM is not set", "data": None}})
+        assert normalize_response(resp) == snapshot(
+            {"error": {"code": -32001, "message": "LLM is not set", "data": None}}
+        )
     finally:
         wire.close()
 

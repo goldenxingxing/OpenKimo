@@ -38,78 +38,80 @@ def test_initialize_handshake(tmp_path) -> None:
         result = _as_dict(resp.get("result"))
         assert result.get("protocol_version") == "1.10"
         assert "slash_commands" in result
-        assert normalize_response(resp) == snapshot({
-    "result": {
-        "protocol_version": "1.10",
-        "server": {"name": "OpenKimo", "version": "1.49.0"},
-        "slash_commands": [
+        assert normalize_response(resp) == snapshot(
             {
-                "name": "init",
-                "description": "Analyze the codebase and generate an `AGENTS.md` file",
-                "aliases": [],
-            },
-            {
-                "name": "compact",
-                "description": "Compact the context (optionally with a custom focus, e.g. /compact keep db discussions)",
-                "aliases": [],
-            },
-            {"name": "clear", "description": "Clear the context", "aliases": ["reset"]},
-            {
-                "name": "yolo",
-                "description": "Toggle YOLO mode (auto-approve all actions)",
-                "aliases": [],
-            },
-            {
-                "name": "afk",
-                "description": "Toggle afk mode (auto-dismiss AskUserQuestion, auto-approve tool calls)",
-                "aliases": [],
-            },
-            {
-                "name": "plan",
-                "description": "Toggle plan mode. Usage: /plan [on|off|view|clear]",
-                "aliases": [],
-            },
-            {
-                "name": "add-dir",
-                "description": "Add a directory to the workspace. Usage: /add-dir <path>. Run without args to list added dirs",
-                "aliases": [],
-            },
-            {
-                "name": "export",
-                "description": "Export current session context to a markdown file",
-                "aliases": [],
-            },
-            {
-                "name": "import",
-                "description": "Import context from a file or session ID",
-                "aliases": [],
-            },
-        ],
-        "yolo": True,
-        "afk": False,
-        "approval_requests": [],
-        "question_requests": [],
-        "hooks": {
-            "supported_events": [
-                "PreToolUse",
-                "PostToolUse",
-                "PostToolUseFailure",
-                "UserPromptSubmit",
-                "Stop",
-                "StopFailure",
-                "SessionStart",
-                "SessionEnd",
-                "SubagentStart",
-                "SubagentStop",
-                "PreCompact",
-                "PostCompact",
-                "Notification",
-            ],
-            "configured": {},
-        },
-        "capabilities": {"supports_question": True},
-    }
-})
+                "result": {
+                    "protocol_version": "1.10",
+                    "server": {"name": "OpenKimo", "version": "1.49.0"},
+                    "slash_commands": [
+                        {
+                            "name": "init",
+                            "description": "Analyze the codebase and generate an `AGENTS.md` file",
+                            "aliases": [],
+                        },
+                        {
+                            "name": "compact",
+                            "description": "Compact the context (optionally with a custom focus, e.g. /compact keep db discussions)",
+                            "aliases": [],
+                        },
+                        {"name": "clear", "description": "Clear the context", "aliases": ["reset"]},
+                        {
+                            "name": "yolo",
+                            "description": "Toggle YOLO mode (auto-approve all actions)",
+                            "aliases": [],
+                        },
+                        {
+                            "name": "afk",
+                            "description": "Toggle afk mode (auto-dismiss AskUserQuestion, auto-approve tool calls)",
+                            "aliases": [],
+                        },
+                        {
+                            "name": "plan",
+                            "description": "Toggle plan mode. Usage: /plan [on|off|view|clear]",
+                            "aliases": [],
+                        },
+                        {
+                            "name": "add-dir",
+                            "description": "Add a directory to the workspace. Usage: /add-dir <path>. Run without args to list added dirs",
+                            "aliases": [],
+                        },
+                        {
+                            "name": "export",
+                            "description": "Export current session context to a markdown file",
+                            "aliases": [],
+                        },
+                        {
+                            "name": "import",
+                            "description": "Import context from a file or session ID",
+                            "aliases": [],
+                        },
+                    ],
+                    "yolo": True,
+                    "afk": False,
+                    "approval_requests": [],
+                    "question_requests": [],
+                    "hooks": {
+                        "supported_events": [
+                            "PreToolUse",
+                            "PostToolUse",
+                            "PostToolUseFailure",
+                            "UserPromptSubmit",
+                            "Stop",
+                            "StopFailure",
+                            "SessionStart",
+                            "SessionEnd",
+                            "SubagentStart",
+                            "SubagentStop",
+                            "PreCompact",
+                            "PostCompact",
+                            "Notification",
+                        ],
+                        "configured": {},
+                    },
+                    "capabilities": {"supports_question": True},
+                }
+            }
+        )
     finally:
         wire.close()
 
@@ -140,82 +142,84 @@ def test_initialize_external_tool_conflict(tmp_path) -> None:
         rejected = external_tools_result.get("rejected")
         assert isinstance(rejected, list)
         assert any(isinstance(item, dict) and item.get("name") == "Shell" for item in rejected)
-        assert normalize_response(resp) == snapshot({
-    "result": {
-        "protocol_version": "1.10",
-        "server": {"name": "OpenKimo", "version": "1.49.0"},
-        "slash_commands": [
+        assert normalize_response(resp) == snapshot(
             {
-                "name": "init",
-                "description": "Analyze the codebase and generate an `AGENTS.md` file",
-                "aliases": [],
-            },
-            {
-                "name": "compact",
-                "description": "Compact the context (optionally with a custom focus, e.g. /compact keep db discussions)",
-                "aliases": [],
-            },
-            {"name": "clear", "description": "Clear the context", "aliases": ["reset"]},
-            {
-                "name": "yolo",
-                "description": "Toggle YOLO mode (auto-approve all actions)",
-                "aliases": [],
-            },
-            {
-                "name": "afk",
-                "description": "Toggle afk mode (auto-dismiss AskUserQuestion, auto-approve tool calls)",
-                "aliases": [],
-            },
-            {
-                "name": "plan",
-                "description": "Toggle plan mode. Usage: /plan [on|off|view|clear]",
-                "aliases": [],
-            },
-            {
-                "name": "add-dir",
-                "description": "Add a directory to the workspace. Usage: /add-dir <path>. Run without args to list added dirs",
-                "aliases": [],
-            },
-            {
-                "name": "export",
-                "description": "Export current session context to a markdown file",
-                "aliases": [],
-            },
-            {
-                "name": "import",
-                "description": "Import context from a file or session ID",
-                "aliases": [],
-            },
-        ],
-        "yolo": True,
-        "afk": False,
-        "approval_requests": [],
-        "question_requests": [],
-        "external_tools": {
-            "accepted": [],
-            "rejected": [{"name": "Shell", "reason": "conflicts with builtin tool"}],
-        },
-        "hooks": {
-            "supported_events": [
-                "PreToolUse",
-                "PostToolUse",
-                "PostToolUseFailure",
-                "UserPromptSubmit",
-                "Stop",
-                "StopFailure",
-                "SessionStart",
-                "SessionEnd",
-                "SubagentStart",
-                "SubagentStop",
-                "PreCompact",
-                "PostCompact",
-                "Notification",
-            ],
-            "configured": {},
-        },
-        "capabilities": {"supports_question": True},
-    }
-})
+                "result": {
+                    "protocol_version": "1.10",
+                    "server": {"name": "OpenKimo", "version": "1.49.0"},
+                    "slash_commands": [
+                        {
+                            "name": "init",
+                            "description": "Analyze the codebase and generate an `AGENTS.md` file",
+                            "aliases": [],
+                        },
+                        {
+                            "name": "compact",
+                            "description": "Compact the context (optionally with a custom focus, e.g. /compact keep db discussions)",
+                            "aliases": [],
+                        },
+                        {"name": "clear", "description": "Clear the context", "aliases": ["reset"]},
+                        {
+                            "name": "yolo",
+                            "description": "Toggle YOLO mode (auto-approve all actions)",
+                            "aliases": [],
+                        },
+                        {
+                            "name": "afk",
+                            "description": "Toggle afk mode (auto-dismiss AskUserQuestion, auto-approve tool calls)",
+                            "aliases": [],
+                        },
+                        {
+                            "name": "plan",
+                            "description": "Toggle plan mode. Usage: /plan [on|off|view|clear]",
+                            "aliases": [],
+                        },
+                        {
+                            "name": "add-dir",
+                            "description": "Add a directory to the workspace. Usage: /add-dir <path>. Run without args to list added dirs",
+                            "aliases": [],
+                        },
+                        {
+                            "name": "export",
+                            "description": "Export current session context to a markdown file",
+                            "aliases": [],
+                        },
+                        {
+                            "name": "import",
+                            "description": "Import context from a file or session ID",
+                            "aliases": [],
+                        },
+                    ],
+                    "yolo": True,
+                    "afk": False,
+                    "approval_requests": [],
+                    "question_requests": [],
+                    "external_tools": {
+                        "accepted": [],
+                        "rejected": [{"name": "Shell", "reason": "conflicts with builtin tool"}],
+                    },
+                    "hooks": {
+                        "supported_events": [
+                            "PreToolUse",
+                            "PostToolUse",
+                            "PostToolUseFailure",
+                            "UserPromptSubmit",
+                            "Stop",
+                            "StopFailure",
+                            "SessionStart",
+                            "SessionEnd",
+                            "SubagentStart",
+                            "SubagentStop",
+                            "PreCompact",
+                            "PostCompact",
+                            "Notification",
+                        ],
+                        "configured": {},
+                    },
+                    "capabilities": {"supports_question": True},
+                }
+            }
+        )
     finally:
         wire.close()
 
@@ -286,91 +290,93 @@ def test_external_tool_call(tmp_path) -> None:
 
         resp, messages = collect_until_response(wire, "prompt-1", request_handler=handle_request)
         assert resp.get("result", {}).get("status") == "finished"
-        assert summarize_messages(messages) == snapshot([
-    {
-        "method": "event",
-        "type": "TurnBegin",
-        "payload": {"user_input": "run external tool", "todos": None},
-    },
-    {"method": "event", "type": "StepBegin", "payload": {"n": 1}},
-    {
-        "method": "event",
-        "type": "ContentPart",
-        "payload": {"type": "text", "text": "calling external tool"},
-    },
-    {
-        "method": "event",
-        "type": "ToolCall",
-        "payload": {
-            "type": "function",
-            "id": "tc-1",
-            "function": {"name": "ext_tool", "arguments": '{"path": "README.md"}'},
-            "extras": None,
-        },
-    },
-    {
-        "method": "event",
-        "type": "StatusUpdate",
-        "payload": {
-            "context_usage": None,
-            "context_tokens": None,
-            "max_context_tokens": None,
-            "token_usage": None,
-            "message_id": None,
-            "plan_mode": False,
-            "thinking_suppressed": False,
-            "yolo": None,
-            "mcp_status": None,
-            "waiting_on_background": None,
-        },
-    },
-    {
-        "method": "request",
-        "type": "ToolCallRequest",
-        "payload": {
-            "id": "tc-1",
-            "name": "ext_tool",
-            "arguments": '{"path": "README.md"}',
-        },
-    },
-    {
-        "method": "event",
-        "type": "ToolResult",
-        "payload": {
-            "tool_call_id": "tc-1",
-            "return_value": {
-                "is_error": False,
-                "output": "Opened",
-                "message": "Opened README.md",
-                "display": [],
-                "extras": None,
-            },
-        },
-    },
-    {"method": "event", "type": "StepBegin", "payload": {"n": 2}},
-    {
-        "method": "event",
-        "type": "ContentPart",
-        "payload": {"type": "text", "text": "done"},
-    },
-    {
-        "method": "event",
-        "type": "StatusUpdate",
-        "payload": {
-            "context_usage": None,
-            "context_tokens": None,
-            "max_context_tokens": None,
-            "token_usage": None,
-            "message_id": None,
-            "plan_mode": False,
-            "thinking_suppressed": False,
-            "yolo": None,
-            "mcp_status": None,
-            "waiting_on_background": None,
-        },
-    },
-    {"method": "event", "type": "TurnEnd", "payload": {"interrupt_reason": None}},
-])
+        assert summarize_messages(messages) == snapshot(
+            [
+                {
+                    "method": "event",
+                    "type": "TurnBegin",
+                    "payload": {"user_input": "run external tool", "todos": None},
+                },
+                {"method": "event", "type": "StepBegin", "payload": {"n": 1}},
+                {
+                    "method": "event",
+                    "type": "ContentPart",
+                    "payload": {"type": "text", "text": "calling external tool"},
+                },
+                {
+                    "method": "event",
+                    "type": "ToolCall",
+                    "payload": {
+                        "type": "function",
+                        "id": "tc-1",
+                        "function": {"name": "ext_tool", "arguments": '{"path": "README.md"}'},
+                        "extras": None,
+                    },
+                },
+                {
+                    "method": "event",
+                    "type": "StatusUpdate",
+                    "payload": {
+                        "context_usage": None,
+                        "context_tokens": None,
+                        "max_context_tokens": None,
+                        "token_usage": None,
+                        "message_id": None,
+                        "plan_mode": False,
+                        "thinking_suppressed": False,
+                        "yolo": None,
+                        "mcp_status": None,
+                        "waiting_on_background": None,
+                    },
+                },
+                {
+                    "method": "request",
+                    "type": "ToolCallRequest",
+                    "payload": {
+                        "id": "tc-1",
+                        "name": "ext_tool",
+                        "arguments": '{"path": "README.md"}',
+                    },
+                },
+                {
+                    "method": "event",
+                    "type": "ToolResult",
+                    "payload": {
+                        "tool_call_id": "tc-1",
+                        "return_value": {
+                            "is_error": False,
+                            "output": "Opened",
+                            "message": "Opened README.md",
+                            "display": [],
+                            "extras": None,
+                        },
+                    },
+                },
+                {"method": "event", "type": "StepBegin", "payload": {"n": 2}},
+                {
+                    "method": "event",
+                    "type": "ContentPart",
+                    "payload": {"type": "text", "text": "done"},
+                },
+                {
+                    "method": "event",
+                    "type": "StatusUpdate",
+                    "payload": {
+                        "context_usage": None,
+                        "context_tokens": None,
+                        "max_context_tokens": None,
+                        "token_usage": None,
+                        "message_id": None,
+                        "plan_mode": False,
+                        "thinking_suppressed": False,
+                        "yolo": None,
+                        "mcp_status": None,
+                        "waiting_on_background": None,
+                    },
+                },
+                {"method": "event", "type": "TurnEnd", "payload": {"interrupt_reason": None}},
+            ]
+        )
     finally:
         wire.close()
 
@@ -398,35 +404,37 @@ def test_prompt_without_initialize(tmp_path) -> None:
         )
         resp, messages = collect_until_response(wire, "prompt-1")
         assert resp.get("result", {}).get("status") == "finished"
-        assert summarize_messages(messages) == snapshot([
-    {
-        "method": "event",
-        "type": "TurnBegin",
-        "payload": {"user_input": "hi", "todos": None},
-    },
-    {"method": "event", "type": "StepBegin", "payload": {"n": 1}},
-    {
-        "method": "event",
-        "type": "ContentPart",
-        "payload": {"type": "text", "text": "hello without init"},
-    },
-    {
-        "method": "event",
-        "type": "StatusUpdate",
-        "payload": {
-            "context_usage": None,
-            "context_tokens": None,
-            "max_context_tokens": None,
-            "token_usage": None,
-            "message_id": None,
-            "plan_mode": False,
-            "thinking_suppressed": False,
-            "yolo": None,
-            "mcp_status": None,
-            "waiting_on_background": None,
-        },
-    },
-    {"method": "event", "type": "TurnEnd", "payload": {"interrupt_reason": None}},
-])
+        assert summarize_messages(messages) == snapshot(
+            [
+                {
+                    "method": "event",
+                    "type": "TurnBegin",
+                    "payload": {"user_input": "hi", "todos": None},
+                },
+                {"method": "event", "type": "StepBegin", "payload": {"n": 1}},
+                {
+                    "method": "event",
+                    "type": "ContentPart",
+                    "payload": {"type": "text", "text": "hello without init"},
+                },
+                {
+                    "method": "event",
+                    "type": "StatusUpdate",
+                    "payload": {
+                        "context_usage": None,
+                        "context_tokens": None,
+                        "max_context_tokens": None,
+                        "token_usage": None,
+                        "message_id": None,
+                        "plan_mode": False,
+                        "thinking_suppressed": False,
+                        "yolo": None,
+                        "mcp_status": None,
+                        "waiting_on_background": None,
+                    },
+                },
+                {"method": "event", "type": "TurnEnd", "payload": {"interrupt_reason": None}},
+            ]
+        )
     finally:
         wire.close()

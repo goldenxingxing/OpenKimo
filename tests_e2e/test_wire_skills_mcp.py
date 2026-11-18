@@ -116,36 +116,38 @@ def test_skill_prompt_injects_skill_text(tmp_path: Path, monkeypatch: pytest.Mon
         )
         resp, messages = collect_until_response(wire, "prompt-1")
         assert resp.get("result", {}).get("status") == "finished"
-        assert summarize_messages(messages) == snapshot([
-    {
-        "method": "event",
-        "type": "TurnBegin",
-        "payload": {"user_input": "/skill:test", "todos": None},
-    },
-    {"method": "event", "type": "StepBegin", "payload": {"n": 1}},
-    {
-        "method": "event",
-        "type": "ContentPart",
-        "payload": {"type": "text", "text": "skill ok"},
-    },
-    {
-        "method": "event",
-        "type": "StatusUpdate",
-        "payload": {
-            "context_usage": None,
-            "context_tokens": None,
-            "max_context_tokens": None,
-            "token_usage": None,
-            "message_id": None,
-            "plan_mode": False,
-            "thinking_suppressed": False,
-            "yolo": None,
-            "mcp_status": None,
-            "waiting_on_background": None,
-        },
-    },
-    {"method": "event", "type": "TurnEnd", "payload": {"interrupt_reason": None}},
-])
+        assert summarize_messages(messages) == snapshot(
+            [
+                {
+                    "method": "event",
+                    "type": "TurnBegin",
+                    "payload": {"user_input": "/skill:test", "todos": None},
+                },
+                {"method": "event", "type": "StepBegin", "payload": {"n": 1}},
+                {
+                    "method": "event",
+                    "type": "ContentPart",
+                    "payload": {"type": "text", "text": "skill ok"},
+                },
+                {
+                    "method": "event",
+                    "type": "StatusUpdate",
+                    "payload": {
+                        "context_usage": None,
+                        "context_tokens": None,
+                        "max_context_tokens": None,
+                        "token_usage": None,
+                        "message_id": None,
+                        "plan_mode": False,
+                        "thinking_suppressed": False,
+                        "yolo": None,
+                        "mcp_status": None,
+                        "waiting_on_background": None,
+                    },
+                },
+                {"method": "event", "type": "TurnEnd", "payload": {"interrupt_reason": None}},
+            ]
+        )
     finally:
         wire.close()
 
@@ -205,19 +207,21 @@ def test_flow_skill(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         )
         resp, messages = collect_until_response(wire, "prompt-1")
         assert resp.get("result", {}).get("status") == "finished"
-        assert summarize_messages(messages) == snapshot([
-    {
-        "method": "event",
-        "type": "TurnBegin",
-        "payload": {"user_input": "/flow:test-flow", "todos": None},
-    },
-    {
-        "method": "event",
-        "type": "ContentPart",
-        "payload": {"type": "text", "text": 'Unknown slash command "/flow:test-flow".'},
-    },
-    {"method": "event", "type": "TurnEnd", "payload": {"interrupt_reason": None}},
-])
+        assert summarize_messages(messages) == snapshot(
+            [
+                {
+                    "method": "event",
+                    "type": "TurnBegin",
+                    "payload": {"user_input": "/flow:test-flow", "todos": None},
+                },
+                {
+                    "method": "event",
+                    "type": "ContentPart",
+                    "payload": {"type": "text", "text": 'Unknown slash command "/flow:test-flow".'},
+                },
+                {"method": "event", "type": "TurnEnd", "payload": {"interrupt_reason": None}},
+            ]
+        )
     finally:
         wire.close()
 
@@ -292,149 +296,151 @@ def test_mcp_tool_call(tmp_path) -> None:
             request_handler=lambda msg: build_approval_response(msg, "approve"),
         )
         assert resp.get("result", {}).get("status") == "finished"
-        assert summarize_messages(messages) == snapshot([
-    {
-        "method": "event",
-        "type": "TurnBegin",
-        "payload": {"user_input": "call mcp", "todos": None},
-    },
-    {
-        "method": "event",
-        "type": "StatusUpdate",
-        "payload": {
-            "context_usage": None,
-            "context_tokens": None,
-            "max_context_tokens": None,
-            "token_usage": None,
-            "message_id": None,
-            "plan_mode": None,
-            "thinking_suppressed": None,
-            "yolo": None,
-            "mcp_status": {
-                "loading": True,
-                "connected": 0,
-                "total": 1,
-                "tools": 0,
-                "servers": [{"name": "test", "status": "connecting", "tools": []}],
-            },
-            "waiting_on_background": None,
-        },
-    },
-    {"method": "event", "type": "MCPLoadingBegin", "payload": {}},
-    {
-        "method": "event",
-        "type": "StatusUpdate",
-        "payload": {
-            "context_usage": None,
-            "context_tokens": None,
-            "max_context_tokens": None,
-            "token_usage": None,
-            "message_id": None,
-            "plan_mode": None,
-            "thinking_suppressed": None,
-            "yolo": None,
-            "mcp_status": {
-                "loading": False,
-                "connected": 1,
-                "total": 1,
-                "tools": 1,
-                "servers": [{"name": "test", "status": "connected", "tools": ["ping"]}],
-            },
-            "waiting_on_background": None,
-        },
-    },
-    {"method": "event", "type": "MCPLoadingEnd", "payload": {}},
-    {"method": "event", "type": "StepBegin", "payload": {"n": 1}},
-    {
-        "method": "event",
-        "type": "ContentPart",
-        "payload": {"type": "text", "text": "call mcp"},
-    },
-    {
-        "method": "event",
-        "type": "ToolCall",
-        "payload": {
-            "type": "function",
-            "id": "tc-1",
-            "function": {"name": "ping", "arguments": '{"text": "hi"}'},
-            "extras": None,
-        },
-    },
-    {
-        "method": "event",
-        "type": "StatusUpdate",
-        "payload": {
-            "context_usage": None,
-            "context_tokens": None,
-            "max_context_tokens": None,
-            "token_usage": None,
-            "message_id": None,
-            "plan_mode": False,
-            "thinking_suppressed": False,
-            "yolo": None,
-            "mcp_status": None,
-            "waiting_on_background": None,
-        },
-    },
-    {
-        "method": "request",
-        "type": "ApprovalRequest",
-        "payload": {
-            "id": "<uuid>",
-            "tool_call_id": "tc-1",
-            "sender": "ping",
-            "action": "mcp:ping",
-            "description": "Call MCP tool `ping`.",
-            "source_kind": "foreground_turn",
-            "source_id": "<uuid>",
-            "agent_id": None,
-            "subagent_type": None,
-            "source_description": None,
-            "display": [],
-        },
-    },
-    {
-        "method": "event",
-        "type": "ApprovalResponse",
-        "payload": {"request_id": "<uuid>", "response": "approve", "feedback": ""},
-    },
-    {
-        "method": "event",
-        "type": "ToolResult",
-        "payload": {
-            "tool_call_id": "tc-1",
-            "return_value": {
-                "is_error": False,
-                "output": [{"type": "text", "text": "pong:hi"}],
-                "message": "",
-                "display": [],
-                "extras": None,
-            },
-        },
-    },
-    {"method": "event", "type": "StepBegin", "payload": {"n": 2}},
-    {
-        "method": "event",
-        "type": "ContentPart",
-        "payload": {"type": "text", "text": "done"},
-    },
-    {
-        "method": "event",
-        "type": "StatusUpdate",
-        "payload": {
-            "context_usage": None,
-            "context_tokens": None,
-            "max_context_tokens": None,
-            "token_usage": None,
-            "message_id": None,
-            "plan_mode": False,
-            "thinking_suppressed": False,
-            "yolo": None,
-            "mcp_status": None,
-            "waiting_on_background": None,
-        },
-    },
-    {"method": "event", "type": "TurnEnd", "payload": {"interrupt_reason": None}},
-])
+        assert summarize_messages(messages) == snapshot(
+            [
+                {
+                    "method": "event",
+                    "type": "TurnBegin",
+                    "payload": {"user_input": "call mcp", "todos": None},
+                },
+                {
+                    "method": "event",
+                    "type": "StatusUpdate",
+                    "payload": {
+                        "context_usage": None,
+                        "context_tokens": None,
+                        "max_context_tokens": None,
+                        "token_usage": None,
+                        "message_id": None,
+                        "plan_mode": None,
+                        "thinking_suppressed": None,
+                        "yolo": None,
+                        "mcp_status": {
+                            "loading": True,
+                            "connected": 0,
+                            "total": 1,
+                            "tools": 0,
+                            "servers": [{"name": "test", "status": "connecting", "tools": []}],
+                        },
+                        "waiting_on_background": None,
+                    },
+                },
+                {"method": "event", "type": "MCPLoadingBegin", "payload": {}},
+                {
+                    "method": "event",
+                    "type": "StatusUpdate",
+                    "payload": {
+                        "context_usage": None,
+                        "context_tokens": None,
+                        "max_context_tokens": None,
+                        "token_usage": None,
+                        "message_id": None,
+                        "plan_mode": None,
+                        "thinking_suppressed": None,
+                        "yolo": None,
+                        "mcp_status": {
+                            "loading": False,
+                            "connected": 1,
+                            "total": 1,
+                            "tools": 1,
+                            "servers": [{"name": "test", "status": "connected", "tools": ["ping"]}],
+                        },
+                        "waiting_on_background": None,
+                    },
+                },
+                {"method": "event", "type": "MCPLoadingEnd", "payload": {}},
+                {"method": "event", "type": "StepBegin", "payload": {"n": 1}},
+                {
+                    "method": "event",
+                    "type": "ContentPart",
+                    "payload": {"type": "text", "text": "call mcp"},
+                },
+                {
+                    "method": "event",
+                    "type": "ToolCall",
+                    "payload": {
+                        "type": "function",
+                        "id": "tc-1",
+                        "function": {"name": "ping", "arguments": '{"text": "hi"}'},
+                        "extras": None,
+                    },
+                },
+                {
+                    "method": "event",
+                    "type": "StatusUpdate",
+                    "payload": {
+                        "context_usage": None,
+                        "context_tokens": None,
+                        "max_context_tokens": None,
+                        "token_usage": None,
+                        "message_id": None,
+                        "plan_mode": False,
+                        "thinking_suppressed": False,
+                        "yolo": None,
+                        "mcp_status": None,
+                        "waiting_on_background": None,
+                    },
+                },
+                {
+                    "method": "request",
+                    "type": "ApprovalRequest",
+                    "payload": {
+                        "id": "<uuid>",
+                        "tool_call_id": "tc-1",
+                        "sender": "ping",
+                        "action": "mcp:ping",
+                        "description": "Call MCP tool `ping`.",
+                        "source_kind": "foreground_turn",
+                        "source_id": "<uuid>",
+                        "agent_id": None,
+                        "subagent_type": None,
+                        "source_description": None,
+                        "display": [],
+                    },
+                },
+                {
+                    "method": "event",
+                    "type": "ApprovalResponse",
+                    "payload": {"request_id": "<uuid>", "response": "approve", "feedback": ""},
+                },
+                {
+                    "method": "event",
+                    "type": "ToolResult",
+                    "payload": {
+                        "tool_call_id": "tc-1",
+                        "return_value": {
+                            "is_error": False,
+                            "output": [{"type": "text", "text": "pong:hi"}],
+                            "message": "",
+                            "display": [],
+                            "extras": None,
+                        },
+                    },
+                },
+                {"method": "event", "type": "StepBegin", "payload": {"n": 2}},
+                {
+                    "method": "event",
+                    "type": "ContentPart",
+                    "payload": {"type": "text", "text": "done"},
+                },
+                {
+                    "method": "event",
+                    "type": "StatusUpdate",
+                    "payload": {
+                        "context_usage": None,
+                        "context_tokens": None,
+                        "max_context_tokens": None,
+                        "token_usage": None,
+                        "message_id": None,
+                        "plan_mode": False,
+                        "thinking_suppressed": False,
+                        "yolo": None,
+                        "mcp_status": None,
+                        "waiting_on_background": None,
+                    },
+                },
+                {"method": "event", "type": "TurnEnd", "payload": {"interrupt_reason": None}},
+            ]
+        )
     finally:
         wire.close()
