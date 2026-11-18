@@ -1047,13 +1047,24 @@ class Shell:
 
         The gap between a request arriving and the modal opening is exactly
         where a background-completion follow-up used to slip in and steal the
-        flow, swallowing input typed for the modal.
+        flow, swallowing input typed for the modal. The approval runtime is
+        the authoritative store, so a request that exists but has not reached
+        the presentation queue yet still defers the follow-up.
         """
-        return (
+        if (
             self._approval_modal is not None
             or self._current_prompt_approval_request is not None
             or bool(self._pending_approval_requests)
-        )
+        ):
+            return True
+        runtime = getattr(self.soul, "runtime", None)
+        approval_runtime = getattr(runtime, "approval_runtime", None)
+        requests = getattr(approval_runtime, "_requests", None)
+        if requests:
+            return any(
+                getattr(record, "status", None) == "pending" for record in requests.values()
+            )
+        return False
 
     @staticmethod
     def _should_defer_background_auto_trigger(
