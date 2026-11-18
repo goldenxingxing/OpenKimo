@@ -119,7 +119,7 @@ jobs:
           - runner: ubuntu-22.04-arm
             target: aarch64-unknown-linux-gnu
             binary_path: dist/onefile/kimo
-          - runner: macos-14
+          - runner: macos-15
             target: aarch64-apple-darwin
             binary_path: dist/onefile/kimo
           - runner: windows-2022
@@ -265,7 +265,7 @@ jobs:
           - runner: ubuntu-22.04-arm
             target: aarch64-unknown-linux-gnu
             binary_path: dist/kimo
-          - runner: macos-14
+          - runner: macos-15
             target: aarch64-apple-darwin
             binary_path: dist/kimo
     runs-on: ${{ matrix.runner }}
