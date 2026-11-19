@@ -119,6 +119,79 @@ def test_select_tasks_empty(share: Path):
     assert verify.select_tasks(_config()) == []
 
 
+def test_select_tasks_rejects_side_effect_tasks(share: Path):
+    """R3: tasks with background-launch / long-running intent must never be
+    replayed by the unattended verify subprocess."""
+    _write_records(
+        share,
+        "s1",
+        [
+            _records_line("用 nohup 后台跑寻优脚本，结果写到 output"),
+            _records_line("帮我启动 DE 批量寻优，start_new_session 脱离会话"),
+            _records_line("正常任务：对比一下这两个文档的差异"),
+        ],
+    )
+    tasks = verify.select_tasks(_config(), limit=5)
+    assert tasks == ["正常任务：对比一下这两个文档的差异"]
+
+
+def test_select_tasks_rejects_system_reminder_turns(share: Path):
+    """2026-11-19 incident: a background-notification turn was replayed; the
+    verify agent relaunched the user's dead compute job from task_progress.md.
+    Notification turns are not self-contained tasks and must be filtered."""
+    _write_records(
+        share,
+        "s1",
+        [
+            _records_line(
+                "<system-reminder>Background tasks completed while you were idle.</system-reminder>"
+            ),
+            _records_line("总结今天的改动"),
+        ],
+    )
+    tasks = verify.select_tasks(_config(), limit=5)
+    assert tasks == ["总结今天的改动"]
+
+
+def test_select_tasks_rejects_context_dependent_prompts(share: Path):
+    _write_records(share, "s1", [_records_line("继续"), _records_line("okay")])
+    assert verify.select_tasks(_config(), limit=5) == []
+
+
+def test_select_tasks_all_filtered_returns_empty(share: Path):
+    """No fallback to an unsafe task: empty means the caller skips verifying."""
+    _write_records(
+        share,
+        "s1",
+        [
+            _records_line("继续"),
+            _records_line("nohup 部署到生产环境"),
+        ],
+    )
+    assert verify.select_tasks(_config(), limit=5) == []
+
+
+def test_is_verify_safe_task_patterns():
+    safe = verify.is_verify_safe_task
+    # Side-effect intent, EN + ZH spellings.
+    assert not safe("run the benchmark with nohup in the background")
+    assert not safe("setsid python train.py")
+    assert not safe("用 subprocess start_new_session 启动")
+    assert not safe("后台运行这个仿真")
+    assert not safe("启动批量寻优，结果写工作区")
+    assert not safe("部署发版并 git push")
+    # Notification / context-dependent turns.
+    assert not safe("<system-reminder>Background tasks completed</system-reminder>")
+    assert not safe("继续")
+    assert not safe("Okay")
+    # Ordinary tasks stay selectable.
+    assert safe("对比一下这两个文档的差异")
+    assert safe("fix the failing test in web/src/hooks")
+    assert safe("把报告写到 output 目录")
+    assert not safe("")
+    assert not safe("   ")
+
+
 # ---------------------------------------------------------------------------
 # verify() end-to-end with an injected fake runner
 # ---------------------------------------------------------------------------

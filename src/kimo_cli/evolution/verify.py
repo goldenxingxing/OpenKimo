@@ -19,6 +19,7 @@ import contextlib
 import hashlib
 import json
 import os
+import re
 import shutil
 import signal
 import subprocess
@@ -86,13 +87,76 @@ class TaskEvidence:
     verdict_suggestion: str = "inconclusive"
 
 
+# ---------------------------------------------------------------------------
+# Verify-task admission (side-effect gate)
+# ---------------------------------------------------------------------------
+
+#: Notification turns replayed as "tasks" are context-dependent nudges, not
+#: self-contained work: the headless agent improvises against whatever state
+#: it finds.  2026-11-19 incident: a "Background tasks completed" reminder
+#: turn was selected for verification; the verify agent read the real
+#: workspace's task_progress.md, found the user's compute job dead and
+#: relaunched it — a 3.6-day DE optimization, orphaned to launchd, started
+#: by a process nobody authorized to run anything.
+_SYSTEM_TURN_RE = re.compile(r"<system-reminder>|</system-reminder>")
+
+#: Side-effect intent: launching background / long-running work, or mutating
+#: shared state.  A verify run replays the task inside a full-capability
+#: headless agent whose default work dir is a disposable directory, but the
+#: agent can still cd to any absolute path the task mentions and start
+#: processes there.  These tasks are fine for a supervised session and
+#: wrong for an unattended replay.
+_SIDE_EFFECT_RE = re.compile(
+    r"\b(nohup|setsid|disown|start_new_session|run_in_background|launchd|"
+    r"daemon(?:ize)?|hyperparameter(?:\s+search)?|grid\s*search)\b"
+    r"|后台(?:运行|执行|启动|挂)|守护进程|脱离会话|"
+    r"寻优|批量启动|启动[^。\n]{0,20}(?:寻优|训练|仿真|模拟|计算|脚本)|"
+    r"部署|发版|git\s+push",
+    re.IGNORECASE,
+)
+
+#: Context-dependent prompts the replayed agent will interpret against a
+#: clean session and improvise — the improvisation is where the side effects
+#: come from.
+_CONTEXT_DEPENDENT_RE = re.compile(
+    r"^(?:继续|接着|继续吧|continue|go\s*on|resume)[。!\.\s]*$|"
+    r"^(?:好|好的|嗯|ok|okay)[，,。!\.\s]*$",
+    re.IGNORECASE,
+)
+
+
+def is_verify_safe_task(task: str) -> bool:
+    """Whether a recorded task may be replayed by the verify subprocess.
+
+    Conservative text-level gate (R3): reject notification turns, prompts
+    with background-launch / long-running / shared-state-mutation intent,
+    and context-dependent nudges.  This is an admission filter, not a
+    sandbox — process-level isolation of the verify run is a separate layer.
+    """
+    text = (task or "").strip()
+    if not text:
+        return False
+    if _SYSTEM_TURN_RE.search(text):
+        return False
+    if _CONTEXT_DEPENDENT_RE.match(text):
+        return False
+    return not _SIDE_EFFECT_RE.search(text)
+
+
 def select_tasks(
     config,
     *,
     task_pattern: str | None = None,
     limit: int = 3,
 ) -> list[str]:
-    """Pick replayable tasks: proposal-targeted, failed-heavy first."""
+    """Pick replayable tasks: proposal-targeted, failed-heavy first.
+
+    Tasks failing the side-effect gate (``is_verify_safe_task``) are skipped:
+    an unattended verify run must never re-execute work that launches
+    background processes or mutates shared state.  When every candidate is
+    filtered out the result is empty (the caller surfaces "no replayable
+    tasks") rather than falling back to an unsafe task.
+    """
     del config  # reserved for future weighting; selection is evidence-driven
     records = library.iter_all_session_records()
     groups = library.task_groups(records, pattern=task_pattern)
@@ -102,11 +166,12 @@ def select_tasks(
             # Never replayable to a meaningful baseline skip: keep failed-only
             # tasks only if nothing better exists; they still exercise the path.
             continue
+        if not is_verify_safe_task(task):
+            logger.info("Verify task rejected by side-effect gate: {task}", task=task[:60])
+            continue
         tasks.append(task)
         if len(tasks) >= limit:
             break
-    if not tasks and groups:
-        tasks = [groups[0][0]]
     return tasks
 
 
