@@ -595,6 +595,7 @@ function App() {
         needsAttention: sessionsNeedingAttention.includes(session.sessionId),
         backgroundTasks: session.status?.background_tasks ?? 0,
         backgroundInterrupted: session.status?.background_interrupted ?? 0,
+        isBusy: session.status?.state === "busy",
       })),
     [sessions, deriveArchiveState, archiveErrors, sessionsNeedingAttention, t],
   );

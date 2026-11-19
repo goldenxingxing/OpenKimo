@@ -13,7 +13,11 @@ import kimo_cli.web.user_auth as user_auth
 from kimo_cli.web.api import sessions as sessions_api
 from kimo_cli.web.runner.activity import ActivityHub, SessionActivity
 from kimo_cli.web.runner.process import KimoCLIRunner, SessionProcess
-from kimo_cli.wire.jsonrpc import JSONRPCEventMessage, JSONRPCRequestMessage
+from kimo_cli.wire.jsonrpc import (
+    JSONRPCEventMessage,
+    JSONRPCRequestMessage,
+    JSONRPCSuccessResponse,
+)
 from kimo_cli.wire.types import (
     ApprovalRequest,
     ApprovalResponse,
@@ -126,6 +130,41 @@ async def test_nothing_is_published_when_nothing_a_page_shows_changed(recorded) 
     process._note_answered("unknown")
 
     assert [(a.state, a.awaiting_input) for a in seen] == [("busy", False), ("busy", True)]
+
+
+async def test_idle_is_emitted_when_busy_status_outlived_its_in_flight_set(recorded) -> None:
+    """A missed busy→idle flip must recover on the next completion signal.
+
+    If the in-flight set was cleared without the matching prompt response
+    (a worker restart racing a completion, an id that leaked out of the set),
+    the old ``was_busy`` guard saw "already not busy" and never emitted idle:
+    the session broadcast "busy" forever and frontends spun "thinking" with
+    nothing running. Any success/error response that finds the set drained
+    while the last broadcast state is still "busy" must emit idle.
+    """
+    process, seen = recorded
+    process._in_flight_prompt_ids.add("p1")
+    await process._emit_status("busy", reason="prompt")
+
+    # The set drained with no matching response — the stuck-state condition.
+    process._in_flight_prompt_ids.clear()
+
+    await process._handle_out_message(JSONRPCSuccessResponse(id="rpc-9", result={}))
+
+    assert seen[-1].state == "idle"
+    assert process._status.reason == "prompt_complete"
+
+
+async def test_no_idle_emitted_while_another_prompt_is_still_in_flight(recorded) -> None:
+    """The recovery must not fire mid-turn when one of several prompts ends."""
+    process, seen = recorded
+    process._in_flight_prompt_ids.update({"p1", "p2"})
+    await process._emit_status("busy", reason="prompt")
+
+    await process._handle_out_message(JSONRPCSuccessResponse(id="p1", result={}))
+
+    assert seen[-1].state == "busy"
+    assert process._in_flight_prompt_ids == {"p2"}
 
 
 def test_a_page_that_stops_reading_keeps_only_the_newest() -> None:

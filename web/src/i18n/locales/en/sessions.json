@@ -60,6 +60,7 @@
   },
   "action": {
     "rename": "Rename",
+    "rename_busy": "Session is busy — rename it after the turn finishes",
     "archive": "Archive",
     "unarchive": "Unarchive",
     "record_memory": "Record memory",

@@ -89,6 +89,8 @@ type SessionSummary = {
   backgroundTasks?: number;
   /** Interrupted background tasks the user has not been notified of yet. */
   backgroundInterrupted?: number;
+  /** Turn in flight: the backend rejects edits until it finishes. */
+  isBusy?: boolean;
 };
 
 const ARCHIVE_DOT_CLASSES: Record<ArchiveState, string> = {
@@ -588,6 +590,13 @@ export const SessionsSidebar = memo(function SessionsSidebarComponent({
     } else if (action === "rename") {
       const session = sessions.find((s) => s.id === sessionId);
       if (session) {
+        // Validate before entering edit mode: the backend rejects edits to a
+        // busy session, and discovering that after the rename input is open
+        // leaves the unsaved title stuck on screen.
+        if (session.isBusy) {
+          toast.error(t("action.rename_busy"));
+          return;
+        }
         setEditingSessionId(session.id);
         setEditingTitle(normalizeTitle(session.title));
       }
@@ -621,14 +630,15 @@ export const SessionsSidebar = memo(function SessionsSidebarComponent({
 
     isSavingRenameRef.current = true;
     try {
-      const success = await onRenameSession(editingSessionId, trimmedTitle);
-      if (success) {
-        handleCancelEdit();
-      }
+      // renameSession toasts the backend's reason on failure. Either way the
+      // edit ends here: a rejected save must not pin the unsaved title in the
+      // input — revert to the original until the user tries again.
+      await onRenameSession(editingSessionId, trimmedTitle);
     } catch (err) {
       reportFailure(err);
     } finally {
       isSavingRenameRef.current = false;
+      handleCancelEdit();
     }
   };
 
@@ -721,6 +731,9 @@ export const SessionsSidebar = memo(function SessionsSidebarComponent({
       menuSession?.archiveState ?? "gray";
     const recordMemoryBlocked =
       recordMemoryState === "in_progress" || recordMemoryState === "green";
+    // The backend rejects edits to a busy session — flag the menu item up
+    // front instead of letting the rename fail after the input is open.
+    const renameBlocked = menuSession?.isBusy === true;
 
     const menu = (
       <div
@@ -738,7 +751,12 @@ export const SessionsSidebar = memo(function SessionsSidebarComponent({
         {/* Show Rename only for non-archived sessions */}
         {onRenameSession && !contextMenuIsArchived && (
           <button
-            className="flex w-full cursor-pointer items-center gap-2 rounded-sm px-2 py-1.5 text-left text-xs hover:bg-accent"
+            className={cn(
+              "flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-left text-xs",
+              renameBlocked
+                ? "cursor-not-allowed text-muted-foreground opacity-60"
+                : "cursor-pointer hover:bg-accent",
+            )}
             onClick={() => handleMenuAction("rename")}
             type="button"
           >

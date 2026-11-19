@@ -862,17 +862,23 @@ class SessionProcess:
         self._track_retrying(message)
         match message:
             case JSONRPCSuccessResponse():
-                was_busy = self.is_busy
                 if message.id in self._in_flight_prompt_ids:
                     self._in_flight_prompt_ids.remove(message.id)
-                if was_busy and not self.is_busy:
+                # Emit idle whenever the in-flight set drained and the last
+                # broadcast state is still "busy" — not only on the exact
+                # busy→idle edge. If a flip was ever missed (an id leaked out
+                # of the set without the matching response, a restart raced a
+                # completion), the old was_busy guard left the session stuck
+                # broadcasting "busy" forever, and every frontend watching it
+                # spun "thinking" with nothing running. _emit_status dedups
+                # identical states, so the extra check is free when healthy.
+                if not self.is_busy and self._status.state == "busy":
                     await self._emit_status("idle", reason="prompt_complete")
                     self._settle_deferred_restart()
             case JSONRPCErrorResponse():
-                was_busy = self.is_busy
                 if message.id in self._in_flight_prompt_ids:
                     self._in_flight_prompt_ids.remove(message.id)
-                if was_busy and not self.is_busy:
+                if not self.is_busy and self._status.state == "busy":
                     await self._emit_status("idle", reason="prompt_error")
                     self._settle_deferred_restart()
             case _:

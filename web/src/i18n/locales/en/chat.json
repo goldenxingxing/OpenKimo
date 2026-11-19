@@ -104,6 +104,7 @@
   "header": {
     "openSidebar": "Open sessions sidebar",
     "doubleClickRename": "Double-click to rename",
+    "rename_busy": "Session is busy — rename it after the turn finishes",
     "showFiles": "Show workspace files",
     "hideFiles": "Hide workspace files",
     "searchMessages": "Search messages",

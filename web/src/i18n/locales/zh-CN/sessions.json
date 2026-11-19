@@ -59,6 +59,7 @@
   },
   "action": {
     "rename": "重命名",
+    "rename_busy": "会话正在运行，等它结束后再重命名",
     "archive": "归档",
     "unarchive": "取消归档",
     "record_memory": "保存记忆",

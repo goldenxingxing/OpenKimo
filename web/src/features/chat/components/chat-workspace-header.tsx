@@ -1,5 +1,6 @@
 import { useState, useCallback } from "react";
 import { useTranslation } from "react-i18next";
+import { toast } from "sonner";
 import { Input } from "@/components/ui/input";
 import {
   Tooltip,
@@ -57,9 +58,15 @@ export function ChatWorkspaceHeader({
 
   const handleDoubleClick = useCallback(() => {
     if (!(onRenameSession && selectedSessionId && sessionDescription)) return;
+    // Validate before entering edit mode: the backend rejects edits to a busy
+    // session, and a save that fails must not leave the title input stuck.
+    if (currentSession?.status?.state === "busy") {
+      toast.error(t("header.rename_busy"));
+      return;
+    }
     setIsEditing(true);
     setEditingTitle(sessionDescription);
-  }, [onRenameSession, selectedSessionId, sessionDescription]);
+  }, [onRenameSession, selectedSessionId, sessionDescription, currentSession, t]);
 
   const handleCancelEdit = useCallback(() => {
     setIsEditing(false);
@@ -78,10 +85,11 @@ export function ChatWorkspaceHeader({
       return;
     }
 
-    const success = await onRenameSession(selectedSessionId, trimmedTitle);
-    if (success) {
-      handleCancelEdit();
-    }
+    await onRenameSession(selectedSessionId, trimmedTitle);
+    // End the edit either way: a rejected save (e.g. the session became busy
+    // between entering edit mode and saving) reverts to the original title
+    // instead of pinning the unsaved one.
+    handleCancelEdit();
   }, [selectedSessionId, editingTitle, onRenameSession, handleCancelEdit]);
 
   return (

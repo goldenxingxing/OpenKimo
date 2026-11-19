@@ -1637,6 +1637,25 @@ export function useSessionStream(
           if (event.payload?.interrupt_reason) {
             useToolEventsStore.getState().markTodoStale("interrupted");
           }
+          // Recovery: the backend normally flips the session to idle with a
+          // session_status broadcast, and that message is what returns the UI
+          // to ready. When the broadcast is lost — network jitter dropping the
+          // socket, a server handover, a worker restart — nothing else clears
+          // the busy indicator and the UI spins "thinking" forever even though
+          // the TurnEnd itself arrived. A top-level TurnEnd is authoritative:
+          // the turn is over, so recover a stuck busy state right here.
+          // Gated on the current status so an "error" status broadcast just
+          // before the TurnEnd (worker process_exit) is not clobbered.
+          if (
+            statusRef.current === "streaming" ||
+            statusRef.current === "submitted"
+          ) {
+            setStatus("ready");
+            setAwaitingFirstResponse(false);
+            awaitingIdleRef.current = false;
+            completeStreamingMessages();
+            interruptStaleToolCalls({ preserveUnsubmitted: true });
+          }
           break;
         }
 
@@ -2707,6 +2726,8 @@ export function useSessionStream(
       setAwaitingFirstResponse,
       processSubagentEvent,
       sessionId,
+      completeStreamingMessages,
+      interruptStaleToolCalls,
     ],
   );
 
