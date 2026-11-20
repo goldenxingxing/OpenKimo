@@ -279,4 +279,4 @@ jobs:
         uses: DeterminateSystems/nix-installer-action@9383ce2bf08796b65508822f5982f49151badc4e # main
 
       - name: Run nix package
-        run: nix run .#kimo-cli -- --version && nix run . -- --help
+        run: nix run "path:.#kimo-cli" -- --version && nix run "path:." -- --help

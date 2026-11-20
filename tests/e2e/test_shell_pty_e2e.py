@@ -660,16 +660,22 @@ def test_shell_background_agent_approval_preserves_running_draft(tmp_path: Path)
 
         turn_mark = shell.mark()
         shell.send_line("Launch a background agent that writes a file.")
+        # Type the draft before the WriteFile approval modal opens. Once the
+        # modal is up, default_buffer.read_only becomes True (the running prompt
+        # hides its input), so any keystrokes typed after that are discarded and
+        # the draft never reaches the buffer. On fast CI runners the modal
+        # reliably beats the send_text below, which is why this test was flaky
+        # (3.13/3.14 fail, 3.12 passes by timing luck).
+        draft_text = "keep this draft"
+        shell.send_text(draft_text)
         shell.read_until_contains(
             "Root finished launching the background subagent.",
             after=turn_mark,
             timeout=15.0,
         )
-        draft_text = "keep this draft"
         shell.read_until_contains(
             "Root starts a background subagent.", after=turn_mark, timeout=15.0
         )
-        shell.send_text(draft_text)
         approval_mark = shell.mark()
         shell.read_until_contains(
             "requesting approval to edit file",
