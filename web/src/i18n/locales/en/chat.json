@@ -119,7 +119,8 @@
     "createNewSession": "Create new session",
     "newTabHint": "{{modifier}}+Click to open in new tab",
     "startConversation": "Start a conversation by typing a message below.",
-    "scrollToBottom": "Scroll to bottom"
+    "scrollToBottom": "Scroll to bottom",
+    "newMessagesBelow": "New messages"
   },
   "files": {
     "title": "Workspace files",

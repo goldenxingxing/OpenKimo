@@ -46,6 +46,13 @@ export type VirtualizedMessageListProps = {
   highlightedMessageIndex?: number;
   /** Callback when scroll position changes */
   onAtBottomChange?: (atBottom: boolean) => void;
+  /**
+   * Called with `true` when newly appended content will NOT be scrolled into
+   * view (the reader is away, or follow was disarmed by a stray scroll), and
+   * with `false` when they return to the bottom. Lets the parent surface a
+   * "new content below" affordance so a long turn does not look truncated.
+   */
+  onUnreadContentChange?: (unread: boolean) => void;
   /** Callback to fork session from before a specific turn */
   onForkSession?: (turnIndex: number) => void;
   /** True while history is being replayed into the list */
@@ -274,6 +281,7 @@ function VirtualizedMessageListComponent(
     blocksExpanded,
     highlightedMessageIndex = -1,
     onAtBottomChange,
+    onUnreadContentChange,
     onForkSession,
     isReplayingHistory = false,
     workDir,
@@ -381,6 +389,8 @@ function VirtualizedMessageListComponent(
         // Back at the bottom — by scrollbar, wheel, or a jump — following
         // new output resumes.
         readerAwayRef.current = false;
+        // Everything below has now been read.
+        onUnreadContentChange?.(false);
       }
       // Deliberately does not end catch-up. Early in a replay only a few
       // messages exist, so the viewport reaches the bottom trivially; ending
@@ -389,7 +399,7 @@ function VirtualizedMessageListComponent(
       // nextCatchUp() and its tests.
       onAtBottomChange?.(atBottom);
     },
-    [onAtBottomChange],
+    [onAtBottomChange, onUnreadContentChange],
   );
 
   // Catch-up ends when the reader moves the viewport themselves. Wheel, touch,
@@ -485,7 +495,7 @@ function VirtualizedMessageListComponent(
   const handleFollowOutput = useCallback(
     (isAtBottom: boolean) => {
       const scroller = scrollerRef.current;
-      return decideFollowOutput({
+      const decision = decideFollowOutput({
         isAtBottom,
         isReplayingHistory,
         isCatchingUp: catchUpRef.current,
@@ -494,8 +504,16 @@ function VirtualizedMessageListComponent(
           ? scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight
           : null,
       });
+      // "false" means Virtuoso declined to bring the viewport to this newly
+      // appended item, so it lands below the fold. For a long turn (a tool
+      // card, then a long report) the reader then sees only the intro and the
+      // turn looks truncated — surface that there is unseen content below.
+      if (decision === false) {
+        onUnreadContentChange?.(true);
+      }
+      return decision;
     },
-    [isReplayingHistory],
+    [isReplayingHistory, onUnreadContentChange],
   );
 
   // A list filled from empty — a conversation opened, or rebuilt — starts at

@@ -119,7 +119,8 @@
     "createNewSession": "新建会话",
     "newTabHint": "{{modifier}}+点击在新标签页打开",
     "startConversation": "在下方输入消息开始对话。",
-    "scrollToBottom": "滚动到底部"
+    "scrollToBottom": "滚动到底部",
+    "newMessagesBelow": "有新消息"
   },
   "files": {
     "title": "工作区文件",

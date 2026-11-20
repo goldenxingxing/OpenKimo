@@ -64,6 +64,10 @@ export function ChatConversation({
   const { t } = useTranslation("chat");
   const listRef = useRef<VirtualizedMessageListHandle>(null);
   const [isAtBottom, setIsAtBottom] = useState(true);
+  // True when content has been appended below the fold while the reader is
+  // away (see VirtualizedMessageList's onUnreadContentChange). Drives the
+  // labelled "new messages" pill instead of the plain jump arrow.
+  const [unreadBelow, setUnreadBelow] = useState(false);
   const [highlightedIndex, setHighlightedIndex] = useState(-1);
   const highlightTimerRef = useRef<number | null>(null);
 
@@ -240,6 +244,7 @@ export function ChatConversation({
             blocksExpanded={blocksExpanded}
             highlightedMessageIndex={highlightedIndex}
             onAtBottomChange={setIsAtBottom}
+            onUnreadContentChange={setUnreadBelow}
             onForkSession={onForkSession}
             isReplayingHistory={isReplayingHistory}
             workDir={currentSession?.workDir}
@@ -247,7 +252,20 @@ export function ChatConversation({
         </div>
       )}
 
-      {shouldShowScrollButton ? (
+      {unreadBelow ? (
+        // Unread content is waiting below — a long turn (tool card, then a
+        // long report) landed out of view after follow was disarmed. A
+        // labelled pill, not just the plain jump arrow, so the turn does not
+        // read as truncated.
+        <Button
+          className="absolute bottom-[calc(1rem+var(--safe-bottom))] left-[50%] -translate-x-1/2 rounded-full"
+          onClick={handleScrollToBottom}
+          type="button"
+        >
+          <ArrowDownIcon className="size-4" />
+          <span>{t("conversation.newMessagesBelow")}</span>
+        </Button>
+      ) : shouldShowScrollButton ? (
         <Button
           className="absolute bottom-[calc(1rem+var(--safe-bottom))] left-[50%] -translate-x-1/2 rounded-full"
           onClick={handleScrollToBottom}
