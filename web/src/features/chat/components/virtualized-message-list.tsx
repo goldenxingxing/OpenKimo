@@ -59,6 +59,8 @@ export type VirtualizedMessageListProps = {
   isReplayingHistory?: boolean;
   /** Session work directory, used to resolve relative path mentions. */
   workDir?: string | null;
+  /** Session id — used to write message-list geometry diagnostics into the session dir. */
+  sessionId?: string;
 };
 
 export type VirtualizedMessageListHandle = {
@@ -285,6 +287,7 @@ function VirtualizedMessageListComponent(
     onForkSession,
     isReplayingHistory = false,
     workDir,
+    sessionId,
   }: VirtualizedMessageListProps,
   ref: React.Ref<VirtualizedMessageListHandle>,
 ) {
@@ -591,6 +594,77 @@ function VirtualizedMessageListComponent(
   );
 
   const hasAnyMessages = messages.length > 0;
+
+  // Diagnostic: detect the virtualization anomaly where the viewport shows
+  // blank space at the bottom while more messages still exist below (a long
+  // report pushed out of the render range). When seen, snapshot the message
+  // geometry into the session dir (ui-diagnostic.jsonl) so it can be inspected
+  // offline. The reader's first reaction to this state is "the model stopped",
+  // not "open a console", so this must record itself. Silent and throttled:
+  // one write per episode, re-armed once the layout returns to normal.
+  const diagnosticLoggedRef = useRef(false);
+  useEffect(() => {
+    if (!sessionId) return;
+    let frame = 0;
+    const check = () => {
+      const scroller = scrollerRef.current;
+      if (!scroller) return;
+      const nodes = scroller.querySelectorAll<HTMLElement>("[data-index]");
+      if (nodes.length === 0) return;
+      let lastNode: HTMLElement | null = null;
+      let lastIndex = -1;
+      for (const node of nodes) {
+        const index = Number(node.dataset.index);
+        if (Number.isFinite(index) && index > lastIndex) {
+          lastIndex = index;
+          lastNode = node;
+        }
+      }
+      if (!lastNode) return;
+      const scrollerRect = scroller.getBoundingClientRect();
+      const lastBottomInViewport =
+        lastNode.getBoundingClientRect().bottom - scrollerRect.top;
+      const blankBelow = scroller.clientHeight - lastBottomInViewport;
+      const hasMoreInData = filteredMessages.length - 1 > lastIndex;
+      const anomaly = hasMoreInData && blankBelow > 150;
+      if (anomaly && !diagnosticLoggedRef.current) {
+        diagnosticLoggedRef.current = true;
+        const items = [...nodes].slice(-10).map((node) => {
+          const rect = node.getBoundingClientRect();
+          return {
+            index: Number(node.dataset.index),
+            top: Math.round(rect.top - scrollerRect.top),
+            height: node.offsetHeight,
+            inView:
+              rect.bottom > scrollerRect.top && rect.top < scrollerRect.bottom,
+          };
+        });
+        const payload = {
+          kind: "viewport-blank-with-unrendered-below",
+          href: window.location.href,
+          scrollTop: Math.round(scroller.scrollTop),
+          scrollHeight: scroller.scrollHeight,
+          clientHeight: scroller.clientHeight,
+          blankBelow: Math.round(blankBelow),
+          totalMessages: filteredMessages.length,
+          renderedCount: nodes.length,
+          lastRenderedIndex: lastIndex,
+          items,
+        };
+        fetch(`/api/sessions/${sessionId}/ui-diagnostic`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+        }).catch(() => {
+          /* diagnostics must never surface an error to the reader */
+        });
+      } else if (!anomaly) {
+        diagnosticLoggedRef.current = false;
+      }
+    };
+    frame = requestAnimationFrame(check);
+    return () => cancelAnimationFrame(frame);
+  }, [filteredMessages, sessionId]);
 
   // Kept referentially stable across token updates so Virtuoso can skip
   // re-rendering rows whose message did not change; neighbor lookups go

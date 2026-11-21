@@ -248,6 +248,7 @@ export function ChatConversation({
             onForkSession={onForkSession}
             isReplayingHistory={isReplayingHistory}
             workDir={currentSession?.workDir}
+            sessionId={selectedSessionId}
           />
         </div>
       )}

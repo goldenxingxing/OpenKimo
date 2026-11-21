@@ -693,6 +693,43 @@ async def upload_session_file(
     )
 
 
+@router.post("/{session_id}/ui-diagnostic", summary="Append a UI diagnostic event")
+async def append_ui_diagnostic(
+    session_id: UUID,
+    payload: dict[str, Any],
+    http_request: Request,
+) -> Response:
+    """Append a frontend UI diagnostic event to the session directory.
+
+    The virtualized message list writes a geometry snapshot here when it detects
+    blank viewport space while more messages still exist below, so a message-list
+    layout problem can be inspected offline afterwards without the reader opening
+    a console in the moment. Written to <session_dir>/ui-diagnostic.jsonl so it is
+    removed together with the session, and deliberately bypasses the busy check —
+    the interesting state is exactly while a turn is streaming.
+    """
+    session = load_session_by_id(session_id)
+    if session is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Session not found",
+        )
+    ensure_session_access(session, http_request)
+    session_dir = session.kimo_cli_session.dir
+    record = {
+        "ts": datetime.now(UTC).isoformat(),
+        "payload": payload,
+    }
+    line = json.dumps(record, ensure_ascii=False, default=str)
+
+    def _append() -> None:
+        with open(session_dir / "ui-diagnostic.jsonl", "a", encoding="utf-8") as handle:
+            handle.write(line + "\n")
+
+    await asyncio.to_thread(_append)
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
 @router.get(
     "/{session_id}/uploads/{path:path}",
     summary="Get uploaded file from session uploads",
