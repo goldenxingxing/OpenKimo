@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import asyncio
-import contextlib
 import os
 import signal
 import subprocess
@@ -29,6 +28,38 @@ def terminate_process_tree_windows(pid: int, *, force: bool) -> None:
         check=False,
         timeout=_PROCESS_WAIT_TIMEOUT_S,
     )
+
+
+def _signal_process_group_posix(pgid: int, sig: int) -> None:
+    """Send ``sig`` to the process group ``pgid``, tolerating a reaped leader.
+
+    ``os.killpg`` returns ``EPERM`` on macOS once the group leader has been
+    reaped, even though SIGTERM-ignoring descendants are still alive in the
+    (orphaned) group and need the later SIGKILL. Fall back to enumerating the
+    surviving members with ``ps`` and signaling each directly so cleanup never
+    crashes and still reaches the descendants.
+    """
+    try:
+        os.killpg(pgid, sig)
+    except ProcessLookupError:
+        return
+    except PermissionError:
+        try:
+            out = subprocess.run(
+                ["ps", "-o", "pid=", "-g", str(pgid)],
+                capture_output=True,
+                text=True,
+                check=False,
+                timeout=_PROCESS_WAIT_TIMEOUT_S,
+            ).stdout
+        except (OSError, subprocess.SubprocessError):
+            return
+        for token in out.split():
+            if token.isdigit():
+                try:
+                    os.kill(int(token), sig)
+                except (ProcessLookupError, PermissionError):
+                    continue
 
 
 async def _cancel_helper_tasks(tasks: tuple[asyncio.Task[Any] | None, ...]) -> None:
@@ -118,8 +149,7 @@ async def run_background_task_worker(
 
         # Signal the process group even when the leader has already exited:
         # SIGTERM-ignoring descendants still need the later SIGKILL.
-        with contextlib.suppress(ProcessLookupError):
-            os.killpg(process.pid, signal.SIGKILL if force else signal.SIGTERM)
+        _signal_process_group_posix(process.pid, signal.SIGKILL if force else signal.SIGTERM)
 
     async def _wait_for_process_bounded() -> None:
         if process is None or process.returncode is not None:
