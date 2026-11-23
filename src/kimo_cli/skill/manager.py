@@ -474,6 +474,7 @@ class SkillManager:
                     text=True,
                     timeout=_DEPENDENCY_INSTALL_TIMEOUT_SECONDS,
                     check=False,
+                    shell=os.name == "nt",
                     env={**os.environ, "npm_config_update_notifier": "false"},
                 )
             except subprocess.TimeoutExpired as exc:

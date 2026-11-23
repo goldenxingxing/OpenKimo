@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import io
 import json
+import os
 import zipfile
 from pathlib import Path
 
@@ -33,17 +34,32 @@ def _archive(*, lockfile: bool = True) -> bytes:
 def _fake_npm(tmp_path: Path, *, exit_code: int = 0) -> tuple[Path, Path]:
     """A stand-in npm that records its arguments and lays out node_modules."""
     record = tmp_path / "npm-args.txt"
-    script = tmp_path / "npm"
-    script.write_text(
-        "#!/bin/sh\n"
-        f'echo "$@" > "{record}"\n'
-        f"if [ {exit_code} -ne 0 ]; then echo 'ERR! network down' >&2; exit {exit_code}; fi\n"
-        "for dep in dotenv @scope/imap; do\n"
-        '  mkdir -p "node_modules/$dep" && echo "{}" > "node_modules/$dep/package.json"\n'
-        '  for i in 1 2 3; do echo x > "node_modules/$dep/f$i.js"; done\n'
-        "done\n"
-    )
-    script.chmod(0o755)
+    if os.name == "nt":
+        script = tmp_path / "npm.cmd"
+        script.write_bytes(
+            (
+                "@echo off\r\n"
+                f'echo %* > "{record}"\r\n'
+                f'if not "{exit_code}"=="0" (echo ERR! network down 1>&2 & exit /b {exit_code})\r\n'
+                "mkdir node_modules\\@scope 2>nul\r\n"
+                "mkdir node_modules\\dotenv 2>nul\r\n"
+                'echo {} > "node_modules\\dotenv\\package.json"\r\n'
+                "mkdir node_modules\\@scope\\imap 2>nul\r\n"
+                'echo {} > "node_modules\\@scope\\imap\\package.json"\r\n'
+            ).encode()
+        )
+    else:
+        script = tmp_path / "npm"
+        script.write_text(
+            "#!/bin/sh\n"
+            f'echo "$@" > "{record}"\n'
+            f"if [ {exit_code} -ne 0 ]; then echo 'ERR! network down' >&2; exit {exit_code}; fi\n"
+            "for dep in dotenv @scope/imap; do\n"
+            '  mkdir -p "node_modules/$dep" && echo "{}" > "node_modules/$dep/package.json"\n'
+            '  for i in 1 2 3; do echo x > "node_modules/$dep/f$i.js"; done\n'
+            "done\n"
+        )
+        script.chmod(0o755)
     return script, record
 
 
