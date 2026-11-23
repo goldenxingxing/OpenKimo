@@ -8,9 +8,7 @@ from kimo_cli.ui.shell.usage import UsageRow, _format_row, _ratio_color, _remain
 
 
 def _render_segments(row: UsageRow, label_width: int = 6) -> list[Segment]:
-    console = Console(
-        force_terminal=True, color_system="standard", width=80, legacy_windows=False
-    )
+    console = Console(force_terminal=True, color_system="standard", width=80, legacy_windows=False)
     return console.render_lines(
         _format_row(row, label_width=label_width),
         console.options,

@@ -26,7 +26,9 @@ async def test_exit_0_allows():
 @pytest.mark.asyncio
 async def test_exit_2_blocks():
     result = await run_hook(
-        _py("import sys; sys.stderr.write('blocked'); sys.exit(2)"), {"tool_name": "Shell"}, timeout=5
+        _py("import sys; sys.stderr.write('blocked'); sys.exit(2)"),
+        {"tool_name": "Shell"},
+        timeout=5,
     )
     assert result.action == "block"
     assert "blocked" in result.reason
@@ -47,7 +49,9 @@ async def test_timeout_allows():
 
 @pytest.mark.asyncio
 async def test_json_deny_decision():
-    cmd = _py("import json; print(json.dumps({'hookSpecificOutput': {'permissionDecision': 'deny', 'permissionDecisionReason': 'use rg'}}))")
+    cmd = _py(
+        "import json; print(json.dumps({'hookSpecificOutput': {'permissionDecision': 'deny', 'permissionDecisionReason': 'use rg'}}))"
+    )
     result = await run_hook(cmd, {"tool_name": "Bash"}, timeout=5)
     assert result.action == "block"
     assert result.reason == "use rg"

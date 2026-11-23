@@ -42,7 +42,9 @@ async def test_pre_tool_use_block_flow():
             encoding="utf-8",
         )
 
-        hooks = [HookDef(event="PreToolUse", matcher="Shell", command=_run_script(script), timeout=5)]
+        hooks = [
+            HookDef(event="PreToolUse", matcher="Shell", command=_run_script(script), timeout=5)
+        ]
         engine = HookEngine(hooks, cwd=tmpdir)
 
         # Safe command -> allow

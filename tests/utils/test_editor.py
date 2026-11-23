@@ -149,10 +149,15 @@ class TestEditTextInEditor:
         If False, it does nothing (simulating :q! without saving).
         """
         body = (
-            "import sys\n"
-            "with open(sys.argv[1], 'a', encoding='utf-8') as f:\n"
-            "    f.write('edited line\\n')\n"
-        ) + _TOUCH if modify else "import sys\nsys.exit(0)\n"
+            (
+                "import sys\n"
+                "with open(sys.argv[1], 'a', encoding='utf-8') as f:\n"
+                "    f.write('edited line\\n')\n"
+            )
+            + _TOUCH
+            if modify
+            else "import sys\nsys.exit(0)\n"
+        )
         script = _write_editor_script(tmp_path, "fake-editor.py", body)
         return _editor_cmd(script)
 

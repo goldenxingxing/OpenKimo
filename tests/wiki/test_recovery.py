@@ -36,7 +36,9 @@ def _prepare_update(root: Path) -> tuple[WikiTransaction, Path]:
     layout = ensure_wiki(root)
     target = layout.root / "concepts" / "atomic-writes.md"
     target.write_bytes(
-        render_page(_page("concepts/atomic-writes.md", revision=1, body="Before.\n")).encode("utf-8"),
+        render_page(_page("concepts/atomic-writes.md", revision=1, body="Before.\n")).encode(
+            "utf-8"
+        ),
     )
     transaction = WikiTransaction.prepare(
         layout=layout,
