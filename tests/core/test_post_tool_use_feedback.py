@@ -9,7 +9,9 @@ feeds lint and test failures back — for at most MAX_HOOK_FEEDBACK_ROUNDS steps
 from __future__ import annotations
 
 import json
+import os
 import shlex
+import subprocess
 import sys
 
 from kosong.message import ToolCall
@@ -36,6 +38,9 @@ class _WriteFile(CallableTool2[_Params]):
 
 
 def _py(code: str) -> str:
+    if os.name == "nt":
+        # cmd.exe does not understand POSIX single quotes from shlex.quote.
+        return subprocess.list2cmdline([sys.executable, "-c", code])
     return f"{shlex.quote(sys.executable)} -c {shlex.quote(code)}"
 
 

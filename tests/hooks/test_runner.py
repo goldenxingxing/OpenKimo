@@ -1,8 +1,19 @@
 import asyncio
+import os
+import shlex
+import subprocess
+import sys
 
 import pytest
 
 from kimo_cli.hooks.runner import run_hook
+
+
+def _py(code: str) -> str:
+    """A cross-platform ``python -c`` command for run_hook."""
+    if os.name == "nt":
+        return subprocess.list2cmdline([sys.executable, "-c", code])
+    return f"{shlex.quote(sys.executable)} -c {shlex.quote(code)}"
 
 
 @pytest.mark.asyncio
@@ -14,7 +25,9 @@ async def test_exit_0_allows():
 
 @pytest.mark.asyncio
 async def test_exit_2_blocks():
-    result = await run_hook("echo 'blocked' >&2; exit 2", {"tool_name": "Shell"}, timeout=5)
+    result = await run_hook(
+        _py("import sys; sys.stderr.write('blocked'); sys.exit(2)"), {"tool_name": "Shell"}, timeout=5
+    )
     assert result.action == "block"
     assert "blocked" in result.reason
 
@@ -34,7 +47,7 @@ async def test_timeout_allows():
 
 @pytest.mark.asyncio
 async def test_json_deny_decision():
-    cmd = """echo '{"hookSpecificOutput": {"permissionDecision": "deny", "permissionDecisionReason": "use rg"}}' """
+    cmd = _py("import json; print(json.dumps({'hookSpecificOutput': {'permissionDecision': 'deny', 'permissionDecisionReason': 'use rg'}}))")
     result = await run_hook(cmd, {"tool_name": "Bash"}, timeout=5)
     assert result.action == "block"
     assert result.reason == "use rg"
@@ -42,7 +55,7 @@ async def test_json_deny_decision():
 
 @pytest.mark.asyncio
 async def test_stdin_receives_json():
-    cmd = """python3 -c "import sys,json; d=json.load(sys.stdin); print(d['tool_name'])" """
+    cmd = _py("import sys,json; d=json.load(sys.stdin); print(d['tool_name'])")
     result = await run_hook(cmd, {"tool_name": "WriteFile"}, timeout=5)
     assert result.stdout.strip() == "WriteFile"
 

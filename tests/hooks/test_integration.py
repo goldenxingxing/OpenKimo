@@ -1,3 +1,7 @@
+import os
+import shlex
+import subprocess
+import sys
 import tempfile
 from pathlib import Path
 
@@ -8,20 +12,37 @@ from kimo_cli.hooks.config import HookDef
 from kimo_cli.hooks.engine import HookEngine
 
 
+def _py(code: str) -> str:
+    """A cross-platform ``python -c`` command for a hook."""
+    if os.name == "nt":
+        return subprocess.list2cmdline([sys.executable, "-c", code])
+    return f"{shlex.quote(sys.executable)} -c {shlex.quote(code)}"
+
+
+def _run_script(script: Path) -> str:
+    """A cross-platform ``python <script>`` command for a hook."""
+    if os.name == "nt":
+        return subprocess.list2cmdline([sys.executable, str(script)])
+    return f"{shlex.quote(sys.executable)} {shlex.quote(str(script))}"
+
+
 @pytest.mark.asyncio
 async def test_pre_tool_use_block_flow():
     """Full flow: hook blocks a dangerous command."""
     with tempfile.TemporaryDirectory() as tmpdir:
-        script = Path(tmpdir) / "block-rm.sh"
+        script = Path(tmpdir) / "block-rm.py"
         script.write_text(
-            "#!/bin/bash\n"
-            "CMD=$(python3 -c \"import sys,json; print(json.load(sys.stdin).get('tool_input',{}).get('command',''))\")\n"
-            'if echo "$CMD" | grep -q "rm -rf"; then echo "Blocked: rm -rf" >&2; exit 2; fi\n'
-            "exit 0\n"
+            "import sys, json\n"
+            "d = json.load(sys.stdin)\n"
+            "cmd = d.get('tool_input', {}).get('command', '')\n"
+            "if 'rm -rf' in cmd:\n"
+            "    sys.stderr.write('Blocked: rm -rf')\n"
+            "    sys.exit(2)\n"
+            "sys.exit(0)\n",
+            encoding="utf-8",
         )
-        script.chmod(0o755)
 
-        hooks = [HookDef(event="PreToolUse", matcher="Shell", command=str(script), timeout=5)]
+        hooks = [HookDef(event="PreToolUse", matcher="Shell", command=_run_script(script), timeout=5)]
         engine = HookEngine(hooks, cwd=tmpdir)
 
         # Safe command -> allow
@@ -48,7 +69,9 @@ async def test_stop_hook_feedback():
     hooks = [
         HookDef(
             event="Stop",
-            command="""echo '{"hookSpecificOutput":{"permissionDecision":"deny","permissionDecisionReason":"tests not written"}}' """,
+            command=_py(
+                "import json; print(json.dumps({'hookSpecificOutput': {'permissionDecision': 'deny', 'permissionDecisionReason': 'tests not written'}}))"
+            ),
             timeout=5,
         )
     ]
@@ -190,7 +213,11 @@ async def test_post_tool_use_failure_hook():
 async def test_user_prompt_submit_block():
     """UserPromptSubmit hook can block a prompt."""
     hooks = [
-        HookDef(event="UserPromptSubmit", command="echo 'no profanity' >&2; exit 2", timeout=5)
+        HookDef(
+            event="UserPromptSubmit",
+            command=_py("import sys; sys.stderr.write('no profanity'); sys.exit(2)"),
+            timeout=5,
+        )
     ]
     engine = HookEngine(hooks)
     results = await engine.trigger(
