@@ -89,7 +89,7 @@ def test_python_and_pyinstaller_packages_include_wiki_templates() -> None:
         capture_output=True,
         text=True,
     )
-    staged = set(json.loads(inspection.stdout))
+    staged = {Path(p).as_posix() for p in json.loads(inspection.stdout)}
     assert {
         "wiki/templates/schema.md",
         "wiki/templates/index.md",

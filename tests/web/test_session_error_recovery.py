@@ -7,6 +7,7 @@ that sessions don't get stuck in a permanent "busy" state.
 from __future__ import annotations
 
 import asyncio
+import json
 from datetime import UTC, datetime
 from pathlib import Path
 from unittest.mock import MagicMock
@@ -183,7 +184,9 @@ async def test_read_loop_silent_exit_names_log_file(
     await sp._read_loop()
 
     expected = str(tmp_path / "logs" / "kimo.log")
-    assert expected in broadcast[0]
+    # broadcast is a JSON-encoded wire message: a Windows backslash path is
+    # escaped (\\), so compare against the escaped form.
+    assert json.dumps(expected)[1:-1] in broadcast[0]
     assert "exit code 1" in broadcast[0]
     assert sp.status.detail is not None
     assert expected in sp.status.detail
