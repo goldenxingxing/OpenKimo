@@ -8,7 +8,6 @@ from typing import Any, cast
 from unittest.mock import MagicMock
 
 import pytest
-
 from prompt_toolkit.output import DummyOutput
 
 from kimo_cli.soul import StatusSnapshot
