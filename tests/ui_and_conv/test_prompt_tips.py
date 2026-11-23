@@ -242,7 +242,7 @@ def test_shorten_cwd_home_itself() -> None:
 def test_shorten_cwd_subdirectory() -> None:
     home = os.path.expanduser("~")
     subdir = os.path.join(home, "projects", "myapp")
-    assert _shorten_cwd(subdir) == "~/projects/myapp"
+    assert _shorten_cwd(subdir) == os.path.join("~", "projects", "myapp")
 
 
 def test_shorten_cwd_unrelated_path() -> None:

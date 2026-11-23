@@ -93,9 +93,25 @@ def next_expiry(
     return candidate
 
 
+def session_cookie_secure() -> bool:
+    """Whether session cookies are restricted to HTTPS.
+
+    This is an explicit deployment setting, never inferred from spoofable
+    ``X-Forwarded-*`` headers. Leave it off for local plain-HTTP development;
+    enable it when the service is deployed behind HTTPS.
+    """
+    return os.environ.get("KIMO_WEB_COOKIE_SECURE", "").strip().lower() in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }
+
+
 def build_cookie_header(token: str, max_age: int) -> str:
     """The ``Set-Cookie`` value, matching what the login route writes."""
-    return f"{COOKIE_NAME}={token}; Path=/; Max-Age={max_age}; HttpOnly; SameSite=lax"
+    secure = "; Secure" if session_cookie_secure() else ""
+    return f"{COOKIE_NAME}={token}; Path=/; Max-Age={max_age}; HttpOnly; SameSite=lax{secure}"
 
 
 __all__ = [
@@ -106,5 +122,6 @@ __all__ = [
     "build_cookie_header",
     "next_expiry",
     "session_absolute_max_age",
+    "session_cookie_secure",
     "session_max_age",
 ]

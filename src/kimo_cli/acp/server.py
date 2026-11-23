@@ -32,6 +32,7 @@ class ACPServer:
         self.client_capabilities: acp.schema.ClientCapabilities | None = None
         self.conn: acp.Client | None = None
         self.sessions: dict[str, tuple[ACPSession, _ModelIDConv]] = {}
+        self._session_locks: dict[str, asyncio.Lock] = {}
         self.negotiated_version: ACPVersionSpec | None = None
         self._auth_methods: list[acp.schema.AuthMethod] = []
         #: Strong references to the notifications nobody awaits; see below.
@@ -160,6 +161,7 @@ class ACPServer:
                         "name": m.name,
                         "description": m.description,
                         "type": terminal_auth.get("type", "terminal"),
+                        "command": terminal_auth.get("command", ""),
                         "args": terminal_auth.get("args", []),
                         "env": terminal_auth.get("env", {}),
                     }
@@ -320,30 +322,32 @@ class ACPServer:
     ) -> None:
         logger.info("Loading session: {id} for working directory: {cwd}", id=session_id, cwd=cwd)
 
-        if session_id in self.sessions:
-            logger.warning("Session already loaded: {id}", id=session_id)
-            return
-
         # Check authentication before loading session
         self._check_auth()
 
-        acp_session, _ = await self._setup_session(cwd, session_id, mcp_servers)
-        try:
-            await acp_session.replay_history(acp_session.cli.soul.runtime.session.wire_file)
-        except BaseException:
-            # ``BaseException`` so a cancelled replay also releases the CLI; the
-            # exception is re-raised unconditionally. Closing must not mask it,
-            # hence the nested guard around ``close()`` itself.
-            self.sessions.pop(session_id, None)
+        lock = self._session_locks.setdefault(session_id, asyncio.Lock())
+        async with lock:
+            if session_id in self.sessions:
+                logger.warning("Session already loaded: {id}", id=session_id)
+                return
+
+            acp_session, _ = await self._setup_session(cwd, session_id, mcp_servers)
             try:
-                await acp_session.close()
-            except Exception as exc:
-                logger.warning(
-                    "Failed to close session {id} after replay error: {error}",
-                    id=session_id,
-                    error=exc,
-                )
-            raise
+                await acp_session.replay_history(acp_session.cli.soul.runtime.session.wire_file)
+            except BaseException:
+                # ``BaseException`` so a cancelled replay also releases the CLI; the
+                # exception is re-raised unconditionally. Closing must not mask it,
+                # hence the nested guard around ``close()`` itself.
+                self.sessions.pop(session_id, None)
+                try:
+                    await acp_session.close()
+                except Exception as exc:
+                    logger.warning(
+                        "Failed to close session {id} after replay error: {error}",
+                        id=session_id,
+                        error=exc,
+                    )
+                raise
 
     async def resume_session(
         self, cwd: str, session_id: str, mcp_servers: list[MCPServer] | None = None, **kwargs: Any
@@ -354,27 +358,29 @@ class ACPServer:
         # creates a full CLI, so it must not bypass the AUTH_REQUIRED guidance.
         self._check_auth()
 
-        if session_id not in self.sessions:
-            await self._setup_session(cwd, session_id, mcp_servers)
+        lock = self._session_locks.setdefault(session_id, asyncio.Lock())
+        async with lock:
+            if session_id not in self.sessions:
+                await self._setup_session(cwd, session_id, mcp_servers)
 
-        acp_session, model_id_conv = self.sessions[session_id]
-        config = acp_session.cli.soul.runtime.config
-        return acp.schema.ResumeSessionResponse(
-            modes=acp.schema.SessionModeState(
-                available_modes=[
-                    acp.schema.SessionMode(
-                        id="default",
-                        name="Default",
-                        description="The default mode.",
-                    ),
-                ],
-                current_mode_id="default",
-            ),
-            models=acp.schema.SessionModelState(
-                available_models=_expand_llm_models(config.models),
-                current_model_id=model_id_conv.to_acp_model_id(),
-            ),
-        )
+            acp_session, model_id_conv = self.sessions[session_id]
+            config = acp_session.cli.soul.runtime.config
+            return acp.schema.ResumeSessionResponse(
+                modes=acp.schema.SessionModeState(
+                    available_modes=[
+                        acp.schema.SessionMode(
+                            id="default",
+                            name="Default",
+                            description="The default mode.",
+                        ),
+                    ],
+                    current_mode_id="default",
+                ),
+                models=acp.schema.SessionModelState(
+                    available_models=_expand_llm_models(config.models),
+                    current_model_id=model_id_conv.to_acp_model_id(),
+                ),
+            )
 
     async def fork_session(
         self, cwd: str, session_id: str, mcp_servers: list[MCPServer] | None = None, **kwargs: Any
@@ -452,6 +458,10 @@ class ACPServer:
             thinking=model_id_conv.thinking,
             oauth=cli_instance.soul.runtime.oauth,
         )
+        if new_llm is None:
+            raise acp.RequestError.invalid_params(
+                {"model_id": "Model could not be initialized from its configuration"}
+            )
         cli_instance.soul.runtime.llm = new_llm
         # Keep the session's recorded model in sync. Every early return below
         # (including the non-default config path) still means the switch

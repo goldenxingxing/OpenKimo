@@ -250,7 +250,7 @@ class ACPSession:
                 case StepBegin():
                     pass
                 case StepInterrupted():
-                    break
+                    pass
                 case StepRetry():
                     pass
                 case CompactionBegin():
@@ -307,9 +307,11 @@ class ACPSession:
                         self._turn_state = _TurnState()
                         _current_turn_id.set(self._turn_state.id)
                         await self._send_user_input(user_input)
-                    case TurnEnd() | StepInterrupted():
+                    case TurnEnd():
                         self._turn_state = None
                         _current_turn_id.set(None)
+                    case StepInterrupted():
+                        pass
                     case StepBegin():
                         pass
                     case CompactionBegin() | CompactionEnd():

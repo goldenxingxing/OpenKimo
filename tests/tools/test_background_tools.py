@@ -23,7 +23,7 @@ def _write_task(runtime, task_id: str, *, status: TaskStatus, output: str = ""):
         timeout_s=60,
     )
     store.create_task(spec)
-    store.output_path(task_id).write_text(output, encoding="utf-8")
+    store.output_path(task_id).write_bytes(output.encode("utf-8"))
     runtime_state = TaskRuntime(status=status, updated_at=time.time())
     if status in {"completed", "failed", "killed", "lost"}:
         runtime_state.finished_at = time.time()
@@ -57,7 +57,7 @@ def _write_agent_task(
     )
     store.create_task(spec)
     if task_output:
-        store.output_path(task_id).write_text(task_output, encoding="utf-8")
+        store.output_path(task_id).write_bytes(task_output.encode("utf-8"))
     runtime_state = TaskRuntime(status=status, updated_at=time.time())
     if status in {"completed", "failed", "killed", "lost"}:
         runtime_state.finished_at = time.time()
@@ -66,7 +66,7 @@ def _write_agent_task(
     # Write subagent output (the live file)
     subagent_dir = runtime.subagent_store.instance_dir(agent_id, create=True)
     subagent_output_path = subagent_dir / "output"
-    subagent_output_path.write_text(subagent_output, encoding="utf-8")
+    subagent_output_path.write_bytes(subagent_output.encode("utf-8"))
     return spec
 
 
@@ -232,7 +232,7 @@ async def test_task_output_explicitly_surfaces_timeout_contract(runtime, task_ou
         timeout_s=1,
     )
     store.create_task(spec)
-    store.output_path(spec.id).write_text("partial output\n", encoding="utf-8")
+    store.output_path(spec.id).write_bytes(b"partial output\n")
     store.write_runtime(
         spec.id,
         TaskRuntime(

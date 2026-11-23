@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import os
 import subprocess
 import sys
 import types
@@ -77,8 +78,8 @@ def test_pyvenv_cfg_stops_naming_the_build_tree(tmp_path: Path) -> None:
 
     cfg = (runtimes / "app-app-demo" / "pyvenv.cfg").read_text()
     assert str(build_tree) not in cfg
-    assert "home = ../cpython-3.12/bin" in cfg
-    assert "executable = ../cpython-3.12/bin/python" in cfg
+    assert f"home = {os.path.join('..', 'cpython-3.12', 'bin')}" in cfg
+    assert f"executable = {os.path.join('..', 'cpython-3.12', 'bin', 'python')}" in cfg
     # Untouched keys survive: a venv without `version` is not a venv.
     assert "version = 3.12.13" in cfg
 

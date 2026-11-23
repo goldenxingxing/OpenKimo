@@ -931,6 +931,7 @@ async def test_resolve_skills_roots_extra_skill_dirs_expand_tilde(monkeypatch, t
     monkeypatch.setattr(Path, "home", lambda: home_dir)
     monkeypatch.setenv("KIMO_SHARE_DIR", str(tmp_path / "share"))
     monkeypatch.setenv("HOME", str(home_dir))
+    monkeypatch.setenv("USERPROFILE", str(home_dir))  # Windows expanduser reads this
 
     work_dir = tmp_path / "project"
     work_dir.mkdir()

@@ -92,7 +92,7 @@ async def test_replay_failure_cancels_followup_and_closes_cli() -> None:
     assert cli.close_calls == 1
 
 
-async def test_concurrent_resume_closes_replaced_session(tmp_path: Path) -> None:
+async def test_concurrent_resume_sets_up_session_once(tmp_path: Path) -> None:
     server = ACPServer()
     server.conn = Mock()
     server.client_capabilities = acp.schema.ClientCapabilities()
@@ -117,8 +117,8 @@ async def test_concurrent_resume_closes_replaced_session(tmp_path: Path) -> None
             server.resume_session(str(tmp_path), "session"),
         )
 
-    assert len(clients) == 2
-    assert sorted(cli.close_calls for cli in clients) == [0, 1]
+    assert len(clients) == 1
+    assert clients[0].close_calls == 0
     await server.sessions["session"][0].close()
 
 
@@ -208,7 +208,14 @@ async def test_auth_required_payload_is_json_serializable() -> None:
             id="login",
             name="Login",
             description="Run `kimo login`",
-            field_meta={"terminal-auth": {"type": "terminal", "args": ["login"], "env": {}}},
+            field_meta={
+                "terminal-auth": {
+                    "command": "kimo",
+                    "type": "terminal",
+                    "args": ["login"],
+                    "env": {},
+                }
+            },
         )
     ]
     expected = [
@@ -217,6 +224,7 @@ async def test_auth_required_payload_is_json_serializable() -> None:
             "name": "Login",
             "description": "Run `kimo login`",
             "type": "terminal",
+            "command": "kimo",
             "args": ["login"],
             "env": {},
         }
@@ -498,6 +506,7 @@ async def test_terminal_auth_payload_carries_only_the_login_argument() -> None:
 
     payload = ACPServer._auth_methods_payload(server)
 
+    assert payload[0]["command"] == "kimo"
     assert payload[0]["args"] == ["login"]
     assert payload[0]["type"] == "terminal"
 

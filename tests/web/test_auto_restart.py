@@ -38,7 +38,9 @@ async def test_auto_restart_restarts_dead_worker() -> None:
     restarted = asyncio.Event()
     reasons: list[str | None] = []
 
-    async def fake_restart_worker(*, reason: str | None = None) -> None:
+    async def fake_restart_worker(
+        *, reason: str | None = None, expected_generation: int | None = None
+    ) -> None:
         reasons.append(reason)
         restarted.set()
 
@@ -58,7 +60,9 @@ async def test_auto_restart_bails_when_worker_is_alive() -> None:
 
     restarted = asyncio.Event()
 
-    async def fake_restart_worker(*, reason: str | None = None) -> None:
+    async def fake_restart_worker(
+        *, reason: str | None = None, expected_generation: int | None = None
+    ) -> None:
         restarted.set()
 
     sp.restart_worker = fake_restart_worker  # type: ignore[method-assign]
@@ -77,7 +81,9 @@ async def test_auto_restart_bails_when_stop_is_expected() -> None:
 
     restarted = asyncio.Event()
 
-    async def fake_restart_worker(*, reason: str | None = None) -> None:
+    async def fake_restart_worker(
+        *, reason: str | None = None, expected_generation: int | None = None
+    ) -> None:
         restarted.set()
 
     sp.restart_worker = fake_restart_worker  # type: ignore[method-assign]
@@ -97,7 +103,9 @@ async def test_auto_restart_skips_short_lived_worker() -> None:
 
     restarted = asyncio.Event()
 
-    async def fake_restart_worker(*, reason: str | None = None) -> None:
+    async def fake_restart_worker(
+        *, reason: str | None = None, expected_generation: int | None = None
+    ) -> None:
         restarted.set()
 
     sp.restart_worker = fake_restart_worker  # type: ignore[method-assign]
@@ -117,7 +125,9 @@ async def test_auto_restart_gives_up_after_max_attempts() -> None:
 
     restarted = asyncio.Event()
 
-    async def fake_restart_worker(*, reason: str | None = None) -> None:
+    async def fake_restart_worker(
+        *, reason: str | None = None, expected_generation: int | None = None
+    ) -> None:
         restarted.set()
 
     sp.restart_worker = fake_restart_worker  # type: ignore[method-assign]
@@ -140,7 +150,9 @@ async def test_auto_restart_history_expires_after_window() -> None:
 
     restarted = asyncio.Event()
 
-    async def fake_restart_worker(*, reason: str | None = None) -> None:
+    async def fake_restart_worker(
+        *, reason: str | None = None, expected_generation: int | None = None
+    ) -> None:
         restarted.set()
 
     sp.restart_worker = fake_restart_worker  # type: ignore[method-assign]

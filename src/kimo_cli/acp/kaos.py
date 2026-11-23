@@ -79,7 +79,8 @@ class ACPProcess:
         return self._returncode
 
     async def wait(self) -> int:
-        return await self._exit_future
+        # A timed-out waiter must not cancel the process's shared exit result.
+        return await asyncio.shield(self._exit_future)
 
     async def kill(self) -> None:
         await self._client.kill_terminal(
@@ -89,14 +90,23 @@ class ACPProcess:
 
     def _feed_output(self, output_response: acp.schema.TerminalOutputResponse) -> None:
         output = output_response.output
-        reset = output_response.truncated or (
-            self._last_output and not output.startswith(self._last_output)
-        )
-        if reset and self._last_output and not self._truncation_noted:
+        previous = self._last_output
+        reset = bool(previous and not output.startswith(previous))
+        if (output_response.truncated or reset) and not self._truncation_noted:
             self._stdout.feed_data(_TRUNCATION_NOTICE.encode("utf-8"))
             self._truncation_noted = True
 
-        delta = output if reset else output[len(self._last_output) :]
+        if not previous:
+            delta = output
+        elif output.startswith(previous):
+            delta = output[len(previous) :]
+        else:
+            # A truncated response is a retained snapshot, often a sliding tail.
+            # Feed only its unseen suffix instead of replaying the whole snapshot.
+            overlap = min(len(previous), len(output)) if output_response.truncated else 0
+            while overlap and not output.startswith(previous[-overlap:]):
+                overlap -= 1
+            delta = output[overlap:]
         if delta:
             self._stdout.feed_data(delta.encode("utf-8", "replace"))
         self._last_output = output
@@ -152,7 +162,7 @@ class ACPProcess:
         finally:
             if not exit_task.done():
                 exit_task.cancel()
-                with suppress(Exception):
+                with suppress(Exception, asyncio.CancelledError):
                     await exit_task
             self._returncode = self._normalize_exit_code(exit_code)
             self._stdout.feed_eof()

@@ -138,7 +138,7 @@ def test_paste_multiple_files(monkeypatch) -> None:
     result = ps._try_paste_media(cast(KeyPressEvent, event))
 
     assert result is True
-    assert buffer.inserted == ["/tmp/a.pdf /tmp/b.csv /tmp/c.mp4"]
+    assert buffer.inserted == [" ".join(str(p) for p in paths)]
 
 
 def test_paste_multiple_files_quoted_in_shell_mode(monkeypatch) -> None:
@@ -227,7 +227,7 @@ def test_paste_files_and_images_together(monkeypatch) -> None:
     assert result is True
     # Should have one insert_text call with file path + image placeholder
     joined = "".join(buffer.inserted)
-    assert "/tmp/doc.pdf" in joined
+    assert str(pdf_path) in joined
     assert "[image:" in joined
 
 

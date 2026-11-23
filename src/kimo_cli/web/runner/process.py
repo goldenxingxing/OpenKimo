@@ -313,6 +313,14 @@ class SessionProcess:
         self._read_task: asyncio.Task[None] | None = None
         self._expecting_exit = False
         self._lock = asyncio.Lock()
+        # Serializes prompt registration with the final busy check and worker
+        # replacement. Kept separate from `_lock` so subclass start/stop hooks
+        # (notably container cleanup) remain polymorphic and deadlock-free.
+        self._prompt_lock = asyncio.Lock()
+        # Incremented synchronously by deliberate stops and worker replacements.
+        # Delayed restarts capture it and revalidate under `_lock` before they
+        # are allowed to touch a worker.
+        self._lifecycle_generation = 0
         self._ws_lock = asyncio.Lock()
         self._sent_files: set[str] = set()
         #: (names, .sent marker) for the message being delivered, so a failed
@@ -536,47 +544,62 @@ class SessionProcess:
     ) -> None:
         """Start the KimoCLI subprocess."""
         async with self._lock:
-            if self.is_alive:
-                if self._read_task is None or self._read_task.done():
-                    self._read_task = asyncio.create_task(self._read_loop())
-                return
-
-            self._in_flight_prompt_ids.clear()
-            self._expecting_exit = False
-            self._worker_id = str(uuid4())
-
-            # 16MB buffer for large messages (e.g., base64-encoded images)
-            STREAM_LIMIT = 16 * 1024 * 1024
-
-            if getattr(sys, "frozen", False):
-                worker_cmd = [sys.executable, "__web-worker", str(self.session_id)]
-            else:
-                worker_cmd = [
-                    sys.executable,
-                    "-m",
-                    "kimo_cli.web.runner.worker",
-                    str(self.session_id),
-                ]
-
-            self._process = await asyncio.create_subprocess_exec(
-                *worker_cmd,
-                stdin=asyncio.subprocess.PIPE,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
-                limit=STREAM_LIMIT,
-                env=get_clean_env(),
+            await self._start_locked(
+                reason=reason,
+                detail=detail,
+                restart_started_at=restart_started_at,
             )
-            self._worker_started_at = time.monotonic()
 
-            self._read_task = asyncio.create_task(self._read_loop())
-            await self._replay_initialize()
-            if restart_started_at is not None:
-                elapsed_ms = int((time.perf_counter() - restart_started_at) * 1000)
-                detail = f"restart_ms={elapsed_ms}"
-                await self._emit_status("idle", reason=reason or "start", detail=detail)
-                await self._emit_restart_notice(reason=reason, restart_ms=elapsed_ms)
-            else:
-                await self._emit_status("idle", reason=reason or "start", detail=None)
+    async def _start_locked(
+        self,
+        *,
+        reason: str | None = None,
+        detail: str | None = None,
+        restart_started_at: float | None = None,
+    ) -> None:
+        """Start the worker while `_lock` serializes prompt registration."""
+        if self.is_alive:
+            if self._read_task is None or self._read_task.done():
+                self._read_task = asyncio.create_task(self._read_loop())
+            return
+
+        self._lifecycle_generation += 1
+        self._in_flight_prompt_ids.clear()
+        self._expecting_exit = False
+        self._worker_id = str(uuid4())
+
+        # 16MB buffer for large messages (e.g., base64-encoded images)
+        STREAM_LIMIT = 16 * 1024 * 1024
+
+        if getattr(sys, "frozen", False):
+            worker_cmd = [sys.executable, "__web-worker", str(self.session_id)]
+        else:
+            worker_cmd = [
+                sys.executable,
+                "-m",
+                "kimo_cli.web.runner.worker",
+                str(self.session_id),
+            ]
+
+        self._process = await asyncio.create_subprocess_exec(
+            *worker_cmd,
+            stdin=asyncio.subprocess.PIPE,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+            limit=STREAM_LIMIT,
+            env=get_clean_env(),
+        )
+        self._worker_started_at = time.monotonic()
+
+        self._read_task = asyncio.create_task(self._read_loop())
+        await self._replay_initialize()
+        if restart_started_at is not None:
+            elapsed_ms = int((time.perf_counter() - restart_started_at) * 1000)
+            detail = f"restart_ms={elapsed_ms}"
+            await self._emit_status("idle", reason=reason or "start", detail=detail)
+            await self._emit_restart_notice(reason=reason, restart_ms=elapsed_ms)
+        else:
+            await self._emit_status("idle", reason=reason or "start", detail=None)
 
     async def stop(self) -> None:
         """Stop the session: terminate worker and close all WebSockets."""
@@ -590,35 +613,50 @@ class SessionProcess:
         emit_status: bool = True,
     ) -> None:
         """Stop only the worker subprocess, keeping WebSockets connected."""
+        # Invalidate sleepers before the first await. `_expecting_exit` alone
+        # was only a transient flag: a delayed auto-restart could wake after it
+        # had been cleared and resurrect the deliberately stopped worker.
+        if reason != "restart":
+            self._lifecycle_generation += 1
+            self._deferred_restart_reason = None
         async with self._lock:
-            # A deliberate stop supersedes the watchdog. Skip the current task
-            # though: the watchdog itself escalates through stop_worker.
-            watchdog = self._cancel_watchdog_task
-            if watchdog is not None and watchdog is not asyncio.current_task():
-                watchdog.cancel()
-            self._cancel_watchdog_task = None
-            self._expecting_exit = True
-            if self._process is not None:
-                if self._process.returncode is None:
-                    self._process.terminate()
-                try:
-                    await asyncio.wait_for(self._process.wait(), timeout=10.0)
-                except TimeoutError:
-                    self._process.kill()
-                    await self._process.wait()
-                self._process = None
+            await self._stop_worker_locked(reason=reason, emit_status=emit_status)
 
-            if self._read_task is not None:
-                self._read_task.cancel()
-                with contextlib.suppress(asyncio.CancelledError):
-                    await self._read_task
-                self._read_task = None
+    async def _stop_worker_locked(
+        self,
+        *,
+        reason: str | None = None,
+        emit_status: bool = True,
+    ) -> None:
+        """Stop the current worker; the caller holds `_lock`."""
+        # A deliberate stop supersedes the watchdog. Skip the current task
+        # though: the watchdog itself escalates through stop_worker.
+        watchdog = self._cancel_watchdog_task
+        if watchdog is not None and watchdog is not asyncio.current_task():
+            watchdog.cancel()
+        self._cancel_watchdog_task = None
+        self._expecting_exit = True
+        if self._process is not None:
+            if self._process.returncode is None:
+                self._process.terminate()
+            try:
+                await asyncio.wait_for(self._process.wait(), timeout=10.0)
+            except TimeoutError:
+                self._process.kill()
+                await self._process.wait()
+            self._process = None
 
-            self._in_flight_prompt_ids.clear()
-            self._worker_id = None
-            self._expecting_exit = False
-            if emit_status:
-                await self._emit_status("stopped", reason=reason or "stop")
+        if self._read_task is not None:
+            self._read_task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await self._read_task
+            self._read_task = None
+
+        self._in_flight_prompt_ids.clear()
+        self._worker_id = None
+        self._expecting_exit = False
+        if emit_status:
+            await self._emit_status("stopped", reason=reason or "stop")
 
     def defer_restart(self, reason: str) -> None:
         """Owe this session a restart, to be paid when it stops being busy.
@@ -653,34 +691,68 @@ class SessionProcess:
         # The debt stays on the books for the next time it goes idle.
         if self.is_busy or not self.is_alive:
             return
+        generation = self._lifecycle_generation
         try:
-            await self.restart_worker(reason=reason)
+            await self.restart_worker(reason=reason, expected_generation=generation)
         except Exception:
             logger.exception(f"Deferred restart failed for session {self.session_id}")
 
-    async def restart_worker(self, *, reason: str | None = None) -> None:
-        """Restart the worker subprocess without disconnecting WebSockets."""
-        # Any restart loads the current config, so it settles the debt whatever
-        # asked for it.
-        self._deferred_restart_reason = None
+    async def restart_worker(
+        self,
+        *,
+        reason: str | None = None,
+        force: bool = False,
+        expected_generation: int | None = None,
+    ) -> None:
+        """Restart without racing prompt registration or a deliberate stop."""
         started_at = time.perf_counter()
         await self._emit_status("restarting", reason=reason or "restart")
-        await self.stop_worker(reason="restart", emit_status=False)
-        await self.start(reason=reason or "restart", restart_started_at=started_at)
+        async with self._prompt_lock:
+            if (
+                expected_generation is not None
+                and expected_generation != self._lifecycle_generation
+            ):
+                return
+            if self.is_busy and not force:
+                # The busy check and termination share `_prompt_lock` with
+                # prompt registration. A prompt that arrived while the status
+                # broadcast awaited is deferred around, never killed after a
+                # stale idle observation.
+                self._deferred_restart_reason = reason or "restart"
+                await self._emit_status("busy", reason="prompt")
+                return
+
+            # Any restart loads the current config, so it settles the debt
+            # whatever asked for it.
+            self._deferred_restart_reason = None
+            await self.stop_worker(reason="restart", emit_status=False)
+            if (
+                expected_generation is not None
+                and expected_generation != self._lifecycle_generation
+            ):
+                # A deliberate stop slipped between the two lifecycle calls.
+                # It owns the stopped state; do not start a replacement.
+                return
+            await self.start(
+                reason=reason or "restart",
+                restart_started_at=started_at,
+            )
 
     def _schedule_auto_restart(self) -> None:
         """Recover from an unexpected worker exit by restarting it, unless the
         exit looks like a persistent crash (restart would just crash-loop)."""
-        task = asyncio.create_task(self._auto_restart_after_unexpected_exit())
+        generation = self._lifecycle_generation
+        task = asyncio.create_task(self._auto_restart_after_unexpected_exit(generation))
         self._closing_tasks.add(task)
         task.add_done_callback(self._closing_tasks.discard)
 
-    async def _auto_restart_after_unexpected_exit(self) -> None:
+    async def _auto_restart_after_unexpected_exit(self, generation: int) -> None:
         await asyncio.sleep(AUTO_RESTART_DELAY_S)
         # A user-triggered start (send_message auto-starts the worker) or a
         # deliberate stop may have happened while we waited — never kill a
-        # healthy fresh worker.
-        if self.is_alive or self._expecting_exit:
+        # healthy fresh worker. The generation is checked again under `_lock`
+        # by restart_worker immediately before termination and again before start.
+        if generation != self._lifecycle_generation or self.is_alive or self._expecting_exit:
             return
         now = time.monotonic()
         if (
@@ -705,7 +777,7 @@ class SessionProcess:
             return
         self._auto_restart_history.append(now)
         try:
-            await self.restart_worker(reason="auto_recover")
+            await self.restart_worker(reason="auto_recover", expected_generation=generation)
         except Exception:
             logger.exception(f"Auto-restart failed for session {self.session_id}")
 
@@ -1255,35 +1327,55 @@ class SessionProcess:
             return False
         return True
 
+    def _rollback_pending_sent_files(self) -> None:
+        """Let a failed send retry this turn's attachments."""
+        if self._pending_sent is None:
+            return
+        names, marker = self._pending_sent
+        self._sent_files.difference_update(names)
+        with contextlib.suppress(Exception):
+            marker.write_text(json.dumps(sorted(self._sent_files)), encoding="utf-8")
+        self._pending_sent = None
+
+    async def _rollback_failed_prompt(self, prompt_id: str) -> None:
+        """Roll back one failed send without disturbing concurrent prompts."""
+        async with self._prompt_lock:
+            self._in_flight_prompt_ids.discard(prompt_id)
+            if not self.is_busy:
+                if self._status.state == "busy":
+                    await self._emit_status("idle", reason="prompt_send_failed")
+                self._settle_deferred_restart()
+
     async def send_message(self, message: str) -> None:
         """Send a message to the subprocess stdin."""
         await self.start()
-        # Re-read after the await, and say so rather than assert. start()
-        # yields, and a restart_worker/stop_worker running meanwhile (a model
-        # change, a config PATCH, the reload watcher) sets _process to None:
-        # the assert then fired into the websocket loop's generic handler as a
-        # silent disconnect, and under `python -O` it is not even there — the
-        # next line raises AttributeError on None instead.
-        process = self._process
-        if process is None or process.stdin is None:
-            raise RuntimeError(f"session {self.session_id} has no running worker to send to")
-
-        # Handle in message
+        prompt_id: str | None = None
         try:
             in_message = JSONRPCInMessageAdapter.validate_json(message)
-            if isinstance(in_message, JSONRPCPromptMessage):
-                was_busy = self.is_busy
-                self._in_flight_prompt_ids.add(in_message.id)
-                if not was_busy:
-                    await self._emit_status("busy", reason="prompt")
-            elif isinstance(in_message, JSONRPCSuccessResponse | JSONRPCErrorResponse):
-                self._note_answered(in_message.id)
-            elif isinstance(in_message, JSONRPCCancelMessage) and not self.is_busy:
-                # If not busy, return success to avoid errors
-                await self._broadcast(
-                    JSONRPCSuccessResponse(id=in_message.id, result={}).model_dump_json()
-                )
-                return
+            async with self._prompt_lock:
+                # Re-read under the same lock restart uses for its final busy
+                # check. Registration therefore happens either before a
+                # non-forced restart (which defers) or on its replacement.
+                process = self._process
+                if process is None or process.stdin is None:
+                    raise RuntimeError(
+                        f"session {self.session_id} has no running worker to send to"
+                    )
+
+                if isinstance(in_message, JSONRPCPromptMessage):
+                    prompt_id = in_message.id
+                    was_busy = self.is_busy
+                    self._in_flight_prompt_ids.add(prompt_id)
+                    if not was_busy:
+                        await self._emit_status("busy", reason="prompt")
+                elif isinstance(in_message, JSONRPCSuccessResponse | JSONRPCErrorResponse):
+                    self._note_answered(in_message.id)
+                elif isinstance(in_message, JSONRPCCancelMessage) and not self.is_busy:
+                    # If not busy, return success to avoid errors
+                    await self._broadcast(
+                        JSONRPCSuccessResponse(id=in_message.id, result={}).model_dump_json()
+                    )
+                    return
 
             new_message = await self._handle_in_message(in_message)
             if new_message is not None:
@@ -1291,24 +1383,23 @@ class SessionProcess:
 
             if isinstance(in_message, JSONRPCInitializeMessage):
                 self._last_initialize = message
-        except ValueError as e:
-            logger.error(f"{e.__class__.__name__} {e}: Invalid JSONRPC in message: {message}")
-            return
 
-        try:
             process.stdin.write((message + "\n").encode("utf-8"))
             await process.stdin.drain()
-        except (OSError, RuntimeError):
-            # The worker never saw the message. Undo this turn's "already
-            # sent" markers so a retry re-sends its attachments instead of
-            # silently dropping them.
-            if self._pending_sent is not None:
-                names, marker = self._pending_sent
-                self._sent_files.difference_update(names)
-                with contextlib.suppress(Exception):
-                    marker.write_text(json.dumps(sorted(self._sent_files)), encoding="utf-8")
+        except ValueError as e:
+            self._rollback_pending_sent_files()
+            if prompt_id is not None:
+                await self._rollback_failed_prompt(prompt_id)
+            logger.error(f"{e.__class__.__name__} {e}: Invalid JSONRPC in message: {message}")
+            return
+        except BaseException:
+            # Encoding and stdin failures both mean this prompt was not
+            # delivered. Remove only its ID: another prompt may still be live.
+            self._rollback_pending_sent_files()
+            if prompt_id is not None:
+                await self._rollback_failed_prompt(prompt_id)
             raise
-        finally:
+        else:
             self._pending_sent = None
 
         # A forwarded cancel arms the watchdog: whatever the worker does with
@@ -1421,7 +1512,11 @@ class KimoCLIRunner:
         long-lived multi-user server, without bound.
         """
         async with self._lock:
-            self._sessions.pop(session_id, None)
+            session = self._sessions.pop(session_id, None)
+        if session is not None:
+            # Deletion normally stops first, but forget is also a lifecycle
+            # boundary: invalidate any delayed recovery even in direct use.
+            await session.stop_worker(reason="forget", emit_status=False)
 
     async def detach_websocket(self, ws: WebSocket, session_id: UUID) -> None:
         """Detach a WebSocket from a session."""
@@ -1478,7 +1573,10 @@ class KimoCLIRunner:
                 skipped_busy.append(session_id)
                 continue
             restarted.append(session_id)
-            tasks.append(asyncio.create_task(proc.restart_worker(reason=reason)))
+            if force:
+                tasks.append(asyncio.create_task(proc.restart_worker(reason=reason, force=True)))
+            else:
+                tasks.append(asyncio.create_task(proc.restart_worker(reason=reason)))
 
         if tasks:
             await asyncio.gather(*tasks, return_exceptions=True)

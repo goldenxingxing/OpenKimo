@@ -13,9 +13,10 @@ import time
 from collections.abc import Callable
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, cast
+from typing import Any, Literal, cast
 from urllib.parse import quote
 from uuid import UUID, uuid4
+from weakref import WeakKeyDictionary
 
 from fastapi import APIRouter, Depends, HTTPException, Request, UploadFile, status
 from fastapi.responses import FileResponse, Response, StreamingResponse
@@ -116,6 +117,55 @@ def get_runner_ws(ws: WebSocket) -> KimoCLIRunner:
     return ws.app.state.runner
 
 
+def _allowed_work_dir_roots(user: dict[str, Any]) -> list[Path]:
+    """Return the directory trees an authenticated deployment exposes to a user.
+
+    ``KIMO_WEB_ALLOWED_WORK_DIRS`` is an ``os.pathsep``-separated allowlist.
+    ``KIMO_DEFAULT_WORK_DIR`` remains allowed for backwards compatibility. With
+    neither setting, each user gets an isolated workspace below the share dir.
+    A ``{user_id}`` placeholder in either setting permits per-user roots.
+    """
+    configured = os.environ.get("KIMO_WEB_ALLOWED_WORK_DIRS", "")
+    root_values = [value for value in configured.split(os.pathsep) if value.strip()]
+    default_dir = os.environ.get("KIMO_DEFAULT_WORK_DIR")
+    if default_dir:
+        root_values.insert(0, default_dir)
+    if not root_values:
+        root_values.append(str(get_share_dir() / "workspaces" / "{user_id}"))
+
+    user_id = quote(str(user["id"]), safe="")
+    return [
+        Path(value.replace("{user_id}", user_id)).expanduser().resolve() for value in root_values
+    ]
+
+
+def may_access_work_dir(work_dir: str | Path, user: dict[str, Any] | None) -> bool:
+    """Apply directory authorization only to genuinely multi-user identities.
+
+    Anonymous/static-token and ``local_owner`` callers retain the single-user
+    directory picker. Admins already have cross-session access and keep it.
+    Other authenticated users may select only an allowed root or a descendant;
+    this is an application-level boundary, not a reliance on service-account
+    OS permissions.
+    """
+    if user is None or user.get("auth_mode") == "local" or user.get("role") == "admin":
+        return True
+    path = Path(work_dir).expanduser().resolve()
+    return any(path.is_relative_to(root) for root in _allowed_work_dir_roots(user))
+
+
+def _ensure_work_dir_allowed(work_dir: Path, user: dict[str, Any] | None) -> None:
+    if may_access_work_dir(work_dir, user):
+        return
+    raise HTTPException(
+        status_code=status.HTTP_403_FORBIDDEN,
+        detail=(
+            "Working directory is outside the allowed roots. "
+            "Configure KIMO_WEB_ALLOWED_WORK_DIRS to grant access."
+        ),
+    )
+
+
 def ensure_session_access(session: Session, connection: HTTPConnection) -> None:
     """Refuse a session that belongs to somebody else.
 
@@ -162,8 +212,13 @@ def may_access_session(session: Session, user: dict[str, Any] | None) -> bool:
         return True
     owner_id = getattr(session, "owner_id", None)
     if owner_id is None:
-        return user is None
-    return user is not None and user.get("id") == owner_id
+        owner_allowed = user is None
+    else:
+        owner_allowed = user is not None and user.get("id") == owner_id
+    if not owner_allowed:
+        return False
+    work_dir = getattr(session, "work_dir", None)
+    return work_dir is None or may_access_work_dir(work_dir, user)
 
 
 def get_editable_session(
@@ -499,9 +554,19 @@ async def create_session(
     request: CreateSessionRequest | None = None,
 ) -> Session:
     """Create a new session."""
+    from kimo_cli.web.user_auth import get_current_user as _get_current_user
+
+    current_user = _get_current_user(http_request)
+    multi_user = (
+        current_user is not None
+        and current_user.get("auth_mode") != "local"
+        and current_user.get("role") != "admin"
+    )
+
     # Use provided work_dir or default to user's home directory
     if request and request.work_dir:
         work_dir_path = Path(request.work_dir).expanduser().resolve()
+        _ensure_work_dir_allowed(work_dir_path, current_user)
         # Validate the directory exists
         if not work_dir_path.exists():
             if request.create_dir:
@@ -533,7 +598,18 @@ async def create_session(
     else:
         default_dir = os.environ.get("KIMO_DEFAULT_WORK_DIR")
         if default_dir:
-            default_path = Path(default_dir).expanduser().resolve()
+            if multi_user:
+                assert current_user is not None
+                default_path = _allowed_work_dir_roots(current_user)[0]
+            else:
+                default_path = Path(default_dir).expanduser().resolve()
+            default_path.mkdir(parents=True, exist_ok=True)
+            work_dir = KaosPath.unsafe_from_local_path(default_path)
+        elif multi_user:
+            # Never default a multi-user caller to the service account's home:
+            # doing so would make every service-readable dotfile selectable.
+            assert current_user is not None
+            default_path = _allowed_work_dir_roots(current_user)[0]
             default_path.mkdir(parents=True, exist_ok=True)
             work_dir = KaosPath.unsafe_from_local_path(default_path)
         else:
@@ -596,9 +672,6 @@ async def create_session(
         )
 
     # Persist owner_id so session list filtering works correctly
-    from kimo_cli.web.user_auth import get_current_user as _get_current_user
-
-    current_user = _get_current_user(http_request)
     if current_user is not None:
         from kimo_cli.session_state import load_session_state, save_session_state
 
@@ -1460,6 +1533,54 @@ Title:"""
     return GenerateTitleResponse(title=title)
 
 
+# The runner's prompt registration and stdin write are deliberately not changed
+# here. Serializing the API-side busy check and send closes the two-socket race
+# without growing a lock entry per deleted session: process replacement or
+# deletion lets the weak key and its lock be collected.
+_session_prompt_locks: WeakKeyDictionary[object, asyncio.Lock] = WeakKeyDictionary()
+
+
+def _prompt_lock_for(session_process: object) -> asyncio.Lock:
+    lock = _session_prompt_locks.get(session_process)
+    if lock is None:
+        lock = asyncio.Lock()
+        _session_prompt_locks[session_process] = lock
+    return lock
+
+
+async def _send_session_prompt(
+    session_process: Any,
+    websocket: WebSocket,
+    in_message: JSONRPCPromptMessage,
+    message: str,
+) -> bool:
+    """Check idle and hand one prompt to the runner as an indivisible API step."""
+    async with _prompt_lock_for(session_process):
+        if session_process.is_busy and session_process.status.state != "error":
+            await websocket.send_text(
+                JSONRPCErrorResponse(
+                    id=in_message.id,
+                    error=JSONRPCErrorObject(
+                        code=ErrorCodes.INVALID_STATE,
+                        message=(
+                            "Session is busy; wait for completion before sending a new prompt."
+                        ),
+                    ),
+                ).model_dump_json()
+            )
+            return False
+
+        if session_process.status.state == "error":
+            logger.info(
+                "Clearing stale in-flight prompts for "
+                f"session {session_process.session_id} (was in error state)"
+            )
+            session_process.clear_in_flight()
+
+        await session_process.send_message(message)
+        return True
+
+
 def _websocket_user(websocket: WebSocket) -> dict[str, Any] | None:
     """Resolve the logged-in user behind a WebSocket handshake, if any."""
     from kimo_cli.web.user_auth import user_from_connection
@@ -1613,49 +1734,23 @@ async def session_stream(
         while True:
             try:
                 message = await websocket.receive_text()
-                # Reject new prompts when session is busy
-                if session_process.is_busy:
-                    try:
-                        in_message = JSONRPCInMessageAdapter.validate_json(message)
-                    except ValueError:
-                        in_message = None
-                    if isinstance(in_message, JSONRPCPromptMessage):
-                        # If the session is in error state, the in-flight IDs
-                        # are stale from a failed prompt.  Clear them so the
-                        # user can recover by sending a new message.
-                        if session_process.status.state == "error":
-                            logger.info(
-                                "Clearing stale in-flight prompts for "
-                                f"session {session_id} (was in error state)"
-                            )
-                            session_process.clear_in_flight()
-                        else:
-                            await websocket.send_text(
-                                JSONRPCErrorResponse(
-                                    id=in_message.id,
-                                    error=JSONRPCErrorObject(
-                                        code=ErrorCodes.INVALID_STATE,
-                                        message=(
-                                            "Session is busy; wait for completion before sending "
-                                            "a new prompt."
-                                        ),
-                                    ),
-                                ).model_dump_json()
-                            )
-                            continue
+                try:
+                    in_message = JSONRPCInMessageAdapter.validate_json(message)
+                except ValueError:
+                    in_message = None
 
-                # Update last_session_id on first successful prompt
-                if not last_session_id_updated:
-                    try:
-                        in_message = JSONRPCInMessageAdapter.validate_json(message)
-                    except ValueError:
-                        in_message = None
-                    if isinstance(in_message, JSONRPCPromptMessage):
+                if isinstance(in_message, JSONRPCPromptMessage):
+                    accepted = await _send_session_prompt(
+                        session_process, websocket, in_message, message
+                    )
+                    if not accepted:
+                        continue
+                    if not last_session_id_updated:
                         await asyncio.to_thread(_update_last_session_id, session)
                         last_session_id_updated = True
-
-                logger.debug(f"sending message to session {session_id}")
-                await session_process.send_message(message)
+                else:
+                    logger.debug(f"sending message to session {session_id}")
+                    await session_process.send_message(message)
             except WebSocketDisconnect:
                 logger.debug("WebSocket disconnected")
                 break
@@ -1820,25 +1915,77 @@ def _is_app_runtime_path(rel_path: str) -> bool:
     return "/__pycache__/" in p or p.endswith("/__pycache__")
 
 
+async def _git_output(work_dir: Path, *args: str) -> bytes:
+    """Return stdout from git, or turn a failed command into a visible error."""
+    proc = await asyncio.create_subprocess_exec(
+        "git",
+        *args,
+        cwd=str(work_dir),
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE,
+        env=get_clean_env(),
+    )
+    stdout, stderr = await _communicate_with_timeout(proc, 5.0)
+    if proc.returncode != 0:
+        detail = os.fsdecode(stderr).strip() or f"exit status {proc.returncode}"
+        raise RuntimeError(f"git {args[0]} failed: {detail}")
+    return stdout
+
+
+def _parse_name_status_z(output: bytes) -> list[tuple[str, str]]:
+    """Parse ``git diff --name-status -z``, including rename/copy pairs."""
+    tokens = iter(output.split(b"\0"))
+    changes: list[tuple[str, str]] = []
+    for raw_status in tokens:
+        if not raw_status:
+            continue
+        try:
+            raw_path = next(tokens)
+            change = os.fsdecode(raw_status)
+            if change.startswith(("R", "C")):
+                raw_path = next(tokens)  # display and merge by the destination
+            changes.append((os.fsdecode(raw_path), change))
+        except StopIteration as e:
+            raise ValueError("Malformed git name-status output") from e
+    return changes
+
+
+def _parse_numstat_z(output: bytes) -> dict[str, tuple[int, int]]:
+    """Parse numstat NUL records and merge them by the destination path."""
+    tokens = iter(output.split(b"\0"))
+    stats: dict[str, tuple[int, int]] = {}
+    for record in tokens:
+        if not record:
+            continue
+        parts = record.split(b"\t", 2)
+        if len(parts) != 3:
+            raise ValueError("Malformed git numstat output")
+        raw_add, raw_delete, raw_path = parts
+        try:
+            if not raw_path:  # rename/copy: empty path, then source, destination
+                next(tokens)
+                raw_path = next(tokens)
+            additions = 0 if raw_add == b"-" else int(raw_add)
+            deletions = 0 if raw_delete == b"-" else int(raw_delete)
+        except (StopIteration, ValueError) as e:
+            raise ValueError("Malformed git numstat output") from e
+        stats[os.fsdecode(raw_path)] = (additions, deletions)
+    return stats
+
+
 @router.get("/{session_id}/git-diff", summary="Get git diff stats")
 async def get_session_git_diff(session_id: UUID, http_request: Request) -> GitDiffStats:
-    """get git diff stats for the session's work directory"""
+    """Get git diff stats for the session's work directory."""
     session = load_session_by_id(session_id)
     if session is None:
         raise HTTPException(status_code=404, detail="Session not found")
     ensure_session_access(session, http_request)
 
     work_dir = Path(str(session.kimo_cli_session.work_dir))
-
-    # Check if it is a git repository
     if not (work_dir / ".git").exists():
         return GitDiffStats(is_git_repo=False)
 
     try:
-        files: list[GitFileDiff] = []
-        total_add, total_del = 0, 0
-
-        # Check if HEAD exists (repo has at least one commit)
         check_proc = await asyncio.create_subprocess_exec(
             "git",
             "rev-parse",
@@ -1849,87 +1996,56 @@ async def get_session_git_diff(session_id: UUID, http_request: Request) -> GitDi
             stderr=asyncio.subprocess.DEVNULL,
             env=get_clean_env(),
         )
-        await check_proc.wait()
+        await _communicate_with_timeout(check_proc, 5.0)
         has_head = check_proc.returncode == 0
 
-        if has_head:
-            # Execute git diff --numstat HEAD (including staged and unstaged)
-            proc = await asyncio.create_subprocess_exec(
-                "git",
-                "diff",
-                "--numstat",
-                "HEAD",
-                cwd=str(work_dir),
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
-                env=get_clean_env(),
-            )
-            stdout, _ = await _communicate_with_timeout(proc, 5.0)
-
-            # Parse output
-            for line in stdout.decode().strip().split("\n"):
-                if not line:
-                    continue
-                parts = line.split("\t")
-                if len(parts) >= 3:
-                    # Skip app-runtime/metadata paths: this panel should show
-                    # what the conversation produced, not session storage or
-                    # Office/editor temp files.
-                    if _is_app_runtime_path(parts[2]):
-                        continue
-                    add = int(parts[0]) if parts[0] != "-" else 0
-                    dele = int(parts[1]) if parts[1] != "-" else 0
-                    total_add += add
-                    total_del += dele
-                    # Determine file status
-                    file_status: str = "modified"
-                    if dele == 0 and add > 0:
-                        file_status = "added"
-                    elif add == 0 and dele > 0:
-                        file_status = "deleted"
-                    files.append(
-                        GitFileDiff(
-                            path=parts[2],
-                            additions=add,
-                            deletions=dele,
-                            status=file_status,  # type: ignore[arg-type]
-                        )
-                    )
-
-        # Also get untracked files (new files not yet added to git)
-        untracked_proc = await asyncio.create_subprocess_exec(
-            "git",
-            "ls-files",
-            "--others",
-            "--exclude-standard",
-            cwd=str(work_dir),
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.DEVNULL,
-            env=get_clean_env(),
+        # An unborn HEAD cannot be a diff base. The index is still meaningful:
+        # diff it against the empty tree rather than dropping staged files.
+        diff_base = ["HEAD", "--"] if has_head else ["--cached", "--"]
+        numstat_output, name_status_output, untracked_output = await asyncio.gather(
+            _git_output(work_dir, "diff", "--numstat", "-z", "--find-renames", *diff_base),
+            _git_output(work_dir, "diff", "--name-status", "-z", "--find-renames", *diff_base),
+            _git_output(work_dir, "ls-files", "--others", "--exclude-standard", "-z"),
         )
-        untracked_stdout, _ = await _communicate_with_timeout(untracked_proc, 5.0)
+        numstat = _parse_numstat_z(numstat_output)
+        changes = _parse_name_status_z(name_status_output)
 
-        # Add untracked files to the result
-        for line in untracked_stdout.decode().strip().split("\n"):
-            if line:
-                if _is_app_runtime_path(line):
-                    continue
-                files.append(
-                    GitFileDiff(
-                        path=line,
-                        additions=0,  # Cannot count lines for untracked files
-                        deletions=0,
-                        status="added",
-                    )
+        status_map: dict[str, Literal["added", "modified", "deleted", "renamed"]] = {
+            "A": "added",
+            "C": "added",
+            "D": "deleted",
+            "R": "renamed",
+        }
+        files: list[GitFileDiff] = []
+        total_add, total_del = 0, 0
+        for path, change in changes:
+            if _is_app_runtime_path(path):
+                continue
+            additions, deletions = numstat.get(path, (0, 0))
+            total_add += additions
+            total_del += deletions
+            files.append(
+                GitFileDiff(
+                    path=path,
+                    additions=additions,
+                    deletions=deletions,
+                    status=status_map.get(change[:1], "modified"),
                 )
+            )
 
-        if not has_head:
-            return GitDiffStats(
-                is_git_repo=True,
-                has_changes=len(files) > 0,
-                total_additions=0,
-                total_deletions=0,
-                files=files,
+        for raw_path in untracked_output.split(b"\0"):
+            if not raw_path:
+                continue
+            path = os.fsdecode(raw_path)
+            if _is_app_runtime_path(path):
+                continue
+            files.append(
+                GitFileDiff(
+                    path=path,
+                    additions=0,
+                    deletions=0,
+                    status="added",
+                )
             )
 
         return GitDiffStats(

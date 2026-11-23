@@ -8,10 +8,22 @@ from fastapi import Depends, HTTPException, Request, status
 from starlette.requests import HTTPConnection
 
 from kimo_cli import logger
+from kimo_cli.web.auth import parse_bearer_token
 from kimo_cli.web.db.crud import get_user_session
 from kimo_cli.web.db.database import get_db
 
 _COOKIE_NAME = "kimo_session"
+
+
+def session_token_from_connection(connection: HTTPConnection) -> str | None:
+    """Resolve the session token once for authentication and logout.
+
+    Cookie authentication has priority when both transports are present, matching
+    the browser session that ``/api/auth/logout`` clears.
+    """
+    return connection.cookies.get(_COOKIE_NAME) or parse_bearer_token(
+        connection.headers.get("authorization")
+    )
 
 
 def user_from_connection(connection: HTTPConnection) -> dict[str, Any] | None:
@@ -27,8 +39,6 @@ def user_from_connection(connection: HTTPConnection) -> dict[str, Any] | None:
     1. Cookie ``kimo_session`` (primary, used by browser clients).
     2. ``Authorization: Bearer <token>`` header (for API / admin clients).
     """
-    token: str | None = None
-
     # Local-owner mode: a loopback deployment may run without a login page.
     # The local owner is returned as the identity so sessions and memory get
     # its stable owner_id instead of the unauthenticated sentinel.
@@ -47,17 +57,7 @@ def user_from_connection(connection: HTTPConnection) -> dict[str, Any] | None:
             # the no-login local owner (no sign-out entry point makes sense).
             return {**local_owner, "auth_mode": "local"}
 
-    # 1. Cookie
-    cookie_token = connection.cookies.get(_COOKIE_NAME)
-    if cookie_token:
-        token = cookie_token
-
-    # 2. Bearer header fallback
-    if not token:
-        auth_header = connection.headers.get("authorization", "")
-        if auth_header.lower().startswith("bearer "):
-            token = auth_header[7:].strip() or None
-
+    token = session_token_from_connection(connection)
     if not token:
         return None
 
@@ -143,4 +143,5 @@ __all__ = [
     "require_admin",
     "require_current_user",
     "require_current_user_sse",
+    "session_token_from_connection",
 ]

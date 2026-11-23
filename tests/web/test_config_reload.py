@@ -134,7 +134,7 @@ async def test_the_deferred_restart_lands_when_the_prompt_finishes() -> None:
     proc._in_flight_prompt_ids.add("prompt-1")  # noqa: SLF001
     restarted: list[str | None] = []
 
-    async def _record(*, reason: str | None = None) -> None:
+    async def _record(*, reason: str | None = None, expected_generation: int | None = None) -> None:
         restarted.append(reason)
 
     proc.restart_worker = _record  # type: ignore[method-assign]

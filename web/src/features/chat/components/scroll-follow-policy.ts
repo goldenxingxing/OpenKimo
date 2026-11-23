@@ -41,14 +41,16 @@ export const FOLLOW_GAP_TOLERANCE = 1500;
 export function decideFollowOutput(
   state: FollowOutputState,
 ): FollowOutputDecision {
-  if (state.isReplayingHistory || state.isCatchingUp) {
-    return "auto";
-  }
   if (state.isAtBottom) {
     return "auto";
   }
+  // A replay or rebuild must never undo an explicit upward scroll. Catch-up
+  // only owns the viewport until the reader takes it over.
   if (state.readerAway) {
     return false;
+  }
+  if (state.isReplayingHistory || state.isCatchingUp) {
+    return "auto";
   }
   if (state.gapToBottom !== null && state.gapToBottom <= FOLLOW_GAP_TOLERANCE) {
     return "auto";
