@@ -102,7 +102,10 @@ def _copy_template_exclusive(name: str, destination: Path, root: Path) -> None:
 
 def _template_bytes(name: str) -> bytes:
     template = importlib.resources.files("kimo_cli.wiki").joinpath("templates", name)
-    return template.read_bytes()
+    # Packaged templates are checked out with CRLF on Windows (autocrlf);
+    # normalise to LF so the initial wiki index/log always match the LF that
+    # transaction writes and recovery reads back.
+    return template.read_bytes().replace(b"\r\n", b"\n")
 
 
 def _read_manifest(path: Path, root: Path) -> dict[str, Any]:
