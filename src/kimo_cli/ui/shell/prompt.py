@@ -37,7 +37,6 @@ from prompt_toolkit.formatted_text import AnyFormattedText, FormattedText, to_fo
 from prompt_toolkit.history import InMemoryHistory
 from prompt_toolkit.key_binding import KeyBindings, KeyPressEvent
 from prompt_toolkit.keys import Keys
-from prompt_toolkit.output import Output
 from prompt_toolkit.layout.containers import (
     ConditionalContainer,
     DynamicContainer,
@@ -49,6 +48,7 @@ from prompt_toolkit.layout.containers import (
 from prompt_toolkit.layout.controls import BufferControl, UIContent, UIControl
 from prompt_toolkit.layout.dimension import Dimension
 from prompt_toolkit.layout.menus import CompletionsMenu
+from prompt_toolkit.output import Output
 from prompt_toolkit.patch_stdout import patch_stdout
 from prompt_toolkit.utils import get_cwidth
 from pydantic import BaseModel, ValidationError

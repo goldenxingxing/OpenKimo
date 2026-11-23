@@ -25,7 +25,7 @@ from kimo_cli.utils.sensitive import is_sensitive_file
 if TYPE_CHECKING:
     from kimo_cli.soul.agent import Runtime
 
-_PATH_CANDIDATE = re.compile(r"(?<![\w./~-])((?:~?/|[A-Za-z]:\\)[^\s`'\"<>()\[\]{}，。；：、！？（）《》“”‘’]+)")
+_PATH_CANDIDATE = re.compile(r"(?<![\w./~-])((?:~?/|[A-Za-z]:\\)[^\s`'\"<>()\[\]{}，。；：、！？（）《》“”‘’]+)")  # noqa: E501
 _TRAILING_PUNCTUATION = ".,;:!?"
 _MAX_TRUSTED_ROOTS = 64
 
