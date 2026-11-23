@@ -224,6 +224,10 @@ class TestUntrackedFiles:
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.skipif(
+    os.name == "nt",
+    reason="Windows filenames cannot contain tab, quotes, or backslash",
+)
 class TestSpecialCharFilenames:
     """Filenames with tab, quotes, or backslash must be handled correctly."""
 
