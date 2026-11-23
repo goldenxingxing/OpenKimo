@@ -1324,20 +1324,22 @@ def convert_mcp_tool_result(
         # --- budget enforcement (text) ---
         if isinstance(converted, TextPart):
             if char_budget <= 0:
+                # Once the in-context budget is exhausted, later parts must not
+                # each add an unbudgeted reference (or perform an unreachable
+                # offload). The first truncated part already carries its own
+                # reference when offloading is enabled.
                 truncated = True
-                if offloader is not None:
-                    path = offloader.offload_text(converted.text, tool_name=tool_name)
-                    reference = ToolOutputOffloader.reference(path, total_chars=len(converted.text))
-                    content.append(TextPart(text=reference))
                 continue
             if len(converted.text) > char_budget:
                 truncated = True
                 if offloader is not None:
                     path = offloader.offload_text(converted.text, tool_name=tool_name)
-                    converted = TextPart(
-                        text=converted.text[:char_budget]
-                        + ToolOutputOffloader.reference(path, total_chars=len(converted.text))
-                    )
+                    reference = ToolOutputOffloader.reference(path, total_chars=len(converted.text))
+                    if len(reference) >= char_budget:
+                        converted = TextPart(text=converted.text[:char_budget])
+                    else:
+                        prefix_length = char_budget - len(reference)
+                        converted = TextPart(text=converted.text[:prefix_length] + reference)
                 else:
                     converted = TextPart(text=converted.text[:char_budget])
             char_budget -= len(converted.text)

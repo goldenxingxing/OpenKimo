@@ -26,7 +26,7 @@ import json
 import os
 import threading
 import time
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -69,6 +69,12 @@ class SessionLease:
                 f"Session lease lost: holding epoch {self.epoch}, "
                 f"disk has {disk_epoch} ({self.path}); another worker owns this session"
             )
+
+    def run_verified[WriteResult](self, write: Callable[[], WriteResult]) -> WriteResult:
+        """Verify and perform one write in the takeover critical section."""
+        with _claim_lock(self.session_dir):
+            self.verify()
+            return write()
 
 
 def _read_epoch(path: Path) -> int:

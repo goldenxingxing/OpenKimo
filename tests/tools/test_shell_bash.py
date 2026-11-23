@@ -3,7 +3,12 @@
 from __future__ import annotations
 
 import asyncio
+import os
 import platform
+import shlex
+import subprocess
+import sys
+from pathlib import Path
 
 import pytest
 from inline_snapshot import snapshot
@@ -246,11 +251,15 @@ class _EmptyStream:
     async def readline(self) -> bytes:
         return b""
 
+    async def read(self, _size: int = -1) -> bytes:
+        return b""
+
 
 class _FakeProc:
     stdin = _NullStdin()
     stdout = _EmptyStream()
     stderr = _EmptyStream()
+    returncode = None
 
     async def wait(self) -> int:
         return 0
@@ -260,27 +269,26 @@ class _FakeProc:
 
 
 def _capture_exec(monkeypatch: pytest.MonkeyPatch) -> list[str]:
-    """Patch kaos.exec to record the command string and return a no-op process."""
+    """Patch process spawning to record the command and return a no-op process."""
     captured: list[str] = []
 
-    async def fake_exec(*args, **_kwargs):
-        # args[-1] is the command string when invoked as (shell, -c, command)
-        captured.append(args[-1])
-        return _FakeProc()
+    async def fake_spawn(shell: Shell, command: str, _env: dict[str, str]):
+        captured.append(shell._shell_args(command)[-1])
+        return _FakeProc(), False
 
-    monkeypatch.setattr("kimo_cli.tools.shell.kaos.exec", fake_exec)
+    monkeypatch.setattr("kimo_cli.tools.shell.Shell._spawn_process", fake_spawn)
     return captured
 
 
 def _capture_exec_kwargs(monkeypatch: pytest.MonkeyPatch) -> list[dict]:
-    """Patch kaos.exec to record kwargs (e.g., env) and return a no-op process."""
+    """Patch process spawning to record kwargs (e.g., env)."""
     captured: list[dict] = []
 
-    async def fake_exec(*_args, **kwargs):
-        captured.append(kwargs)
-        return _FakeProc()
+    async def fake_spawn(_self, _command: str, env: dict[str, str]):
+        captured.append({"env": env})
+        return _FakeProc(), False
 
-    monkeypatch.setattr("kimo_cli.tools.shell.kaos.exec", fake_exec)
+    monkeypatch.setattr("kimo_cli.tools.shell.Shell._spawn_process", fake_spawn)
     return captured
 
 
@@ -376,7 +384,7 @@ async def test_cancelled_command_kills_process(shell_tool: Shell, monkeypatch: p
     started = asyncio.Event()
 
     class BlockingReadable:
-        async def readline(self) -> bytes:
+        async def read(self, _size: int = -1) -> bytes:
             started.set()
             await asyncio.Event().wait()
             raise AssertionError("unreachable")
@@ -390,6 +398,7 @@ async def test_cancelled_command_kills_process(shell_tool: Shell, monkeypatch: p
             self.stdin = FakeStdin()
             self.stdout = BlockingReadable()
             self.stderr = BlockingReadable()
+            self.returncode: int | None = None
             self.kill_calls = 0
 
         async def wait(self) -> int:
@@ -400,10 +409,10 @@ async def test_cancelled_command_kills_process(shell_tool: Shell, monkeypatch: p
 
     fake_process = FakeProcess()
 
-    async def fake_exec(*_args, **_kwargs) -> FakeProcess:
-        return fake_process
+    async def fake_spawn(_self, _command: str, _env: dict[str, str]):
+        return fake_process, False
 
-    monkeypatch.setattr("kimo_cli.tools.shell.kaos.exec", fake_exec)
+    monkeypatch.setattr("kimo_cli.tools.shell.Shell._spawn_process", fake_spawn)
 
     task = asyncio.create_task(
         shell_tool._run_shell_command("sleep 10", lambda _line: None, lambda _line: None, 60)
@@ -450,3 +459,83 @@ async def test_shell_without_a_shell_reports_how_to_fix_it(
     assert "Install Git for Windows" in str(result)
     assert background.is_error
     assert captured == []
+
+
+def _process_is_alive(pid: int) -> bool:
+    result = subprocess.run(
+        ["ps", "-o", "stat=", "-p", str(pid)],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.DEVNULL,
+        check=False,
+        text=True,
+    )
+    state = result.stdout.strip()
+    return bool(state) and not state.startswith("Z")
+
+
+async def _assert_process_stopped(pid: int) -> None:
+    async with asyncio.timeout(3):
+        while _process_is_alive(pid):
+            await asyncio.sleep(0.02)
+
+
+def _command_with_sigterm_ignoring_child(pid_file: Path) -> str:
+    child_code = (
+        "import os, signal, sys, time; "
+        "signal.signal(signal.SIGTERM, signal.SIG_IGN); "
+        "open(sys.argv[1], 'w').write(str(os.getpid())); "
+        "time.sleep(30)"
+    )
+    return (
+        f"{shlex.quote(sys.executable)} -c {shlex.quote(child_code)} "
+        f"{shlex.quote(str(pid_file))} & wait"
+    )
+
+
+async def test_shell_reads_single_line_larger_than_asyncio_limit(shell_tool: Shell):
+    command = f"{shlex.quote(sys.executable)} -c \"print('x' * 200000)\""
+
+    result = await shell_tool(Params(command=command, timeout=10))
+
+    assert not result.is_error
+    assert "x" * 1000 in result.output
+    assert len(result.output) <= DEFAULT_MAX_CHARS + 200
+
+
+async def test_shell_timeout_kills_background_child(shell_tool: Shell, tmp_path: Path):
+    pid_file = tmp_path / "shell-timeout-child.pid"
+    child_pid: int | None = None
+    try:
+        result = await shell_tool(
+            Params(command=_command_with_sigterm_ignoring_child(pid_file), timeout=1)
+        )
+        assert result.is_error
+        assert "killed by timeout" in result.message
+        child_pid = int(pid_file.read_text(encoding="utf-8"))
+        await _assert_process_stopped(child_pid)
+    finally:
+        if child_pid is not None and _process_is_alive(child_pid):
+            os.kill(child_pid, 9)
+
+
+async def test_shell_cancellation_kills_background_child(shell_tool: Shell, tmp_path: Path):
+    pid_file = tmp_path / "shell-cancel-child.pid"
+    child_pid: int | None = None
+    task = asyncio.create_task(
+        shell_tool(Params(command=_command_with_sigterm_ignoring_child(pid_file), timeout=30))
+    )
+    try:
+        async with asyncio.timeout(3):
+            while not pid_file.exists() or not pid_file.read_text(encoding="utf-8").strip():
+                await asyncio.sleep(0.01)
+        child_pid = int(pid_file.read_text(encoding="utf-8"))
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+        await _assert_process_stopped(child_pid)
+    finally:
+        if child_pid is not None and _process_is_alive(child_pid):
+            os.kill(child_pid, 9)
+        if not task.done():
+            task.cancel()
+            await asyncio.gather(task, return_exceptions=True)

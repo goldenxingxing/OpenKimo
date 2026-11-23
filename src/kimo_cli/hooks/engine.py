@@ -166,8 +166,10 @@ class HookEngine:
         self._rebuild_index()
 
     def add_wire_subscriptions(self, subs: list[WireHookSubscription]) -> None:
-        """Register client-side hook subscriptions from wire initialize."""
-        self._wire_subs.extend(subs)
+        """Register or replace client-side hook subscriptions by stable ID."""
+        subscriptions = {subscription.id: subscription for subscription in self._wire_subs}
+        subscriptions.update({subscription.id: subscription for subscription in subs})
+        self._wire_subs = list(subscriptions.values())
         self._rebuild_index()
 
     def set_callbacks(

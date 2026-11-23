@@ -7,17 +7,20 @@ Communication model:
 - Each session runs in its own Docker container (kimo-agent-sandbox image)
 - The gateway executes ``docker run -i --rm`` as an asyncio subprocess
 - stdin/stdout pipes are used for JSON-RPC communication (same protocol)
-- Container lifecycle (start/stop/remove) is managed via the subprocess
+- Container lifecycle is explicitly managed by container name
 """
 
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
 import os
 import time
 from collections.abc import Callable
+from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 from uuid import UUID, uuid4
 
 from kimo_cli import logger
@@ -27,33 +30,55 @@ from kimo_cli.web.runner.activity import SessionActivity
 from kimo_cli.web.runner.process import KimoCLIRunner, SessionProcess
 
 
-def _read_owner_id_from_disk(session_id: UUID) -> str | None:
-    """Locate the session's ``state.json`` and return its ``owner_id`` field.
+@dataclass(frozen=True, slots=True)
+class _SessionSecurityContext:
+    session_dir: Path | None
+    owner_id: str | None
 
-    Sessions live under ``$KIMO_SHARE_DIR/sessions/<work_dir_hash>/<session_id>/``;
-    the work-dir hash is unknown to the runner, so we glob across hashes.
-    """
+
+def _read_session_security_context(session_id: UUID) -> _SessionSecurityContext:
+    """Read owner and storage location without turning errors into anonymous access."""
     share = os.environ.get("KIMO_SHARE_DIR")
     if not share:
-        return None
+        return _SessionSecurityContext(session_dir=None, owner_id=None)
+
     sessions_root = Path(share) / "sessions"
-    if not sessions_root.is_dir():
-        return None
-    for state_file in sessions_root.glob(f"*/{session_id}/state.json"):
-        try:
-            data = json.loads(state_file.read_text(encoding="utf-8"))
-        except (OSError, ValueError):
-            return None
-        if not isinstance(data, dict):
-            return None
-        owner = data.get("owner_id")
-        return owner if isinstance(owner, str) else None
-    return None
+    try:
+        matches = list(sessions_root.glob(f"*/{session_id}"))
+    except OSError as exc:
+        raise RuntimeError(f"Cannot locate session storage safely: {session_id}") from exc
+    if not matches:
+        # A genuinely new session has no on-disk owner yet and retains the
+        # legacy anonymous-memory behaviour.
+        return _SessionSecurityContext(session_dir=None, owner_id=None)
+    if len(matches) != 1 or not matches[0].is_dir():
+        raise ValueError(f"Ambiguous or invalid session storage: {session_id}")
+
+    session_dir = matches[0]
+    try:
+        raw: Any = json.loads((session_dir / "state.json").read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, json.JSONDecodeError) as exc:
+        raise ValueError(f"Cannot read session owner safely: {session_id}") from exc
+    if not isinstance(raw, dict):
+        raise ValueError(f"Invalid session state format: {session_id}")
+
+    owner_id = raw.get("owner_id")
+    if owner_id is None:
+        return _SessionSecurityContext(session_dir=session_dir, owner_id=None)
+    if not isinstance(owner_id, str) or not owner_id.strip():
+        raise ValueError(f"Invalid session owner format: {session_id}")
+    resolve_owner_id(owner_id)
+    return _SessionSecurityContext(session_dir=session_dir, owner_id=owner_id)
 
 
-# Environment variable names to forward into sandbox containers
-_SANDBOX_ENV_VARS = [
-    # LLM configuration
+def _read_owner_id_from_disk(session_id: UUID) -> str | None:
+    """Read the persisted owner for this session, failing closed on disk errors."""
+    return _read_session_security_context(session_id).owner_id
+
+
+# Environment variable names to forward into sandbox containers. Values travel
+# in the docker CLI's environment, never in its argv or startup logs.
+_SANDBOX_ENV_VARS = (
     "KIMO_MODEL_MAX_CONTEXT_SIZE",
     "OPENAI_API_KEY",
     "OPENAI_BASE_URL",
@@ -64,16 +89,15 @@ _SANDBOX_ENV_VARS = [
     "LLM_PROVIDER",
     "LLM_THINKING",
     "LLM_TEMPERATURE",
-    # Session / runtime
     "KIMO_SHARE_DIR",
     "KIMO_SESSIONS_DIR",
     "KIMO_WORK_DIR",
-    # Feature flags
+    "KIMO_OUTPUT_DIR",
+    "KIMO_DEBUG",
     "ENABLE_BROWSER",
     "ENABLE_JUPYTER",
     "ENABLE_SHELL_SANDBOX",
     "BLOCK_DANGEROUS_COMMANDS",
-    # Browser / display
     "DISPLAY",
     "SCREEN_RESOLUTION",
     "CHROME_LOCALE",
@@ -81,22 +105,36 @@ _SANDBOX_ENV_VARS = [
     "CHROME_INIT_URL",
     "CHROME_FLAGS",
     "USE_CDP",
-    # HuggingFace
     "HF_HOME",
     "HF_TOKEN",
     "HUGGINGFACE_HUB_CACHE",
     "TRANSFORMERS_CACHE",
-]
+    "NO_PROXY",
+    "no_proxy",
+)
+
+# Worker inputs that are genuinely shared. Mount them individually so other
+# users' sessions and memory are not visible inside this session's container.
+_READ_ONLY_SHARED_PATHS = (
+    "kimo.json",
+    "config.toml",
+    "config.json",
+    "mcp.json",
+    "mcp-oauth",
+    "credentials",
+    "device_id",
+    "evolution",
+    "plugins",
+    "skills",
+    "bin",
+)
+
+_DOCKER_STOP_TIMEOUT_SECONDS = 5
+_DOCKER_COMMAND_TIMEOUT_SECONDS = 10
 
 
 class ContainerSessionProcess(SessionProcess):
-    """SessionProcess that runs the worker inside a Docker container.
-
-    The container is launched via ``docker run -i --rm`` as an asyncio
-    subprocess.  Killing the subprocess stops and removes the container
-    automatically.  stdin/stdout communication is identical to the local
-    subprocess model.
-    """
+    """SessionProcess that runs the worker inside a Docker container."""
 
     def __init__(
         self,
@@ -138,47 +176,45 @@ class ContainerSessionProcess(SessionProcess):
             self._in_flight_prompt_ids.clear()
             self._expecting_exit = False
             self._worker_id = str(uuid4())
-
-            # Use worker_id suffix to avoid container name conflicts when
-            # restarting: the old container may still be stopping (--rm is
-            # async) when the new one tries to register the same name.
+            # Avoid name conflicts while a previous --rm container is stopping.
             self._container_name = f"kimo-session-{self.session_id}-{self._worker_id[:8]}"
 
-            STREAM_LIMIT = 16 * 1024 * 1024
-
-            cmd = self._build_docker_cmd()
-
-            logger.info(
-                "Starting container for session {session_id}: {cmd}",
-                session_id=self.session_id,
-                cmd=" ".join(cmd),
-            )
-
-            self._process = await asyncio.create_subprocess_exec(
-                *cmd,
-                stdin=asyncio.subprocess.PIPE,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
-                limit=STREAM_LIMIT,
-                env=get_clean_env(),
-            )
-
-            # Same bookkeeping as SessionProcess.start: the short-lived-worker
-            # guard needs the timestamp, and a restarted worker needs its
-            # initialize/state replayed before it accepts a prompt.
-            self._worker_started_at = time.monotonic()
-            self._read_task = asyncio.create_task(self._read_loop())
-            await self._replay_initialize()
-            if restart_started_at is not None:
-                elapsed_ms = int((time.perf_counter() - restart_started_at) * 1000)
-                detail = f"restart_ms={elapsed_ms}"
-                await self._emit_status("idle", reason=reason or "start", detail=detail)
-                await self._emit_restart_notice(reason=reason, restart_ms=elapsed_ms)
-            else:
-                await self._emit_status("idle", reason=reason or "start", detail=None)
+            try:
+                cmd, env = self._build_docker_launch()
+                logger.info(
+                    "Starting container for session {session_id}: {cmd}",
+                    session_id=self.session_id,
+                    cmd=" ".join(cmd),
+                )
+                self._process = await asyncio.create_subprocess_exec(
+                    *cmd,
+                    stdin=asyncio.subprocess.PIPE,
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.PIPE,
+                    limit=16 * 1024 * 1024,
+                    env=env,
+                )
+                self._worker_started_at = time.monotonic()
+                self._read_task = asyncio.create_task(self._read_loop())
+                await self._replay_initialize()
+                if restart_started_at is not None:
+                    elapsed_ms = int((time.perf_counter() - restart_started_at) * 1000)
+                    detail = f"restart_ms={elapsed_ms}"
+                    await self._emit_status("idle", reason=reason or "start", detail=detail)
+                    await self._emit_restart_notice(reason=reason, restart_ms=elapsed_ms)
+                else:
+                    await self._emit_status("idle", reason=reason or "start", detail=detail)
+            except BaseException:
+                # Includes cancellation after spawn. A failed start must never
+                # leave a live container or state that makes start() return early.
+                await asyncio.shield(self._cleanup_failed_start())
+                raise
 
     def _build_docker_cmd(self) -> list[str]:
-        """Build the ``docker run`` command for this session."""
+        """Build the Docker command without embedding environment values in argv."""
+        return self._build_docker_launch()[0]
+
+    def _build_docker_launch(self) -> tuple[list[str], dict[str, str]]:
         cmd: list[str] = [
             "docker",
             "run",
@@ -187,8 +223,6 @@ class ContainerSessionProcess(SessionProcess):
             "--name",
             self._container_name,
         ]
-
-        # Resource limits
         cpus = self._resource_limits.get("cpus")
         if cpus:
             cmd.extend(["--cpus", cpus])
@@ -198,67 +232,145 @@ class ContainerSessionProcess(SessionProcess):
         pids = self._resource_limits.get("pids")
         if pids:
             cmd.extend(["--pids-limit", pids])
-
-        # Network
         if self._network:
             cmd.extend(["--network", self._network])
 
-        # Mount shared data volume.
-        # KIMO_SESSION_DATA_DIR is the host-side path (bind mount).
-        # KIMO_SHARE_DIR is the in-container mount point.
-        # We use the host path so that sandbox containers (spawned via the
-        # Docker socket from inside the gateway container) see the same data
-        # as the gateway itself.
-        share_dir = os.environ.get("KIMO_SHARE_DIR", "/data/sessions")
-        host_share_dir = os.environ.get("KIMO_SESSION_DATA_DIR", share_dir)
-        cmd.extend(["-v", f"{host_share_dir}:{share_dir}"])
+        share_dir = Path(os.environ.get("KIMO_SHARE_DIR", "/data/sessions"))
+        host_share_dir = Path(os.environ.get("KIMO_SESSION_DATA_DIR", str(share_dir)))
+        context = _read_session_security_context(self.session_id)
 
-        # Mount custom skills directory if configured
+        for name in _READ_ONLY_SHARED_PATHS:
+            host_path = host_share_dir / name
+            if host_path.exists():
+                cmd.extend(["-v", f"{host_path}:{share_dir / name}:ro"])
+
+        if context.session_dir is not None:
+            relative_session_dir = context.session_dir.relative_to(share_dir)
+            host_session_dir = host_share_dir / relative_session_dir
+            cmd.extend(["-v", f"{host_session_dir}:{context.session_dir}"])
+
+            # The worker needs a writable logs/ directory. Scope it to this
+            # session instead of giving every container the shared logs tree.
+            host_logs_dir = host_session_dir / "container-logs"
+            host_logs_dir.mkdir(parents=True, exist_ok=True)
+            cmd.extend(["-v", f"{host_logs_dir}:{share_dir / 'logs'}"])
+
         custom_skills = os.environ.get("CUSTOM_SKILLS_HOST_PATH")
         if custom_skills:
             cmd.extend(["-v", f"{custom_skills}:/root/.config/agents/skills:ro"])
 
-        # Mount HuggingFace cache directory if configured
         hf_cache = os.environ.get("HF_CACHE_HOST_PATH")
         if hf_cache:
-            cmd.extend(["-v", f"{hf_cache}:/root/.cache/huggingface"])
-            cmd.extend(["-e", "HF_HOME=/root/.cache/huggingface"])
+            cmd.extend(["-v", f"{hf_cache}:/root/.cache/huggingface:ro"])
 
-        # Forward known environment variables
-        for var_name in _SANDBOX_ENV_VARS:
-            value = os.environ.get(var_name)
-            if value is not None:
-                cmd.extend(["-e", f"{var_name}={value}"])
+        owner_id = resolve_owner_id(context.owner_id)
+        host_memory_dir = host_share_dir / "users" / owner_id / "memory"
+        host_memory_dir.mkdir(parents=True, exist_ok=True)
+        container_memory_dir = share_dir / "users" / owner_id / "memory"
+        cmd.extend(["-v", f"{host_memory_dir}:{container_memory_dir}"])
 
-        # Extra env vars from configuration
-        for key, value in self._extra_env.items():
-            cmd.extend(["-e", f"{key}={value}"])
+        forwarded_env = {name: os.environ[name] for name in _SANDBOX_ENV_VARS if name in os.environ}
+        forwarded_env.update(self._extra_env)
+        forwarded_env["KIMO_SESSION_ID"] = str(self.session_id)
+        forwarded_env["KIMO_USER_ID"] = owner_id
+        if hf_cache:
+            forwarded_env["HF_HOME"] = "/root/.cache/huggingface"
+        for name in forwarded_env:
+            cmd.extend(["-e", name])
 
-        # Security: drop privileges
-        cmd.extend(["--privileged=false"])
+        cmd.extend(["--privileged=false", self._image, "/start-sandbox.sh"])
+        env = get_clean_env()
+        env.update(forwarded_env)
+        return cmd, env
 
-        # Pass session ID so start-sandbox.sh knows which worker to launch
-        cmd.extend(["-e", f"KIMO_SESSION_ID={self.session_id}"])
-
-        # Pass user identity so the agent can route per-user private memory
-        # (cross-session highlights / persistent.jsonl) under
-        # ``$KIMO_SHARE_DIR/users/<owner_id>/memory/``.  Sessions without an
-        # authenticated owner fall back to a sentinel so they cannot pollute
-        # real users' data.
-        owner_id_raw = _read_owner_id_from_disk(self.session_id)
+    async def _run_docker_cleanup_command(self, *args: str) -> None:
         try:
-            owner_id = resolve_owner_id(owner_id_raw)
-        except ValueError:
-            # A dirty state.json must not abort container startup; fall back
-            # to the anonymous sentinel like an ownerless session.
-            owner_id = resolve_owner_id(None)
-        cmd.extend(["-e", f"KIMO_USER_ID={owner_id}"])
+            proc = await asyncio.create_subprocess_exec(
+                "docker",
+                *args,
+                stdout=asyncio.subprocess.DEVNULL,
+                stderr=asyncio.subprocess.DEVNULL,
+            )
+            try:
+                await asyncio.wait_for(proc.wait(), timeout=_DOCKER_COMMAND_TIMEOUT_SECONDS)
+            except TimeoutError:
+                with contextlib.suppress(ProcessLookupError):
+                    proc.kill()
+                await asyncio.wait_for(proc.wait(), timeout=1.0)
+        except asyncio.CancelledError:
+            raise
+        except (OSError, TimeoutError):
+            logger.warning(
+                "Docker cleanup command unavailable or timed out for {name}",
+                name=self._container_name,
+            )
 
-        # Image + entrypoint command (runs start-sandbox.sh which launches
-        # Xvfb, kernel server, browser guard, and finally the worker)
-        cmd.extend([self._image, "/start-sandbox.sh"])
+    async def _cleanup_container(self) -> None:
+        """Bounded stop/rm by name, independent of the attached CLI's state."""
+        await self._run_docker_cleanup_command(
+            "stop", "--time", str(_DOCKER_STOP_TIMEOUT_SECONDS), self._container_name
+        )
+        await self._run_docker_cleanup_command("rm", "--force", self._container_name)
 
-        return cmd
+    async def _cancel_read_task(self) -> None:
+        task = self._read_task
+        self._read_task = None
+        if task is None or task is asyncio.current_task():
+            return
+        task.cancel()
+        await asyncio.gather(task, return_exceptions=True)
+
+    def _reset_worker_state(self) -> None:
+        self._process = None
+        self._worker_started_at = None
+        self._worker_id = None
+        self._in_flight_prompt_ids.clear()
+        self._expecting_exit = False
+
+    async def _cleanup_failed_start(self) -> None:
+        self._expecting_exit = True
+        process = self._process
+        try:
+            if process is not None:
+                if process.returncode is None:
+                    with contextlib.suppress(ProcessLookupError, OSError):
+                        process.terminate()
+                try:
+                    await asyncio.wait_for(process.wait(), timeout=10.0)
+                except TimeoutError:
+                    with contextlib.suppress(ProcessLookupError, OSError):
+                        process.kill()
+                    await asyncio.wait_for(process.wait(), timeout=1.0)
+        except (OSError, TimeoutError):
+            pass
+        finally:
+            self._process = None
+            await self._cancel_read_task()
+            await self._cleanup_container()
+            self._reset_worker_state()
+
+    async def stop_worker(
+        self,
+        *,
+        reason: str | None = None,
+        emit_status: bool = True,
+    ) -> None:
+        """Stop the attached CLI and remove the named container, even if CLI died."""
+        try:
+            await super().stop_worker(reason=reason, emit_status=emit_status)
+        finally:
+            self._process = None
+            await self._cancel_read_task()
+            self._reset_worker_state()
+            await asyncio.shield(self._cleanup_container())
+
+    async def _read_loop(self) -> None:
+        try:
+            await super()._read_loop()
+        finally:
+            if not self._expecting_exit:
+                # The attached docker CLI can exit while the container survives.
+                await asyncio.shield(self._cleanup_container())
 
 
 class ContainerRunner(KimoCLIRunner):
@@ -280,10 +392,8 @@ class ContainerRunner(KimoCLIRunner):
 
     def start(self) -> None:
         """Start the runner (no-op, containers started on demand)."""
-        pass
 
     def get_session(self, session_id: UUID) -> ContainerSessionProcess | None:
-        """Return the session process for the given session ID, or None."""
         proc = self._sessions.get(session_id)
         if proc is None:
             return None
@@ -291,7 +401,6 @@ class ContainerRunner(KimoCLIRunner):
         return proc
 
     async def get_or_create_session(self, session_id: UUID) -> ContainerSessionProcess:
-        """Get or create a containerized session process."""
         async with self._lock:
             if session_id not in self._sessions:
                 self._sessions[session_id] = ContainerSessionProcess(

@@ -9,16 +9,21 @@ transcript — jcode's ``session_lease.rs`` adapted to OpenKimo's file layout.
 
 from __future__ import annotations
 
+import asyncio
 import json
+import threading
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 import pytest
+from kosong.message import Message
 
 from kimo_cli.session_lease import (
     LeaseLostError,
+    SessionLease,
     claim_session_lease,
 )
+from kimo_cli.soul.context import Context
 from kimo_cli.wire.file import WireFile
 from kimo_cli.wire.types import TurnBegin
 
@@ -84,6 +89,43 @@ async def test_wire_append_fails_after_takeover(tmp_path: Path) -> None:
 
     with pytest.raises(LeaseLostError):
         await wire_file.append_message(TurnBegin(user_input="world"))
+
+
+@pytest.mark.asyncio
+async def test_context_write_and_verify_share_takeover_critical_section(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A takeover requested after verify cannot overtake the guarded write."""
+    old_lease = claim_session_lease(tmp_path)
+    context = Context(tmp_path / "context.jsonl", lease=old_lease)
+    verified = threading.Event()
+    allow_write = threading.Event()
+    original_verify = SessionLease.verify
+
+    def _pause_after_verify(lease: SessionLease) -> None:
+        original_verify(lease)
+        if lease is old_lease:
+            verified.set()
+            assert allow_write.wait(timeout=5)
+
+    monkeypatch.setattr(SessionLease, "verify", _pause_after_verify)
+    write_task = asyncio.create_task(context.append_message(Message(role="user", content="old")))
+    assert await asyncio.to_thread(verified.wait, 5)
+
+    loop = asyncio.get_running_loop()
+    takeover = loop.run_in_executor(None, claim_session_lease, tmp_path)
+    await asyncio.sleep(0.1)
+    assert not takeover.done(), "takeover must wait for the in-flight verified write"
+
+    allow_write.set()
+    await write_task
+    new_lease = await takeover
+    assert new_lease.epoch == old_lease.epoch + 1
+    assert "old" in context.file_backend.read_text(encoding="utf-8")
+
+    with pytest.raises(LeaseLostError):
+        await context.append_message(Message(role="user", content="stale"))
+    assert "stale" not in context.file_backend.read_text(encoding="utf-8")
 
 
 @pytest.mark.asyncio

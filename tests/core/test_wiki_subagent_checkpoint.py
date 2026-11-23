@@ -533,3 +533,44 @@ async def test_checkpoint_delivery_is_inert_without_a_root_coordinator(runtime) 
     _write_agent_task(runtime, "t-none", "a2", status="completed")
 
     assert await runtime.background_tasks.checkpoint_block_for_task("t-none") == ""
+
+
+@pytest.mark.asyncio
+async def test_checkpoint_render_failure_does_not_consume_delivery_key(
+    root_runtime, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    coordinator = root_runtime.wiki_coordinator
+    await coordinator.begin_turn("root work", "root work")
+    subagent = _subagent_reporter(root_runtime, agent_id="a-render", run_generation=1)
+    await _observe_workspace_file(subagent)
+    _write_agent_task(root_runtime, "t-render", "a-render", status="completed")
+    store = root_runtime.background_tasks.store
+    store.write_wiki_evidence_manifest(
+        "t-render",
+        WikiEvidenceManifest(
+            agent_id="a-render",
+            task_id="t-render",
+            run_generation=1,
+            summary_hash=content_hash(b"conclusion"),
+            evidence=subagent.wiki_evidence_reporter.seal_subagent_run(),
+        ),
+    )
+    original_render = coordinator.render_checkpoints
+    should_fail = True
+
+    async def fail_first_render(checkpoints):
+        nonlocal should_fail
+        if should_fail:
+            should_fail = False
+            raise RuntimeError("render failed")
+        return await original_render(checkpoints)
+
+    monkeypatch.setattr(coordinator, "render_checkpoints", fail_first_render)
+
+    assert await root_runtime.background_tasks.checkpoint_block_for_task("t-render") == ""
+    assert store.read_consumer("t-render").delivered_wiki_checkpoint_keys == []
+
+    block = await root_runtime.background_tasks.checkpoint_block_for_task("t-render")
+
+    assert "<OPENKIMO_WIKI_CHECKPOINT_START>" in block
+    assert len(store.read_consumer("t-render").delivered_wiki_checkpoint_keys) == 1

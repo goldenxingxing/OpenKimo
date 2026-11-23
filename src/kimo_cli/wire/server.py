@@ -735,9 +735,9 @@ class WireServer:
         self._apply_wire_client_info(msg.params.client)
         self._track_session_started(msg.params.client)
 
-        if msg.params.capabilities is not None:
-            self._client_supports_question = msg.params.capabilities.supports_question
-            self._client_supports_plan_mode = msg.params.capabilities.supports_plan_mode
+        capabilities = msg.params.capabilities
+        self._client_supports_question = bool(capabilities and capabilities.supports_question)
+        self._client_supports_plan_mode = bool(capabilities and capabilities.supports_plan_mode)
 
         if toolset is not None:
             self._sync_ask_user_tool_visibility(toolset)

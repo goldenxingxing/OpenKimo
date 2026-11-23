@@ -188,13 +188,12 @@ class Session:
 
         if session_id is None:
             session_id = str(uuid.uuid4())
-        # session_id comes from the CLI/ACP caller. Keep it a single path
-        # component so a crafted '../...' cannot read or write outside the
-        # sessions directory.
-        if not re.fullmatch(r"[A-Za-z0-9_-]{1,128}", session_id):
-            raise ValueError(f"Invalid session id: {session_id!r}")
+        _validate_session_id(session_id)
         session_dir = work_dir_meta.sessions_dir / session_id
-        session_dir.mkdir(parents=True, exist_ok=True)
+        try:
+            session_dir.mkdir(parents=True, exist_ok=False)
+        except FileExistsError as exc:
+            raise ValueError(f"Session already exists: {session_id!r}") from exc
         if output_dir := work_dir_meta.output_dir:
             output_dir.mkdir(parents=True, exist_ok=True)
 
@@ -237,6 +236,7 @@ class Session:
     @staticmethod
     async def find(work_dir: KaosPath, session_id: str) -> Session | None:
         """Find a session by work directory and session ID."""
+        _validate_session_id(session_id)
         work_dir = work_dir.canonical()
         logger.debug(
             "Finding session for work directory: {work_dir}, session ID: {session_id}",
@@ -359,6 +359,13 @@ class Session:
             session_id=work_dir_meta.last_session_id,
         )
         return await Session.find(work_dir, work_dir_meta.last_session_id)
+
+
+def _validate_session_id(session_id: str) -> None:
+    # Session IDs come from CLI/ACP callers. Keep them a single path component
+    # so crafted absolute paths, separators, or '../' cannot escape session storage.
+    if not re.fullmatch(r"[A-Za-z0-9_-]{1,128}", session_id):
+        raise ValueError(f"Invalid session id: {session_id!r}")
 
 
 def _find_session_dir(work_dir_meta: WorkDirMeta, session_id: str) -> Path | None:

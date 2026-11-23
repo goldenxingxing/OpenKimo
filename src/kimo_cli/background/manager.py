@@ -451,6 +451,7 @@ class BackgroundTaskManager:
         )
         if checkpoint is None:
             return ""
+        block = await coordinator.render_checkpoints((checkpoint,))
         updated = consumer.model_copy(
             update={
                 "delivered_wiki_checkpoint_keys": [
@@ -460,7 +461,7 @@ class BackgroundTaskManager:
             }
         )
         await asyncio.to_thread(self._store.write_consumer, task_id, updated)
-        return await coordinator.render_checkpoints((checkpoint,))
+        return block
 
     def get_task(self, task_id: str) -> TaskView | None:
         try:
@@ -542,6 +543,10 @@ class BackgroundTaskManager:
                 return
             if runtime.child_pid is not None:
                 os.kill(runtime.child_pid, signal.SIGTERM)
+            elif runtime.worker_pid is not None:
+                # The control file remains authoritative; this signal covers the
+                # startup window before the detached worker has polled it.
+                os.kill(runtime.worker_pid, signal.SIGTERM)
         except ProcessLookupError:
             pass
         except Exception:

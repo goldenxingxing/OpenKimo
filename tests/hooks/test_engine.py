@@ -136,7 +136,20 @@ async def test_wire_hook_callback_failure_resolves_without_waiting():
     assert not results[0].timed_out
 
 
-def test_wire_hook_handle_uses_the_running_loop() -> None:
+def test_wire_subscriptions_with_same_id_replace_instead_of_accumulating() -> None:
+    eng = HookEngine()
+    eng.add_wire_subscriptions(
+        [WireHookSubscription(id="w1", event="PreToolUse", matcher="Shell", timeout=30)]
+    )
+    eng.add_wire_subscriptions(
+        [WireHookSubscription(id="w1", event="PreToolUse", matcher="Bash", timeout=10)]
+    )
+
+    assert eng.summary == {"PreToolUse": 1}
+    assert eng.details()["PreToolUse"] == [
+        {"matcher": "Bash", "source": "wire", "command": "(client-side)"}
+    ]
+
     """``get_event_loop()`` raises on 3.14 when no loop is current."""
     import inspect
 

@@ -113,7 +113,30 @@ def test_mcp_oversized_text_is_offloaded(tmp_path: Path) -> None:
     assert str(files[0]) in joined
 
 
-def test_mcp_without_offloader_keeps_plain_truncation() -> None:
+def test_mcp_exhausted_budget_does_not_offload_every_remaining_part(tmp_path: Path) -> None:
+    offloader = ToolOutputOffloader(tmp_path / "offload")
+    big = "d" * (MCP_MAX_OUTPUT_CHARS + 1)
+    result = CallToolResult(
+        content=[
+            TextContent(type="text", text=big),
+            TextContent(type="text", text="x" * 1_000),
+            TextContent(type="text", text="y" * 1_000),
+        ],
+        structured_content=None,
+        meta=None,
+    )
+
+    value = convert_mcp_tool_result(result, offloader=offloader, tool_name="playwright")
+
+    files = list((tmp_path / "offload").glob("*playwright*.txt"))
+    assert len(files) == 1
+    texts = [p.text for p in value.output if hasattr(p, "text")]
+    assert len(texts) == 2  # budgeted first part + one truncation notice
+    assert len(texts[0]) == MCP_MAX_OUTPUT_CHARS
+    assert str(files[0]) in texts[0]
+    assert "x" * 1_000 not in texts
+    assert "y" * 1_000 not in texts
+
     big = "d" * (MCP_MAX_OUTPUT_CHARS + 10_000)
     result = CallToolResult(
         content=[TextContent(type="text", text=big)], structured_content=None, meta=None

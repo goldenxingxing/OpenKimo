@@ -132,6 +132,19 @@ SKILL_COMMAND_PREFIX = "skill:"
 FLOW_COMMAND_PREFIX = "flow:"
 DEFAULT_MAX_FLOW_MOVES = 1000
 
+
+async def _await_shielded[T](awaitable: Awaitable[T]) -> T:
+    """Wait for the inner task after outer cancellation, preserving its errors."""
+    inner = asyncio.ensure_future(awaitable)
+    try:
+        return await asyncio.shield(inner)
+    except asyncio.CancelledError:
+        # If the inner failed while the outer task was being cancelled, awaiting
+        # it raises that failure; otherwise the original cancellation is reraised.
+        await inner
+        raise
+
+
 MAX_TRUNCATION_CONTINUATIONS = 3
 """How many times in a row a reply cut off by the output token limit is continued
 before the turn ends with what it has."""
@@ -1288,6 +1301,8 @@ class KimoSoul:
             if not is_within_directory(root.root, self._runtime.session.work_dir)
         ]
         self._runtime.skills_prompt = new_prompt
+        self._slash_commands = self._build_slash_commands()
+        self._slash_command_map = self._index_slash_commands(self._slash_commands)
         self._runtime.managed_skill_revision = revision
 
     async def _turn(self, user_message: Message) -> TurnOutcome:
@@ -2022,7 +2037,7 @@ class KimoSoul:
         # 2e.7. CONTEXT GROWTH
         # ═══════════════════════════════════════════════════════════════════════
         # shield the context manipulation from interruption
-        await asyncio.shield(self._grow_context(result, results))
+        await _await_shielded(self._grow_context(result, results))
 
         # ═══════════════════════════════════════════════════════════════════════
         # 2e.8. OUTCOME RESOLUTION
@@ -2213,14 +2228,29 @@ class KimoSoul:
             history = self._tool_output_pruner.view(history)
         return len(self._agent.system_prompt.encode("utf-8")) + estimate_message_bytes(history)
 
-    async def _replace_context_history(self, messages: Sequence[Message]) -> None:
-        """Rebuild the context with ``messages`` (system prompt is re-asserted)."""
+    async def _replace_context_history(
+        self, messages: Sequence[Message], *, estimated_token_count: int | None = None
+    ) -> None:
+        """Finish the full rebuild even if the caller is cancelled after clear."""
+        await _await_shielded(
+            self._replace_context_history_inner(
+                messages, estimated_token_count=estimated_token_count
+            )
+        )
+
+    async def _replace_context_history_inner(
+        self, messages: Sequence[Message], *, estimated_token_count: int | None = None
+    ) -> None:
         await self._context.clear()
         await self._context.write_system_prompt(self._agent.system_prompt)
         await self._checkpoint()
         await self._context.append_message(messages)
-        # rough estimate; corrected by the real usage on the next LLM call
-        await self._context.update_token_count(estimate_text_tokens(messages))
+        # Rough estimate; corrected by the real usage on the next LLM call.
+        await self._context.update_token_count(
+            estimate_text_tokens(messages)
+            if estimated_token_count is None
+            else estimated_token_count
+        )
 
     async def _self_heal_oversized_request(self) -> bool:
         """Shrink the context after a 400 "message size exceeds limit" error.
@@ -2322,13 +2352,14 @@ class KimoSoul:
         # The compaction request itself must fit the provider's request-body
         # limit (see upstream issue #2402): when the history is already over
         # the byte threshold, strip images first so compaction can't 400.
-        history = self._context.history
-        if estimate_message_bytes(history) > self._loop_control.max_request_bytes:
-            history, _ = strip_image_parts(history, keep_last_user_message=True)
+        history = list(self._context.history)
+        request_history = history
+        if estimate_message_bytes(request_history) > self._loop_control.max_request_bytes:
+            request_history, _ = strip_image_parts(request_history, keep_last_user_message=True)
 
         if chat_provider is not None and isinstance(self._compaction, SimpleCompaction):
             compact_message, to_preserve = self._compaction.prepare(
-                history,
+                request_history,
                 custom_instruction=custom_instruction,
                 max_context_size=self._runtime.llm.max_context_size
                 if self._runtime.llm is not None
@@ -2374,7 +2405,7 @@ class KimoSoul:
                 chat_provider=request_provider,
             )
             return await self._compaction.compact(
-                history,
+                request_history,
                 compaction_llm,
                 custom_instruction=custom_instruction,
             )
@@ -2487,12 +2518,8 @@ class KimoSoul:
             )
 
         history_count_before = len(self._context.history)
-        await self._context.clear()
-        await self._context.write_system_prompt(self._agent.system_prompt)
-        await self._checkpoint()
-        await self._context.append_message(compaction_result.messages)
+        post_compaction_messages = list(compaction_result.messages)
         estimated_token_count = compaction_result.estimated_token_count
-
         if self.is_root:
             active_task_snapshot = build_active_task_snapshot(self._runtime.background_tasks)
             if active_task_snapshot is not None:
@@ -2506,11 +2533,16 @@ class KimoSoul:
                         TextPart(text=active_task_snapshot),
                     ],
                 )
-                await self._context.append_message(active_task_message)
+                post_compaction_messages.append(active_task_message)
                 estimated_token_count += estimate_text_tokens([active_task_message])
 
-        # Estimate token count so context_usage is not reported as 0%
-        await self._context.update_token_count(estimated_token_count)
+        # Estimate token count so context_usage is not reported as 0%. The
+        # rebuild is shielded as one unit so cancellation cannot strand an empty
+        # or half-restored context after its initial clear.
+        await self._replace_context_history(
+            post_compaction_messages,
+            estimated_token_count=estimated_token_count,
+        )
 
         # Notify dynamic injection providers that history has been rebuilt so
         # they can reset any one-shot throttling state. Failures are isolated

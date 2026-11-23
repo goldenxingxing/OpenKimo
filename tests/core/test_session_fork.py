@@ -269,6 +269,44 @@ class TestTruncateContextAtTurn:
         lines = truncate_context_at_turn(context_path, 5)
         assert len(lines) == 2
 
+    def test_wire_boundary_ignores_compaction_summary_and_slash_turn(self, session_dir: Path):
+        wire_path = _write_wire_file(session_dir, ["first", "/plan", "second"])
+        context_path = session_dir / "context.jsonl"
+        records = [
+            {"role": "user", "content": "first"},
+            {"role": "assistant", "content": "answer one"},
+            {
+                "role": "user",
+                "content": (
+                    "<system>Previous context has been compacted. "
+                    "Here is the compaction output:</system>"
+                ),
+            },
+            {"role": "assistant", "content": "continued"},
+            {"role": "user", "content": "second"},
+            {"role": "assistant", "content": "answer two"},
+        ]
+        context_path.write_text(
+            "".join(json.dumps(record) + "\n" for record in records),
+            encoding="utf-8",
+        )
+
+        lines = truncate_context_at_turn(context_path, 1, wire_path=wire_path)
+
+        assert len(lines) == 4
+        assert "second" not in lines
+        assert "compaction output" in lines[2]
+
+    def test_wire_boundary_handles_repeated_user_text(self, session_dir: Path):
+        wire_path = _write_wire_file(session_dir, ["repeat", "/plan", "repeat"])
+        context_path = session_dir / "context.jsonl"
+        _write_context_file(session_dir, ["repeat", "repeat"])
+
+        lines = truncate_context_at_turn(context_path, 0, wire_path=wire_path)
+
+        assert len(lines) == 2
+        assert sum(json.loads(line)["role"] == "user" for line in lines) == 1
+
 
 # ---------------------------------------------------------------------------
 # Tests: fork_session

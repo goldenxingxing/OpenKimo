@@ -31,6 +31,65 @@ def _make_flow() -> Flow:
     return Flow(nodes=nodes, outgoing=outgoing, begin_id="BEGIN", end_id="END")
 
 
+@pytest.mark.asyncio
+async def test_managed_skill_refresh_rebuilds_slash_registry(
+    runtime: Runtime, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    old_dir = tmp_path / "old-skill"
+    new_dir = tmp_path / "new-skill"
+    old_dir.mkdir()
+    new_dir.mkdir()
+    old_skill = Skill(
+        name="old-skill",
+        description="Old skill",
+        type="standard",
+        dir=KaosPath.unsafe_from_local_path(old_dir),
+        skill_md_file=KaosPath.unsafe_from_local_path(old_dir / "SKILL.md"),
+        scope="user",
+    )
+    new_skill = Skill(
+        name="new-skill",
+        description="New skill",
+        type="standard",
+        dir=KaosPath.unsafe_from_local_path(new_dir),
+        skill_md_file=KaosPath.unsafe_from_local_path(new_dir / "SKILL.md"),
+        scope="user",
+    )
+    runtime.skills = {old_skill.name: old_skill}
+    runtime.managed_skill_revision = 0
+    agent = Agent(
+        name="Test Agent",
+        system_prompt="Test system prompt.\nNo skills found.",
+        toolset=EmptyToolset(),
+        runtime=runtime,
+    )
+    soul = KimoSoul(agent, context=Context(file_backend=tmp_path / "history.jsonl"))
+    assert soul._find_slash_command("skill:old-skill") is not None
+
+    from types import SimpleNamespace
+
+    monkeypatch.setattr(
+        "kimo_cli.skill.manager.SkillManager",
+        lambda: SimpleNamespace(revision=1),
+    )
+    monkeypatch.setattr(
+        "kimo_cli.skill.resolve_skills_roots",
+        AsyncMock(return_value=[]),
+    )
+    monkeypatch.setattr(
+        "kimo_cli.skill.discover_skills_from_roots",
+        AsyncMock(return_value=[new_skill]),
+    )
+
+    await soul._refresh_managed_skills()
+
+    command_names = {command.name for command in soul.available_slash_commands}
+    assert "skill:new-skill" in command_names
+    assert "skill:old-skill" not in command_names
+    assert soul._find_slash_command("skill:new-skill") is not None
+    assert soul._find_slash_command("skill:old-skill") is None
+
+
 def test_flow_skill_registers_skill_and_flow_commands(runtime: Runtime, tmp_path: Path) -> None:
     flow = _make_flow()
     skill_dir = tmp_path / "flow-skill"

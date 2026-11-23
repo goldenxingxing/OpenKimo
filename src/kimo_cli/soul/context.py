@@ -5,7 +5,7 @@ import contextlib
 import json
 import os
 import time
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from pathlib import Path
 from typing import Any, cast
 from uuid import uuid4
@@ -15,7 +15,7 @@ import aiofiles.os
 from kosong.message import Message
 from pydantic import ValidationError
 
-from kimo_cli.session_lease import SessionLease
+from kimo_cli.session_lease import LeaseLostError, SessionLease
 from kimo_cli.soul.compaction import estimate_text_tokens
 from kimo_cli.soul.message import system
 from kimo_cli.utils.logging import logger
@@ -94,6 +94,13 @@ class Context:
     def file_backend(self) -> Path:
         return self._file_backend
 
+    def _run_write(self, write: Callable[[], None]) -> None:
+        """Keep lease verification and the canonical-file write atomic."""
+        if self._lease is None:
+            write()
+        else:
+            self._lease.run_verified(write)
+
     async def write_system_prompt(self, prompt: str) -> None:
         """Write the system prompt as the first record of the context file.
 
@@ -102,8 +109,6 @@ class Context:
         temporary file to avoid corruption on crash and avoid loading the entire file
         into memory.
         """
-        if self._lease is not None:
-            self._lease.verify()
         prompt_line = json.dumps({"role": "_system_prompt", "content": prompt}) + "\n"
 
         def _write_system_prompt_sync() -> None:
@@ -132,14 +137,12 @@ class Context:
             finally:
                 tmp_path.unlink(missing_ok=True)
 
-        await asyncio.to_thread(_write_system_prompt_sync)
+        await asyncio.to_thread(self._run_write, _write_system_prompt_sync)
 
         self._system_prompt = prompt
 
     async def replace_system_prompt(self, prompt: str) -> None:
         """Atomically replace all persisted system-prompt records with one current record."""
-        if self._lease is not None:
-            self._lease.verify()
         prompt_line = json.dumps({"role": "_system_prompt", "content": prompt}) + "\n"
 
         def _replace_system_prompt_sync() -> None:
@@ -168,14 +171,12 @@ class Context:
             finally:
                 temporary.unlink(missing_ok=True)
 
-        await asyncio.to_thread(_replace_system_prompt_sync)
+        await asyncio.to_thread(self._run_write, _replace_system_prompt_sync)
         self._system_prompt = prompt
 
     async def checkpoint(self, add_user_message: bool) -> int:
         checkpoint_id = self._next_checkpoint_id
         logger.debug("Checkpointing, ID: {id}", id=checkpoint_id)
-        if self._lease is not None:
-            self._lease.verify()
         messages = (
             [Message(role="user", content=[system(f"CHECKPOINT {checkpoint_id}")])]
             if add_user_message
@@ -199,7 +200,7 @@ class Context:
                     os.fsync(file.fileno())
                     raise
 
-        await asyncio.to_thread(_append_checkpoint_sync)
+        await asyncio.to_thread(self._run_write, _append_checkpoint_sync)
         self._next_checkpoint_id += 1
         self._history.extend(messages)
         self._pending_token_estimate += estimate_text_tokens(messages)
@@ -220,10 +221,6 @@ class Context:
         """
 
         logger.debug("Reverting checkpoint, ID: {id}", id=checkpoint_id)
-        if self._lease is not None:
-            # Rotation replaces the canonical file; a second writer would keep
-            # appending to the old inode and its lines would vanish.
-            self._lease.verify()
         if checkpoint_id >= self._next_checkpoint_id:
             logger.error("Checkpoint {checkpoint_id} does not exist", checkpoint_id=checkpoint_id)
             raise ValueError(f"Checkpoint {checkpoint_id} does not exist")
@@ -245,7 +242,10 @@ class Context:
         if rotated_file_path is None:
             logger.error("No available rotation path found")
             raise RuntimeError("No available rotation path found")
-        await aiofiles.os.replace(self._file_backend, rotated_file_path)
+        await asyncio.to_thread(
+            self._run_write,
+            lambda: os.replace(self._file_backend, rotated_file_path),
+        )
         logger.debug(
             "Rotated context file: {rotated_file_path}", rotated_file_path=rotated_file_path
         )
@@ -269,10 +269,16 @@ class Context:
             await self._rebuild_until_checkpoint(
                 rotated_file_path, tmp_path, checkpoint_id, messages_after_last_usage
             )
-            await aiofiles.os.replace(tmp_path, self._file_backend)
+            await asyncio.to_thread(
+                self._run_write,
+                lambda: os.replace(tmp_path, self._file_backend),
+            )
         except BaseException:
-            with contextlib.suppress(OSError):
-                await aiofiles.os.replace(rotated_file_path, self._file_backend)
+            with contextlib.suppress(OSError, LeaseLostError):
+                await asyncio.to_thread(
+                    self._run_write,
+                    lambda: os.replace(rotated_file_path, self._file_backend),
+                )
             with contextlib.suppress(OSError):
                 await aiofiles.os.remove(tmp_path)
             # Roll back in-memory state to pre-revert values so the Context
@@ -337,21 +343,20 @@ class Context:
 
         logger.debug("Clearing context")
 
-        if self._lease is not None:
-            # Same reason as in ``revert_to``: rotating away a file another
-            # writer still holds would silently discard its appends.
-            self._lease.verify()
-
         # rotate the context file
         rotated_file_path = await next_available_rotation(self._file_backend)
         if rotated_file_path is None:
             logger.error("No available rotation path found")
             raise RuntimeError("No available rotation path found")
-        await aiofiles.os.replace(self._file_backend, rotated_file_path)
-        # Truncate rather than ``touch``: touch only bumps mtime, so a file that
-        # reappeared in between would keep its content while ``_history`` is
-        # cleared, leaving memory and disk disagreeing.
-        self._file_backend.write_text("", encoding="utf-8")
+
+        def _clear_sync() -> None:
+            os.replace(self._file_backend, rotated_file_path)
+            # Truncate rather than ``touch``: touch only bumps mtime, so a file that
+            # reappeared in between would keep its content while ``_history`` is
+            # cleared, leaving memory and disk disagreeing.
+            self._file_backend.write_text("", encoding="utf-8")
+
+        await asyncio.to_thread(self._run_write, _clear_sync)
         logger.debug(
             "Rotated context file: {rotated_file_path}", rotated_file_path=rotated_file_path
         )
@@ -364,17 +369,18 @@ class Context:
 
     async def append_message(self, message: Message | Sequence[Message]):
         logger.debug("Appending message(s) to context: {message}", message=message)
-        if self._lease is not None:
-            self._lease.verify()
-        messages = [message] if isinstance(message, Message) else message
+        messages: Sequence[Message] = [message] if isinstance(message, Message) else message
         payload = "".join(m.model_dump_json(exclude_none=True) + "\n" for m in messages)
 
         # Write first, mutate memory second. The reverse order diverges on a
         # failed write (ENOSPC, EACCES, EMFILE): `_history` would describe
         # records the file never received, and `restore()` refuses to re-read
         # once `_history` is non-empty, so the split never heals.
-        async with aiofiles.open(self._file_backend, "a", encoding="utf-8") as f:
-            await f.write(payload)
+        def _append_sync() -> None:
+            with self._file_backend.open("a", encoding="utf-8") as f:
+                f.write(payload)
+
+        await asyncio.to_thread(self._run_write, _append_sync)
 
         self._history.extend(messages)
         self._pending_token_estimate += estimate_text_tokens(messages)
@@ -392,8 +398,6 @@ class Context:
         tool calls on disk without their results, and the provider rejects that
         history. The records and their order are the same as before.
         """
-        if self._lease is not None:
-            self._lease.verify()
         lines = [assistant_message.model_dump_json(exclude_none=True) + "\n"]
         if token_count is not None:
             lines.append(json.dumps({"role": "_usage", "token_count": token_count}) + "\n")
@@ -401,8 +405,11 @@ class Context:
             lines.append(message.model_dump_json(exclude_none=True) + "\n")
 
         # Same ordering rule as `append_message`: persist before touching memory.
-        async with aiofiles.open(self._file_backend, "a", encoding="utf-8") as f:
-            await f.write("".join(lines))
+        def _append_sync() -> None:
+            with self._file_backend.open("a", encoding="utf-8") as f:
+                f.write("".join(lines))
+
+        await asyncio.to_thread(self._run_write, _append_sync)
 
         self._history.append(assistant_message)
         self._pending_token_estimate += estimate_text_tokens([assistant_message])
@@ -413,12 +420,13 @@ class Context:
         self._pending_token_estimate += estimate_text_tokens(tool_messages)
 
     async def update_token_count(self, token_count: int):
-        if self._lease is not None:
-            self._lease.verify()
         logger.debug("Updating token count in context: {token_count}", token_count=token_count)
 
-        async with aiofiles.open(self._file_backend, "a", encoding="utf-8") as f:
-            await f.write(json.dumps({"role": "_usage", "token_count": token_count}) + "\n")
+        def _append_sync() -> None:
+            with self._file_backend.open("a", encoding="utf-8") as f:
+                f.write(json.dumps({"role": "_usage", "token_count": token_count}) + "\n")
+
+        await asyncio.to_thread(self._run_write, _append_sync)
 
         self._token_count = token_count
         self._pending_token_estimate = 0

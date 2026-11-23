@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import json
 import os
 import time
@@ -231,6 +232,71 @@ async def test_create_named_session(isolated_share_dir: Path, work_dir: KaosPath
     found = await Session.find(work_dir, session_id)
     assert found is not None
     assert found.id == session_id
+
+
+@pytest.mark.parametrize(
+    "malicious_id",
+    ["/absolute/session", "../escape", "..", "nested/session", "nested\\session"],
+)
+async def test_find_rejects_malicious_session_id_before_migration(
+    isolated_share_dir: Path,
+    work_dir: KaosPath,
+    monkeypatch: pytest.MonkeyPatch,
+    malicious_id: str,
+) -> None:
+    await Session.create(work_dir)
+
+    def fail_if_migrated(*args: object, **kwargs: object) -> None:
+        pytest.fail("session context migration must not run for an invalid session ID")
+
+    monkeypatch.setattr("kimo_cli.session._migrate_session_context_file", fail_if_migrated)
+
+    with pytest.raises(ValueError, match="Invalid session id"):
+        await Session.find(work_dir, malicious_id)
+
+
+async def test_create_rejects_existing_session_without_modifying_files(
+    isolated_share_dir: Path, work_dir: KaosPath
+) -> None:
+    from kimo_cli.session_state import save_session_state
+
+    session = await Session.create(work_dir, "existing-session")
+    _write_context_message(session.context_file, "original context")
+    _write_wire_turn(session.dir, "original wire")
+    session.state.custom_title = "Original state"
+    save_session_state(session.state, session.dir)
+    session_files = [
+        session.context_file,
+        session.wire_file.path,
+        session.dir / "state.json",
+    ]
+    original_contents = {path: path.read_bytes() for path in session_files}
+
+    with pytest.raises(ValueError, match="Session already exists"):
+        await Session.create(work_dir, session.id)
+
+    assert {path: path.read_bytes() for path in session_files} == original_contents
+    restored = await Session.find(work_dir, session.id)
+    assert restored is not None
+    assert restored.title == "Original state"
+
+
+async def test_concurrent_create_with_same_id_has_one_winner(
+    isolated_share_dir: Path, work_dir: KaosPath
+) -> None:
+    results = await asyncio.gather(
+        Session.create(work_dir, "concurrent-session"),
+        Session.create(work_dir, "concurrent-session"),
+        return_exceptions=True,
+    )
+
+    sessions = [result for result in results if isinstance(result, Session)]
+    errors = [result for result in results if isinstance(result, BaseException)]
+    assert len(sessions) == 1
+    assert len(errors) == 1
+    assert isinstance(errors[0], ValueError)
+    assert "Session already exists" in str(errors[0])
+    assert await Session.find(work_dir, sessions[0].id) is not None
 
 
 async def test_custom_title_overrides_wire_title(isolated_share_dir: Path, work_dir: KaosPath):

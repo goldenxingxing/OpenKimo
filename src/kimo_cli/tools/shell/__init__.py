@@ -1,10 +1,17 @@
 import asyncio
+import codecs
+import contextlib
+import os
+import signal
+import subprocess
 from collections.abc import Callable
 from pathlib import Path
-from typing import Self, override
+from typing import Any, Self, override
 
 import kaos
 from kaos import AsyncReadable
+from kaos.local import LocalKaos
+from kaos.path import KaosPath
 from kosong.tooling import CallableTool2, ToolReturnValue
 from pydantic import BaseModel, Field, model_validator
 
@@ -21,6 +28,9 @@ from kimo_cli.utils.subprocess_env import get_noninteractive_env
 
 MAX_FOREGROUND_TIMEOUT = 5 * 60
 MAX_BACKGROUND_TIMEOUT = 24 * 60 * 60
+_STREAM_CHUNK_SIZE = 64 * 1024
+_CLEANUP_GRACE_S = 0.2
+_PROCESS_WAIT_TIMEOUT_S = 5.0
 
 
 class Params(BaseModel):
@@ -244,6 +254,29 @@ class Shell(CallableTool2[Params]):
         )
         return builder.ok("Background task started", brief=f"Started {view.spec.id}")
 
+    async def _spawn_process(self, command: str, env: dict[str, str]) -> tuple[Any, bool]:
+        """Return the process and whether its PID is also a private PGID."""
+        current_kaos = kaos.get_current_kaos()
+        local_host = isinstance(current_kaos, LocalKaos) and self._on_windows == (os.name == "nt")
+        if not local_host:
+            return await kaos.exec(*self._shell_args(command), env=env), False
+
+        kwargs: dict[str, Any] = {
+            "stdin": asyncio.subprocess.PIPE,
+            "stdout": asyncio.subprocess.PIPE,
+            "stderr": asyncio.subprocess.PIPE,
+            "env": env,
+            "cwd": str(KaosPath.cwd()),
+            # Chunked reads below do not depend on readline's separator limit.
+            "limit": _STREAM_CHUNK_SIZE,
+        }
+        if os.name == "nt":
+            kwargs["creationflags"] = getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
+        else:
+            kwargs["start_new_session"] = True
+        process = await asyncio.create_subprocess_exec(*self._shell_args(command), **kwargs)
+        return process, os.name != "nt"
+
     async def _run_shell_command(
         self,
         command: str,
@@ -251,44 +284,90 @@ class Shell(CallableTool2[Params]):
         stderr_cb: Callable[[bytes], None],
         timeout: int,
     ) -> int:
-        async def _read_stream(stream: AsyncReadable, cb: Callable[[bytes], None]):
-            while True:
-                line = await stream.readline()
-                if line:
-                    cb(line)
-                else:
-                    break
+        async def _read_stream(stream: AsyncReadable, cb: Callable[[bytes], None]) -> None:
+            decoder = codecs.getincrementaldecoder("utf-8")(errors="replace")
+            while chunk := await stream.read(_STREAM_CHUNK_SIZE):
+                text = decoder.decode(chunk)
+                if text:
+                    cb(text.encode("utf-8"))
+            tail = decoder.decode(b"", final=True)
+            if tail:
+                cb(tail.encode("utf-8"))
+
+        async def _signal_process(force: bool) -> None:
+            if process is None:
+                return
+            if private_pgid:
+                with contextlib.suppress(ProcessLookupError):
+                    os.killpg(process.pid, signal.SIGKILL if force else signal.SIGTERM)
+                return
+            if os.name == "nt":
+                args = ["taskkill", "/PID", str(process.pid), "/T"]
+                if force:
+                    args.append("/F")
+                await asyncio.to_thread(
+                    subprocess.run,
+                    args,
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                    check=False,
+                    timeout=_PROCESS_WAIT_TIMEOUT_S,
+                )
+                return
+            with contextlib.suppress(ProcessLookupError):
+                await process.kill()
+
+        async def _cleanup_process() -> None:
+            if process is None:
+                return
+            await _signal_process(force=False)
+            if private_pgid or os.name == "nt":
+                if private_pgid:
+                    await asyncio.sleep(_CLEANUP_GRACE_S)
+                await _signal_process(force=True)
+            if process.returncode is None:
+                try:
+                    await asyncio.wait_for(process.wait(), timeout=_PROCESS_WAIT_TIMEOUT_S)
+                except TimeoutError:
+                    logger.error(
+                        "Timed out waiting for shell process {pid} after cleanup",
+                        pid=process.pid,
+                    )
 
         env = get_noninteractive_env()
         # Override SHELL so commands that read $SHELL see the bash we're actually
         # running, not an empty/stale value inherited from the parent (most visible
         # on Windows, where the parent's SHELL is typically empty or PowerShell).
         env["SHELL"] = str(self._shell_path)
-        process = await kaos.exec(*self._shell_args(command), env=env)
-
-        # Close stdin immediately so interactive prompts (e.g. git password) get
-        # EOF instead of hanging forever waiting for input that will never come.
-        process.stdin.close()
-
+        process: Any | None = None
+        private_pgid = False
+        readers: tuple[asyncio.Task[None], ...] = ()
         try:
-            # process.wait() must be inside the timeout too: a command that
-            # redirects its output closes both streams immediately (EOF),
-            # while the process itself can run forever.
+            spawned_process, private_pgid = await self._spawn_process(command, env)
+            process = spawned_process
+            # Close stdin immediately so interactive prompts (e.g. git password)
+            # get EOF instead of hanging forever waiting for input.
+            spawned_process.stdin.close()
+            readers = (
+                asyncio.create_task(_read_stream(spawned_process.stdout, stdout_cb)),
+                asyncio.create_task(_read_stream(spawned_process.stderr, stderr_cb)),
+            )
             results = await asyncio.wait_for(
-                asyncio.gather(
-                    _read_stream(process.stdout, stdout_cb),
-                    _read_stream(process.stderr, stderr_cb),
-                    process.wait(),
-                ),
+                asyncio.gather(*readers, spawned_process.wait()),
                 timeout,
             )
             return results[2]
-        except asyncio.CancelledError:
-            await process.kill()
+        except BaseException:
+            # Timeout, cancellation, reader failures, and post-spawn errors all
+            # share the same process-tree cleanup and bounded wait.
+            await _cleanup_process()
             raise
-        except TimeoutError:
-            await process.kill()
-            raise
+        finally:
+            for reader in readers:
+                if not reader.done():
+                    reader.cancel()
+            if readers:
+                await asyncio.gather(*readers, return_exceptions=True)
 
     def _shell_args(self, command: str) -> tuple[str, ...]:
         # Enable pipefail for bash so a pipeline's exit code reflects the

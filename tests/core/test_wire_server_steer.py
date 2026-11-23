@@ -15,6 +15,7 @@ from kimo_cli.soul.kimosoul import KimoSoul
 from kimo_cli.telemetry import set_context
 from kimo_cli.utils.aioqueue import QueueShutDown
 from kimo_cli.wire.jsonrpc import (
+    ClientCapabilities,
     ClientInfo,
     ErrorCodes,
     JSONRPCErrorResponse,
@@ -128,6 +129,40 @@ async def test_initialize_while_streaming_returns_pending_approval_snapshot(
             },
         }
     ]
+
+
+@pytest.mark.asyncio
+async def test_reinitialize_without_capabilities_resets_client_support(
+    runtime: Runtime,
+    tmp_path: Path,
+) -> None:
+    soul = _make_soul(runtime, tmp_path)
+    server = WireServer(soul)
+
+    await server._handle_initialize(
+        JSONRPCInitializeMessage(
+            id="initialize-capable",
+            params=JSONRPCInitializeMessage.Params(
+                protocol_version="1.0",
+                capabilities=ClientCapabilities(
+                    supports_question=True,
+                    supports_plan_mode=True,
+                ),
+            ),
+        )
+    )
+    assert server._client_supports_question is True
+    assert server._client_supports_plan_mode is True
+
+    await server._handle_initialize(
+        JSONRPCInitializeMessage(
+            id="initialize-reconnect",
+            params=JSONRPCInitializeMessage.Params(protocol_version="1.0"),
+        )
+    )
+
+    assert server._client_supports_question is False
+    assert server._client_supports_plan_mode is False
 
 
 @pytest.mark.asyncio

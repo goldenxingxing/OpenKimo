@@ -237,42 +237,94 @@ def _is_checkpoint_user_message(record: dict[str, Any]) -> bool:
     return False
 
 
-def truncate_context_at_turn(context_path: Path, turn_index: int) -> list[str]:
-    """Read context.jsonl and return all lines up to and including the given turn.
+def _wire_turn_inputs(wire_path: Path) -> list[str]:
+    """Return TurnBegin inputs in wire order, including slash-only turns."""
+    inputs: list[str] = []
+    for raw_line in _read_all_lines(wire_path):
+        try:
+            line = json.loads(raw_line)
+        except json.JSONDecodeError:
+            continue
+        message = line.get("message", {})
+        if isinstance(message, dict) and message.get("type") == "TurnBegin":
+            inputs.append(_extract_user_text(message.get("payload", {}).get("user_input", "")))
+    return inputs
 
-    Turn detection is based on real user messages, excluding synthetic checkpoint
-    user entries like ``<system>CHECKPOINT N</system>``.
 
-    Unlike wire truncation, this is best-effort: if context has fewer user turns
-    than ``turn_index`` (e.g. slash-command turns that did not mutate context),
-    return all available context lines instead of failing.
+def truncate_context_at_turn(
+    context_path: Path, turn_index: int, *, wire_path: Path | None = None
+) -> list[str]:
+    """Truncate context at the boundary derived from its wire turn.
+
+    Context also contains synthetic user messages (compaction summaries,
+    checkpoints and injected state), while slash-only wire turns may have no
+    user message at all. When the wire is available, locate the next real
+    turn's original input instead of counting context user records. The old
+    counting fallback remains for standalone callers and legacy partial files.
     """
     if not context_path.exists():
         return []
 
-    lines: list[str] = []
-    current_turn = -1  # Will become 0 on first real user message
+    lines = _read_all_lines(context_path)
+    if wire_path is not None and wire_path.exists():
+        turn_inputs = _wire_turn_inputs(wire_path)
+        if turn_index < 0 or turn_index >= len(turn_inputs):
+            raise ValueError(
+                f"turn_index {turn_index} out of range (have {len(turn_inputs)} turns)"
+            )
+        real_inputs = [
+            text for text in turn_inputs if text.strip() and not text.lstrip().startswith("/")
+        ]
+        selected_inputs = [
+            text
+            for text in turn_inputs[: turn_index + 1]
+            if text.strip() and not text.lstrip().startswith("/")
+        ]
+        next_inputs = real_inputs[len(selected_inputs) :]
+        if not next_inputs:
+            return lines
 
-    with open(context_path, encoding="utf-8") as f:
-        for line in f:
-            stripped = line.strip()
-            if not stripped:
-                continue
-
+        def _matches_turn(line: str, user_input: str) -> bool:
             try:
-                record: dict[str, Any] = json.loads(stripped)
+                record: dict[str, Any] = json.loads(line)
             except json.JSONDecodeError:
-                continue
+                return False
+            return (
+                record.get("role") == "user"
+                and not _is_checkpoint_user_message(record)
+                and _extract_user_text(record.get("content", "")) == user_input
+            )
 
-            if record.get("role") == "user" and not _is_checkpoint_user_message(record):
-                current_turn += 1
-                if current_turn > turn_index:
+        # Advance past selected real turns in order so repeated user text cannot
+        # anchor the cut to an earlier occurrence. Synthetic context-only user
+        # records are simply skipped by this alignment.
+        search_start = 0
+        for selected_input in selected_inputs:
+            for index in range(search_start, len(lines)):
+                if _matches_turn(lines[index], selected_input):
+                    search_start = index + 1
                     break
 
-            if current_turn <= turn_index:
-                lines.append(stripped)
+        next_user_input = next_inputs[0]
+        for index in range(search_start, len(lines)):
+            if _matches_turn(lines[index], next_user_input):
+                return lines[:index]
+        return lines
 
-    return lines
+    result = []
+    current_turn = -1
+    for line in lines:
+        try:
+            record = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if record.get("role") == "user" and not _is_checkpoint_user_message(record):
+            current_turn += 1
+            if current_turn > turn_index:
+                break
+        if current_turn <= turn_index:
+            result.append(line)
+    return result
 
 
 # ---------------------------------------------------------------------------
@@ -309,7 +361,9 @@ async def fork_session(
 
     if turn_index is not None:
         truncated_wire_lines = truncate_wire_at_turn(wire_path, turn_index)
-        truncated_context_lines = truncate_context_at_turn(context_path, turn_index)
+        truncated_context_lines = truncate_context_at_turn(
+            context_path, turn_index, wire_path=wire_path
+        )
     else:
         # Copy all content
         truncated_wire_lines = _read_all_lines(wire_path)

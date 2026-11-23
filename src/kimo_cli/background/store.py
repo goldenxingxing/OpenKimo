@@ -3,6 +3,8 @@ from __future__ import annotations
 import contextlib
 import os
 import re
+from collections.abc import Iterator
+from contextlib import contextmanager
 from pathlib import Path
 
 from pydantic import BaseModel, ValidationError
@@ -19,6 +21,7 @@ from .models import (
     TaskStatus,
     TaskView,
     WikiEvidenceManifest,
+    is_terminal_status,
 )
 
 _VALID_TASK_ID = re.compile(r"^[a-z0-9][a-z0-9\-]{1,24}$")
@@ -103,8 +106,46 @@ class BackgroundTaskStore:
     def read_spec(self, task_id: str) -> TaskSpec:
         return TaskSpec.model_validate_json(self.spec_path(task_id).read_text(encoding="utf-8"))
 
+    @contextmanager
+    def _runtime_lock(self, task_id: str) -> Iterator[None]:
+        """Serialize runtime replacement across worker and manager processes."""
+        lock_path = self.task_dir(task_id) / "runtime.lock"
+        with lock_path.open("a+b") as lock_file:
+            if os.name == "nt":
+                import msvcrt
+
+                lock_file.seek(0, os.SEEK_END)
+                if lock_file.tell() == 0:
+                    lock_file.write(b"\0")
+                    lock_file.flush()
+                lock_file.seek(0)
+                msvcrt.locking(lock_file.fileno(), msvcrt.LK_LOCK, 1)
+            else:
+                import fcntl
+
+                fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX)
+            try:
+                yield
+            finally:
+                lock_file.seek(0)
+                if os.name == "nt":
+                    import msvcrt
+
+                    msvcrt.locking(lock_file.fileno(), msvcrt.LK_UNLCK, 1)
+                else:
+                    import fcntl
+
+                    fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)
+
     def write_runtime(self, task_id: str, runtime: TaskRuntime, *, fsync: bool = True) -> None:
-        atomic_json_write(runtime.model_dump(mode="json"), self.runtime_path(task_id), fsync=fsync)
+        with self._runtime_lock(task_id):
+            # A stale launch/recover/heartbeat snapshot must never resurrect or
+            # replace a terminal state. The lock makes this check-and-write atomic.
+            if is_terminal_status(self.read_runtime(task_id).status):
+                return
+            atomic_json_write(
+                runtime.model_dump(mode="json"), self.runtime_path(task_id), fsync=fsync
+            )
 
     def read_runtime(self, task_id: str) -> TaskRuntime:
         path = self.runtime_path(task_id)

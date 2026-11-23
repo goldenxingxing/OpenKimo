@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import os
+import signal
 import time
 from datetime import datetime
 
@@ -1292,3 +1293,82 @@ def test_create_agent_task_refused_in_evolution_subprocess(runtime, monkeypatch)
             tool_call_id="tool-evo-agent",
             model_override=None,
         )
+
+
+def test_recover_cannot_overwrite_completion_with_stale_snapshot(runtime, monkeypatch):
+    manager = runtime.background_tasks
+    store = manager.store
+    spec = TaskSpec(
+        id="b-stale-recover",
+        kind="bash",
+        session_id=runtime.session.id,
+        description="recover race",
+        tool_call_id="tool-stale-recover",
+        command="echo done",
+        shell_name="bash",
+        shell_path="/bin/bash",
+        cwd=str(runtime.session.work_dir),
+        timeout_s=60,
+    )
+    store.create_task(spec)
+    store.write_runtime(
+        spec.id,
+        TaskRuntime(
+            status="running",
+            worker_pid=2_000_042,
+            heartbeat_at=time.time() - 60,
+            updated_at=time.time() - 60,
+        ),
+    )
+
+    def complete_before_stale_recover_write(_pid: int) -> bool:
+        store.write_runtime(
+            spec.id,
+            TaskRuntime(
+                status="completed",
+                exit_code=0,
+                finished_at=time.time(),
+                updated_at=time.time(),
+            ),
+        )
+        return False
+
+    monkeypatch.setattr(
+        "kimo_cli.background.manager._pid_exists", complete_before_stale_recover_write
+    )
+    manager.recover()
+
+    final = store.read_runtime(spec.id)
+    assert final.status == "completed"
+    assert final.exit_code == 0
+    assert final.failure_reason is None
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX startup signal fallback")
+def test_kill_signals_worker_pid_before_child_pid_is_published(runtime, monkeypatch):
+    manager = runtime.background_tasks
+    store = manager.store
+    spec = TaskSpec(
+        id="b-startup-kill",
+        kind="bash",
+        session_id=runtime.session.id,
+        description="startup kill race",
+        tool_call_id="tool-startup-kill",
+        command="sleep 30",
+        shell_name="bash",
+        shell_path="/bin/bash",
+        cwd=str(runtime.session.work_dir),
+        timeout_s=60,
+    )
+    store.create_task(spec)
+    store.write_runtime(spec.id, TaskRuntime(status="starting", worker_pid=424242))
+    signals: list[tuple[int, int]] = []
+    monkeypatch.setattr(
+        "kimo_cli.background.manager.os.kill",
+        lambda pid, sig: signals.append((pid, sig)),
+    )
+
+    manager.kill(spec.id)
+
+    assert signals == [(424242, signal.SIGTERM)]
+    assert store.read_control(spec.id).kill_requested_at is not None
