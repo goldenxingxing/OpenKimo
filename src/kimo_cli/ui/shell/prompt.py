@@ -37,6 +37,7 @@ from prompt_toolkit.formatted_text import AnyFormattedText, FormattedText, to_fo
 from prompt_toolkit.history import InMemoryHistory
 from prompt_toolkit.key_binding import KeyBindings, KeyPressEvent
 from prompt_toolkit.keys import Keys
+from prompt_toolkit.output import Output
 from prompt_toolkit.layout.containers import (
     ConditionalContainer,
     DynamicContainer,
@@ -1198,6 +1199,7 @@ class CustomPromptSession:
         shell_mode_slash_commands: Sequence[SlashCommand[Any]],
         editor_command_provider: Callable[[], str] = lambda: "",
         plan_mode_toggle_callback: Callable[[], Awaitable[bool]] | None = None,
+        output: Output | None = None,
     ) -> None:
         history_dir = get_share_dir() / "user-history"
         history_dir.mkdir(parents=True, exist_ok=True)
@@ -1526,6 +1528,7 @@ class CustomPromptSession:
             history=history,
             bottom_toolbar=self._render_bottom_toolbar,
             style=get_prompt_style(),
+            output=output,
         )
         self._session.default_buffer.read_only = Condition(
             lambda: (
@@ -2050,7 +2053,7 @@ class CustomPromptSession:
         # Consume one-shot prefill text if set
         default = getattr(self, "_prefill_text", None) or ""
         self._prefill_text = None
-        with patch_stdout(raw=True):
+        with patch_stdout(raw=True) if get_app_or_none() is not None else contextlib.nullcontext():
             command = str(
                 await self._session.prompt_async(placeholder=placeholder, default=default)
             ).strip()

@@ -9,6 +9,8 @@ from unittest.mock import MagicMock
 
 import pytest
 
+from prompt_toolkit.output import DummyOutput
+
 from kimo_cli.soul import StatusSnapshot
 from kimo_cli.ui.shell import prompt as shell_prompt
 from kimo_cli.ui.shell.prompt import (
@@ -681,6 +683,7 @@ def test_modal_prompt_hides_input_buffer_when_text_input_is_not_allowed() -> Non
         thinking=False,
         agent_mode_slash_commands=[],
         shell_mode_slash_commands=[],
+        output=DummyOutput(),
     )
 
     modal = _DummyReadOnlyModal()
@@ -698,6 +701,7 @@ def test_modal_prompt_keeps_input_buffer_when_text_input_is_allowed() -> None:
         thinking=False,
         agent_mode_slash_commands=[],
         shell_mode_slash_commands=[],
+        output=DummyOutput(),
     )
 
     modal = _DummyRunningPrompt()
@@ -715,6 +719,7 @@ def test_modal_prompt_suspends_and_restores_existing_draft_when_input_is_hidden(
         thinking=False,
         agent_mode_slash_commands=[],
         shell_mode_slash_commands=[],
+        output=DummyOutput(),
     )
     prompt_session._session.default_buffer.start_completion = lambda *args, **kwargs: None  # type: ignore[method-assign]
     prompt_session._session.default_buffer.validate_while_typing = lambda: False  # type: ignore[method-assign]

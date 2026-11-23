@@ -89,6 +89,27 @@ def _wrap_osc8_as_zero_width(m: re.Match[str]) -> str:
     return f"\x01{m.group(0)}\x02"
 
 
+def _ansi_color_system() -> str:
+    """Resolve the ANSI color system from the environment, platform-independently.
+
+    Rich's own detection special-cases Windows: it ignores COLORTERM and uses
+    ``windows_console_features`` (or WINDOWS for a legacy console).  On CI and
+    redirected streams that reports 16-color, which breaks truecolor and OSC 8
+    link rendering.  Reading COLORTERM/TERM directly keeps macOS and Windows
+    consistent with what the user asked for.
+    """
+    if os.environ.get("TERM", "").strip().lower() in ("dumb", "unknown"):
+        return "standard"
+    color_term = os.environ.get("COLORTERM", "").strip().lower()
+    if color_term in ("truecolor", "24bit"):
+        return "truecolor"
+    term = os.environ.get("TERM", "").strip().lower()
+    _name, _hyphen, colors = term.rpartition("-")
+    if colors == "256color":
+        return "256"
+    return "standard"
+
+
 def render_to_ansi(renderable: RenderableType, *, columns: int) -> str:
     """Render a Rich renderable to an ANSI string for prompt_toolkit integration."""
     from io import StringIO
@@ -101,6 +122,8 @@ def render_to_ansi(renderable: RenderableType, *, columns: int) -> str:
         width=width,
         theme=NEUTRAL_MARKDOWN_THEME,
         highlight=False,
+        legacy_windows=False,
+        color_system=_ansi_color_system(),
     )
     temp.print(renderable, end="")
     result = buf.getvalue()

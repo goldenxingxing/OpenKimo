@@ -9,6 +9,7 @@ from prompt_toolkit.formatted_text import StyleAndTextTuples
 from prompt_toolkit.key_binding import KeyBindings, KeyPressEvent
 from prompt_toolkit.layout import HSplit, Layout, VSplit, Window
 from prompt_toolkit.layout.controls import FormattedTextControl
+from prompt_toolkit.output import Output
 from prompt_toolkit.styles import Style
 from prompt_toolkit.widgets import Box, Frame, RadioList
 from rich.console import Group
@@ -237,7 +238,7 @@ class TaskBrowserModel:
 
 
 class TaskBrowserApp:
-    def __init__(self, soul: KimoSoul):
+    def __init__(self, soul: KimoSoul, *, output: Output | None = None):
         self._model = TaskBrowserModel(soul)
         task_values, selected = self._model.refresh()
         self._task_list = RadioList(
@@ -253,7 +254,7 @@ class TaskBrowserApp:
             container_style="class:task-list",
             checked_style="class:task-list.checked",
         )
-        self._app = self._build_app()
+        self._app = self._build_app(output)
 
     async def run(self) -> None:
         await self._app.run_async()
@@ -322,7 +323,7 @@ class TaskBrowserApp:
         self._model.pending_stop_task_id = None
         self._model.set_message("Stop cancelled.")
 
-    def _build_app(self) -> Application[None]:
+    def _build_app(self, output: Output | None = None) -> Application[None]:
         kb = KeyBindings()
 
         @Condition
@@ -428,6 +429,7 @@ class TaskBrowserApp:
             style=_task_browser_style(),
             refresh_interval=_AUTO_REFRESH_SECONDS,
             before_render=lambda _app: self._sync_views(),
+            output=output,
         )
 
     def _sync_views(self) -> None:

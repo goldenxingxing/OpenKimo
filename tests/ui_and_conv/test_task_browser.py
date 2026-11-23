@@ -5,6 +5,7 @@ import time
 from pathlib import Path
 
 from kosong.tooling.empty import EmptyToolset
+from prompt_toolkit.output import DummyOutput
 
 from kimo_cli.background import TaskRuntime, TaskSpec, TaskStatus
 from kimo_cli.soul.agent import Agent, Runtime
@@ -170,7 +171,7 @@ def test_task_browser_footer_keeps_hotkeys_visible_after_flash_message(
 
 def test_task_browser_app_construction_smoke(runtime: Runtime, tmp_path: Path) -> None:
     soul = _make_soul(runtime, tmp_path)
-    app = TaskBrowserApp(soul)
+    app = TaskBrowserApp(soul, output=DummyOutput())
 
     assert app._app.full_screen is True
     assert app._app.erase_when_done is True
@@ -191,7 +192,7 @@ async def test_task_browser_output_uses_coroutine_wrapper(
 ) -> None:
     soul = _make_soul(runtime, tmp_path)
     _write_task(runtime, "b1234567", status="running", description="build", output="line\n")
-    app = TaskBrowserApp(soul)
+    app = TaskBrowserApp(soul, output=DummyOutput())
 
     scheduled: list[object] = []
     run_calls: list[object] = []
@@ -223,7 +224,7 @@ def test_task_browser_toggle_filter_rebuilds_visible_task_list(
     soul = _make_soul(runtime, tmp_path)
     _write_task(runtime, "b1234567", status="running", description="build")
     _write_task(runtime, "b1234568", status="completed", description="done")
-    app = TaskBrowserApp(soul)
+    app = TaskBrowserApp(soul, output=DummyOutput())
 
     assert [task_id for task_id, _label in app._task_list.values] == ["b1234567", "b1234568"]
 
@@ -239,7 +240,7 @@ def test_task_browser_stop_flow_sets_pending_and_can_cancel(
 ) -> None:
     soul = _make_soul(runtime, tmp_path)
     spec = _write_task(runtime, "b1234567", status="running", description="watch")
-    app = TaskBrowserApp(soul)
+    app = TaskBrowserApp(soul, output=DummyOutput())
     app._task_list.current_value = spec.id
 
     app._request_stop_for_selected_task()
@@ -258,7 +259,7 @@ def test_task_browser_confirm_stop_writes_control_for_selected_task(
 ) -> None:
     soul = _make_soul(runtime, tmp_path)
     spec = _write_task(runtime, "b1234567", status="running", description="watch")
-    app = TaskBrowserApp(soul)
+    app = TaskBrowserApp(soul, output=DummyOutput())
     app._task_list.current_value = spec.id
     app._request_stop_for_selected_task()
 
@@ -275,7 +276,7 @@ def test_task_browser_stop_on_terminal_task_surfaces_message(
 ) -> None:
     soul = _make_soul(runtime, tmp_path)
     spec = _write_task(runtime, "b1234567", status="completed", description="done")
-    app = TaskBrowserApp(soul)
+    app = TaskBrowserApp(soul, output=DummyOutput())
     app._task_list.current_value = spec.id
 
     app._request_stop_for_selected_task()
