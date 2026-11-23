@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import tempfile
 from pathlib import Path
 
@@ -753,6 +754,7 @@ def test_build_rg_args_flag_mapping():
     assert "foo" in tilde_args[-1]
 
 
+@pytest.mark.skipif(os.name == "nt", reason="POSIX path prefix")
 def test_strip_path_prefix_posix():
     """Prefix stripping works with POSIX paths (forward slash)."""
     output = "/home/user/project/src/a.py:42:code\n/home/user/project/src/b.py-41-context\n--\n"

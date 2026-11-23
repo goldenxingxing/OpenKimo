@@ -31,6 +31,7 @@ def _paths(tmp_path: Path) -> SimpleNamespace:
     )
 
 
+@pytest.mark.skipif(sys.platform != "darwin", reason="macOS launchd login-shell PATH")
 def test_login_shell_entries_follow_the_bundled_interpreter(tmp_path, monkeypatch) -> None:
     monkeypatch.setenv("PATH", "/usr/bin:/bin")
     monkeypatch.setattr(userenv, "login_shell_path", lambda: "/opt/homebrew/bin:/usr/bin")

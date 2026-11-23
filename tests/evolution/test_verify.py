@@ -284,6 +284,7 @@ class _HungProc:
         self.killed = True
 
 
+@pytest.mark.skipif(os.name == "nt", reason="POSIX process groups")
 async def test_subprocess_runner_timeout_kills_process_group(
     share: Path, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ):
@@ -313,6 +314,7 @@ async def test_subprocess_runner_timeout_kills_process_group(
     assert record.note is not None and "verify_timeout" in record.note
 
 
+@pytest.mark.skipif(os.name == "nt", reason="POSIX process groups")
 def test_kill_process_group_falls_back_to_child(monkeypatch: pytest.MonkeyPatch):
     proc = SimpleNamespace(pid=424242, killed=False)
 

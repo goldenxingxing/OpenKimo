@@ -109,6 +109,7 @@ exec -a "$script_path" "$script_dir/python_" "$@"
 """
 
 
+@pytest.mark.skipif(sys.platform != "darwin", reason="POSIX wrapper exec bit / readlink -f")
 def test_the_build_rewrites_readlink_f_out_of_layer_wrappers(tmp_path: Path) -> None:
     """`readlink -f` is GNU; BSD readlink only learned it in macOS 12.3.
 

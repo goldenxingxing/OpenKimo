@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import shutil
 import subprocess
+import sys
 import urllib.parse
 
 import pytest
@@ -69,6 +70,7 @@ async def test_open_in_offloads_sync_work_to_thread(monkeypatch, tmp_path) -> No
     assert offloaded["is_file"] is False
 
 
+@pytest.mark.skipif(sys.platform != "darwin", reason="AppleScript / macOS filenames")
 def test_a_quote_in_the_path_stays_data_in_the_applescript(monkeypatch, tmp_path) -> None:
     """A double quote is legal in a macOS filename, and this is osascript.
 
