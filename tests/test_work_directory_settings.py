@@ -53,9 +53,9 @@ def test_windows_creates_global_user_wiki_directory(monkeypatch, tmp_path: Path)
 
 def test_settings_do_not_expose_path_controls() -> None:
     root = Path(__file__).parents[1]
-    mac_source = (root / "packaging/app_main/settings_window.py").read_text()
-    windows_html = (root / "packaging/app_main_win/settings.html").read_text()
-    editable_source = (root / "packaging/app_main/dotenv_io.py").read_text()
+    mac_source = (root / "packaging/app_main/settings_window.py").read_text(encoding="utf-8")
+    windows_html = (root / "packaging/app_main_win/settings.html").read_text(encoding="utf-8")
+    editable_source = (root / "packaging/app_main/dotenv_io.py").read_text(encoding="utf-8")
 
     assert "_build_paths_section" not in mac_source
     assert "<h2>Paths</h2>" not in windows_html

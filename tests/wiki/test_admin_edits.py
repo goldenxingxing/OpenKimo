@@ -33,7 +33,7 @@ def _page(path: str, *, revision: int = 1, body: str = "Before.\n") -> WikiPage:
 def _prepare_delete(root: Path) -> tuple[WikiTransaction, Path]:
     layout = ensure_wiki(root)
     target = layout.root / "concepts" / "atomic-writes.md"
-    target.write_text(render_page(_page("concepts/atomic-writes.md")), encoding="utf-8")
+    target.write_bytes(render_page(_page("concepts/atomic-writes.md")).encode("utf-8"))
     transaction = WikiTransaction.prepare(
         layout=layout,
         changes=[],
