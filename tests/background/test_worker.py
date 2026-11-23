@@ -80,7 +80,7 @@ async def test_worker_completes_successfully(runtime):
         tool_call_id="tool-4",
         command="echo hello",
         shell_name="bash",
-        shell_path="/bin/bash",
+        shell_path=str(runtime.environment.shell_path),
         cwd=str(runtime.session.work_dir),
         timeout_s=60,
     )
@@ -105,7 +105,7 @@ async def test_worker_respects_kill_control(runtime):
         tool_call_id="tool-5",
         command="sleep 5",
         shell_name="bash",
-        shell_path="/bin/bash",
+        shell_path=str(runtime.environment.shell_path),
         cwd=str(runtime.session.work_dir),
         timeout_s=60,
     )
@@ -147,7 +147,7 @@ async def test_worker_marks_timeout_as_failed(runtime):
         tool_call_id="tool-6",
         command="sleep 2",
         shell_name="bash",
-        shell_path="/bin/bash",
+        shell_path=str(runtime.environment.shell_path),
         cwd=str(runtime.session.work_dir),
         timeout_s=1,
     )
@@ -180,7 +180,7 @@ async def test_worker_enables_pipefail_for_bash(runtime):
         tool_call_id="tool-pipe",
         command="false | true",
         shell_name="bash",
-        shell_path="/bin/bash",
+        shell_path=str(runtime.environment.shell_path),
         cwd=str(runtime.session.work_dir),
         timeout_s=60,
     )
@@ -216,7 +216,7 @@ async def test_worker_heartbeat_skips_fsync(runtime, monkeypatch):
         tool_call_id="tool-fsync",
         command="sleep 0.3",
         shell_name="bash",
-        shell_path="/bin/bash",
+        shell_path=str(runtime.environment.shell_path),
         cwd=str(runtime.session.work_dir),
         timeout_s=60,
     )

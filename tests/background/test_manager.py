@@ -1227,12 +1227,12 @@ async def test_manager_launches_real_worker_and_waits(runtime):
     manager = runtime.background_tasks
 
     view = manager.create_bash_task(
-        command="python3 -c \"print('bg-ok')\"",
+        command="echo bg-ok",
         description="real worker smoke",
         timeout_s=30,
         tool_call_id="tool-7",
         shell_name="bash",
-        shell_path="/bin/bash",
+        shell_path=str(runtime.environment.shell_path),
         cwd=str(runtime.session.work_dir),
     )
     waited = await manager.wait(view.spec.id, timeout_s=10)
@@ -1252,7 +1252,7 @@ async def test_manager_surfaces_timeout_failure(runtime):
         timeout_s=1,
         tool_call_id="tool-8",
         shell_name="bash",
-        shell_path="/bin/bash",
+        shell_path=str(runtime.environment.shell_path),
         cwd=str(runtime.session.work_dir),
     )
     waited = await manager.wait(view.spec.id, timeout_s=10)

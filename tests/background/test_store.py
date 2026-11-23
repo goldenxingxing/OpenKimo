@@ -45,7 +45,9 @@ def test_read_output_and_tail(runtime):
         timeout_s=60,
     )
     store.create_task(spec)
-    store.output_path(spec.id).write_text("line1\nline2\nline3\n", encoding="utf-8")
+    # write_bytes: keep literal \n bytes. On Windows write_text would translate
+    # \n to \r\n (text mode) and the tail assertion below would see CRLF.
+    store.output_path(spec.id).write_bytes(b"line1\nline2\nline3\n")
 
     chunk = store.read_output(spec.id, 0, 7, status="running")
     assert chunk.text == "line1\nl"
