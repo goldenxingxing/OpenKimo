@@ -333,7 +333,10 @@ async def test_heartbeat_failure_immediately_cleans_process_tree(
 
     def fail_first_heartbeat(self, task_id, task_runtime, *, fsync=True):
         nonlocal failed
-        if not fsync and task_runtime.status == "running" and not failed:
+        # Only fail once the child has actually started and written its pid
+        # file; otherwise the cleanup can kill the tree before the test can
+        # observe the child (a race that is easy to hit on slow runners).
+        if not fsync and task_runtime.status == "running" and not failed and pid_file.exists():
             failed = True
             raise OSError("heartbeat disk failed")
         original_write_runtime(self, task_id, task_runtime, fsync=fsync)
