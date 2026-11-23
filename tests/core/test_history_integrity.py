@@ -180,32 +180,33 @@ async def test_a_session_killed_mid_step_can_carry_on(
 async def test_a_step_is_recorded_in_one_write(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    import aiofiles
-
     file = tmp_path / "history.jsonl"
     context = Context(file_backend=file)
     writes: list[str] = []
-    real_open = aiofiles.open
+    real_open = Path.open
 
     class _File:
         def __init__(self, f) -> None:  # noqa: ANN001
             self._f = f
 
-        async def write(self, data: str) -> int:
+        def __enter__(self) -> _File:
+            self._f.__enter__()
+            return self
+
+        def __exit__(self, *exc) -> None:  # noqa: ANN002
+            self._f.__exit__(*exc)
+
+        def write(self, data: str) -> int:
             writes.append(data)
-            return await self._f.write(data)
+            return self._f.write(data)
 
-    class _Open:
-        def __init__(self, *args, **kwargs) -> None:  # noqa: ANN002, ANN003
-            self._cm = real_open(*args, **kwargs)
+        def __getattr__(self, name):  # noqa: ANN001, ANN204
+            return getattr(self._f, name)
 
-        async def __aenter__(self) -> _File:
-            return _File(await self._cm.__aenter__())
+    def _open(self, *args, **kwargs) -> _File:  # noqa: ANN002, ANN003, ANN202
+        return _File(real_open(self, *args, **kwargs))
 
-        async def __aexit__(self, *exc) -> None:  # noqa: ANN002
-            await self._cm.__aexit__(*exc)
-
-    monkeypatch.setattr("kimo_cli.soul.context.aiofiles.open", _Open)
+    monkeypatch.setattr(Path, "open", _open)
 
     await context.append_step(_call("a", "b"), [_result("a"), _result("b")], token_count=123)
 
