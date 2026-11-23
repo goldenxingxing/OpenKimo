@@ -177,8 +177,8 @@ def _write_manifest(path: Path, manifest: Mapping[str, Any], root: Path) -> None
 def _ensure_revision(path: Path, root: Path) -> None:
     if not path.exists() and not path.is_symlink():
         try:
-            with path.open("x", encoding="ascii") as output:
-                output.write("0\n")
+            with path.open("xb") as output:
+                output.write(b"0\n")
         except FileExistsError:
             pass
     _assert_regular_file(path, root)
@@ -187,7 +187,7 @@ def _ensure_revision(path: Path, root: Path) -> None:
     except (OSError, UnicodeDecodeError) as exc:
         raise ValueError("Wiki revision must be an ASCII integer") from exc
     if not value:
-        path.write_text("0\n", encoding="ascii")
+        path.write_bytes(b"0\n")
     elif not value.isascii() or not value.isdecimal():
         raise ValueError("Wiki revision must be a non-negative integer")
 
